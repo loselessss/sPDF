@@ -540,19 +540,13 @@ class MainWindow(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             settings.set_ocr_engine("rapidocr")
             self.statusBar().showMessage("OCR 엔진: 기본(RapidOCR)", 4000)
         elif clicked is b_vl:
-            # 켜기 전에 사양을 조사해, 무리한 하드웨어면 설치를 말린다.
+            # 켜기 전에 사양을 조사한다. 무리한 하드웨어면 '경고'만 하고
+            # 결정은 사용자에게 맡긴다 — OCR은 별도 프로세스라 느려도 켜놓고
+            # 배경에서 돌릴 수 있으므로, 앱이 대신 막지 않는다.
             level, _specs, reason = vl.vl_suitability()
-            if level == "poor":
-                QMessageBox.warning(
-                    self, "VL 비권장",
-                    "이 컴퓨터 사양은 AI 고품질(VL)에 적합하지 않습니다.\n\n"
-                    "%s\n\n기본 엔진을 그대로 유지합니다." % reason)
-                settings.set_ocr_engine("rapidocr")
-                self.statusBar().showMessage("사양 부족 — 기본 엔진 유지", 5000)
-                return
-            if level == "marginal":
+            if level in ("poor", "marginal"):
                 ret = QMessageBox.question(
-                    self, "VL 사양 주의",
+                    self, "VL 사양 확인",
                     "%s\n\n그래도 AI 고품질(VL)로 설정할까요?" % reason,
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 if ret != QMessageBox.Yes:

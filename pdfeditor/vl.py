@@ -180,8 +180,9 @@ def vl_suitability():
     where = "NVIDIA GPU 없음(내장/AMD 또는 CPU)" if not s["gpu"] \
         else "GPU %s" % s["gpu"]
     return "poor", s, (
-        "%s, RAM %.0fGB — VL은 이 사양에서 매우 느립니다. 설치를 권하지 "
-        "않습니다. 기본(RapidOCR) 엔진을 쓰세요." % (where, ram))
+        "%s, RAM %.0fGB — GPU 가속을 못 써 VL이 매우 느립니다(페이지당 "
+        "수십 초~분). 켜놓고 기다리는 배경 작업이면 쓸 수 있지만, 평소엔 "
+        "기본(RapidOCR)을 권합니다." % (where, ram))
 
 
 # --- 다운로드 -----------------------------------------------------------
