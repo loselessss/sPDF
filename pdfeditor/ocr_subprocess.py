@@ -61,7 +61,32 @@ def _emit(obj):
     sys.stdout.flush()
 
 
-def _build_engine():
+def _build_engine(engine="rapidocr"):
+    """OCR 엔진 생성. engine="vl"이면 PaddleOCR-VL(고품질 AI) 시도.
+
+    VL은 모델이 사용자 폴더에 설치돼 있어야 한다(vl.py). 미설치거나 아직
+    구현 전이면 명확한 예외를 던져 호출부가 사용자에게 안내하게 한다 —
+    조용히 RapidOCR로 떨어지지 않는다(품질 기대가 다르므로).
+    """
+    if engine == "vl":
+        return _build_vl_engine()
+    return _build_rapidocr_engine()
+
+
+def _build_vl_engine():
+    # 뼈대 단계: 모델 설치 여부만 확인하고, 실추론 연결 전까지는 명확한
+    # 미구현 신호를 준다(조용히 다른 엔진으로 떨어지지 않음).
+    from pdfeditor import vl
+    if not vl.vl_installed():
+        raise RuntimeError(
+            "VL 모델이 설치되어 있지 않습니다. 설정에서 'AI 고품질 OCR'을 "
+            "켜고 모델을 먼저 내려받으세요.")
+    # TODO: onnxruntime로 PaddleOCR-VL 세션을 만들고 페이지를 처리한다.
+    # runtime = vl.detect_runtime()로 CUDA/DirectML/CPU 제공자를 고른다.
+    raise RuntimeError("VL 추론은 아직 연결되지 않았습니다.")
+
+
+def _build_rapidocr_engine():
     import os
 
     from rapidocr import RapidOCR
@@ -150,6 +175,15 @@ def _recognize(ocr, img_rgb, zoom):
 
 def main():
     _force_utf8_io()  # 반드시 첫 입출력 전에 (프로즌 EXE의 cp949 폴백 방지)
+
+    # 런타임 감지 모드 — stdin 작업 없이 가속기 종류만 보고하고 끝낸다.
+    # 부모(Qt)는 onnxruntime를 못 import하므로 이 자식에게 물어본다(vl.py).
+    if "--detect-runtime" in sys.argv:
+        from pdfeditor import vl
+        kind, desc = vl.detect_runtime()
+        _emit({"type": "runtime", "kind": kind, "desc": desc})
+        return 0
+
     try:
         job = json.loads(sys.stdin.readline())
     except Exception as e:
@@ -160,11 +194,12 @@ def main():
     password = job.get("password")
     pages = job["pages"]
     fixed_zoom = job.get("zoom")  # 없으면 페이지별 자동 배율
+    engine = job.get("engine", "rapidocr")
 
     try:
         import numpy as np
         import fitz
-        ocr = _build_engine()
+        ocr = _build_engine(engine)
     except Exception as e:
         _emit({"type": "error", "message": "OCR 초기화 실패: %s" % e})
         return 1

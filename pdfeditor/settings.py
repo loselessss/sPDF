@@ -79,3 +79,23 @@ def remove_favorite(path):
     d["favorites"] = [p for p in d.get("favorites", [])
                       if os.path.normcase(p) != os.path.normcase(path)]
     _save(d)
+
+
+# --- OCR 엔진 선택 ------------------------------------------------------
+# "rapidocr": 기본(가벼운 CPU, 한글+영문). "vl": PaddleOCR-VL(고품질 AI,
+# 모델 수 GB·GPU 권장). vl은 모델이 실제로 설치돼 있을 때만 유효하다.
+
+OCR_ENGINES = ("rapidocr", "vl")
+
+
+def ocr_engine():
+    e = _load().get("ocr_engine", "rapidocr")
+    return e if e in OCR_ENGINES else "rapidocr"
+
+
+def set_ocr_engine(engine):
+    if engine not in OCR_ENGINES:
+        return
+    d = _load()
+    d["ocr_engine"] = engine
+    _save(d)

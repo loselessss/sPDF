@@ -54,11 +54,12 @@ class OcrWorker(QThread):
     page_done = pyqtSignal(int, list)    # 페이지 번호, items(PDF 좌표)
     failed = pyqtSignal(str)
 
-    def __init__(self, path, password, pages, parent=None):
+    def __init__(self, path, password, pages, engine="rapidocr", parent=None):
         super().__init__(parent)
         self._path = path
         self._password = password
         self._pages = pages
+        self._engine = engine
         self._proc = None
         self._cancel = False
 
@@ -88,7 +89,7 @@ class OcrWorker(QThread):
             return
 
         job = {"path": self._path, "password": self._password,
-               "pages": self._pages, "zoom": OCR_ZOOM}
+               "pages": self._pages, "zoom": OCR_ZOOM, "engine": self._engine}
         try:
             self._proc.stdin.write(json.dumps(job) + "\n")
             self._proc.stdin.flush()
@@ -178,7 +179,14 @@ class OcrMixin:
         dlg.setValue(0)
         self._ocr_dlg = dlg
 
-        w = OcrWorker(self.doc.path, self.doc._password, pages, self)
+        from . import settings, vl
+        engine = settings.ocr_engine()
+        # VL을 골라뒀어도 모델이 아직 없으면 OCR이 먹통이 되지 않게 기본
+        # 엔진으로 실제 실행한다(선택 자체는 유지 — 모델 붙으면 자동 반영).
+        if engine == "vl" and not vl.vl_installed():
+            engine = "rapidocr"
+        w = OcrWorker(self.doc.path, self.doc._password, pages,
+                      engine=engine, parent=self)
         self._ocr_worker = w
         w.page_done.connect(self._on_ocr_page)
         w.progress.connect(lambda done, total: dlg.setValue(done))
