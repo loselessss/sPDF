@@ -514,7 +514,7 @@ class MainWindow(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         (가속기/모델 설치)만 보여준다.
         """
         from . import settings, vl
-        kind, desc = vl.runtime_summary()
+        _kind, desc = vl.runtime_summary()
         installed = vl.vl_installed()
         cur = settings.ocr_engine()
 
@@ -524,12 +524,12 @@ class MainWindow(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         box.setText(
             "OCR 엔진을 선택하세요.\n\n"
             "• 기본(RapidOCR): 가볍고 빠름, 한글+영문. CPU에서 잘 동작.\n"
-            "• AI 고품질(VL): 저품질 스캔·복잡한 레이아웃에 강함. 모델 수 GB,\n"
-            "  GPU 권장.\n\n"
+            "• AI 고품질(VL): 저품질 스캔·복잡한 레이아웃에 강함.\n"
+            "  실행에 torch+transformers(수 GB) + 모델(약 2GB) 필요, GPU 권장.\n\n"
             "현재 가속기: %s\n"
-            "VL 모델 설치: %s\n"
+            "VL 상태: %s\n"
             "현재 선택: %s"
-            % (desc, "설치됨" if installed else "미설치",
+            % (desc, vl.install_hint(),
                "AI 고품질(VL)" if cur == "vl" else "기본(RapidOCR)"))
         b_basic = box.addButton("기본으로", QMessageBox.AcceptRole)
         b_vl = box.addButton("AI 고품질로", QMessageBox.AcceptRole)
@@ -540,14 +540,32 @@ class MainWindow(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             settings.set_ocr_engine("rapidocr")
             self.statusBar().showMessage("OCR 엔진: 기본(RapidOCR)", 4000)
         elif clicked is b_vl:
+            # 켜기 전에 사양을 조사해, 무리한 하드웨어면 설치를 말린다.
+            level, _specs, reason = vl.vl_suitability()
+            if level == "poor":
+                QMessageBox.warning(
+                    self, "VL 비권장",
+                    "이 컴퓨터 사양은 AI 고품질(VL)에 적합하지 않습니다.\n\n"
+                    "%s\n\n기본 엔진을 그대로 유지합니다." % reason)
+                settings.set_ocr_engine("rapidocr")
+                self.statusBar().showMessage("사양 부족 — 기본 엔진 유지", 5000)
+                return
+            if level == "marginal":
+                ret = QMessageBox.question(
+                    self, "VL 사양 주의",
+                    "%s\n\n그래도 AI 고품질(VL)로 설정할까요?" % reason,
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if ret != QMessageBox.Yes:
+                    self.statusBar().showMessage("기본 엔진 유지", 4000)
+                    return
             settings.set_ocr_engine("vl")
             if not installed:
                 QMessageBox.information(
-                    self, "VL 모델 필요",
-                    "AI 고품질(VL) 엔진을 선택했지만 모델이 아직 설치되지 "
-                    "않았습니다.\n\nVL은 현재 준비 중입니다. 모델이 연결되면 "
-                    "여기서 다운로드할 수 있게 됩니다. 그전까지 OCR은 기본 "
-                    "엔진으로 동작합니다.")
+                    self, "VL 준비 필요",
+                    "AI 고품질(VL)을 선택했습니다(사양 확인됨).\n"
+                    "빠진 것: %s\n\n"
+                    "VL은 준비 중입니다(실추론 연결 예정). 그전까지 OCR은 "
+                    "기본 엔진으로 동작합니다." % vl.install_hint())
             else:
                 self.statusBar().showMessage("OCR 엔진: AI 고품질(VL)", 4000)
 

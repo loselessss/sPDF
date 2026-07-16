@@ -74,15 +74,22 @@ def _build_engine(engine="rapidocr"):
 
 
 def _build_vl_engine():
-    # 뼈대 단계: 모델 설치 여부만 확인하고, 실추론 연결 전까지는 명확한
-    # 미구현 신호를 준다(조용히 다른 엔진으로 떨어지지 않음).
+    # 뼈대 단계: 런타임/모델 설치 여부만 확인하고, 실추론 연결 전까지는
+    # 명확한 미구현 신호를 준다(조용히 다른 엔진으로 떨어지지 않음).
+    #
+    # 백엔드 주의: PaddleOCR-VL은 onnxruntime로 못 돌린다(vl.py 참고).
+    # transformers(PyTorch)로 로드해야 한다 — 즉 이 워커(onnxruntime 기반)와
+    # 별개의 torch 스택이 필요하다. 실제 연결 시 아래 TODO를 채운다.
     from pdfeditor import vl
     if not vl.vl_installed():
         raise RuntimeError(
-            "VL 모델이 설치되어 있지 않습니다. 설정에서 'AI 고품질 OCR'을 "
-            "켜고 모델을 먼저 내려받으세요.")
-    # TODO: onnxruntime로 PaddleOCR-VL 세션을 만들고 페이지를 처리한다.
-    # runtime = vl.detect_runtime()로 CUDA/DirectML/CPU 제공자를 고른다.
+            "VL을 쓸 수 없습니다 — 빠진 것: %s" % vl.install_hint())
+    # TODO: transformers로 PaddleOCR-VL 로드 후 페이지 파싱.
+    #   from transformers import AutoModelForCausalLM, AutoProcessor
+    #   device = "cuda" if vl.detect_runtime()[0] == "cuda" else "cpu"
+    #   model = ...from_pretrained(vl.models_dir()).to(device)
+    # torch와 이 워커의 onnxruntime가 한 프로세스에서 충돌하는지 여부는
+    # GPU 환경에서 확인해 필요하면 VL 전용 워커로 분리한다.
     raise RuntimeError("VL 추론은 아직 연결되지 않았습니다.")
 
 
@@ -175,14 +182,6 @@ def _recognize(ocr, img_rgb, zoom):
 
 def main():
     _force_utf8_io()  # 반드시 첫 입출력 전에 (프로즌 EXE의 cp949 폴백 방지)
-
-    # 런타임 감지 모드 — stdin 작업 없이 가속기 종류만 보고하고 끝낸다.
-    # 부모(Qt)는 onnxruntime를 못 import하므로 이 자식에게 물어본다(vl.py).
-    if "--detect-runtime" in sys.argv:
-        from pdfeditor import vl
-        kind, desc = vl.detect_runtime()
-        _emit({"type": "runtime", "kind": kind, "desc": desc})
-        return 0
 
     try:
         job = json.loads(sys.stdin.readline())

@@ -1,36 +1,34 @@
-"""VL(고품질 AI OCR) 지원 — 런타임 감지 + 모델 경로/설치 확인 + 다운로드.
+"""VL(고품질 AI OCR) 지원 — 런타임 감지 + 모델 설치 확인 + 다운로드.
 
 Qt 비의존(코어 계층). 실제 추론은 ocr_subprocess의 VL 어댑터가 한다.
 
 상태: **뼈대 단계.** 실제 VL 추론 연결은 GPU 환경에서 마무리한다.
-- GPU 런타임 감지(detect_runtime)는 동작·검증됨.
-- 모델 다운로드(download_models)는 소스 URL이 비어 있어(_MODEL_SOURCES)
-  아직 실행되지 않는다 — PaddleOCR-VL ONNX 배포 URL을 채운 뒤 활성화한다.
-  그전까지 vl_installed()는 항상 False라 UI에서 "미설치"로 안전하게 표시된다.
 
-VL은 수 GB 다운로드 + GPU 추론이라 GPU 없는 환경에선 검증이 어렵다.
-검증 가능한 부분(경로/감지/UI 연결)을 먼저 확정하고, 실추론 연결과 모델
-소스는 GPU 환경에서 마무리한다.
+백엔드 현실(2026-07 확인): PaddleOCR-VL은 **onnxruntime로 못 돌린다.**
+공식 배포는 Hugging Face의 transformers(=PyTorch) 경로뿐이고, ONNX 변환은
+아직 미지원(optimum 오픈 이슈, 그마저 transformers.js용). 따라서 VL을 쓰려면
+가벼운 onnxruntime가 아니라 **torch + transformers 스택**(수 GB, GPU 권장)이
+필요하다. 이건 설치 파일(exe)에 번들하지 않고, VL을 켤 때 별도로 받는다.
+
+- 모델: Hugging Face repo(_HF_REPO)를 사용자 폴더로 snapshot 다운로드.
+- 런타임: torch.cuda 유무로 CUDA/CPU 판별(DirectML은 torch-directml 별도).
+- 검증 가능한 부분(경로/감지/UI/게이트)만 먼저 확정하고, 실추론(transformers
+  로 모델 로드 + 페이지 파싱)은 GPU 환경에서 마무리한다.
 """
 
+import importlib.util
 import os
 
 from . import paths
 
+# PaddleOCR-VL 0.9B — Apache 2.0, Hugging Face 공개. transformers로 로드.
+_HF_REPO = "PaddlePaddle/PaddleOCR-VL-1.5"
 
-# --- 모델 파일 정의 ----------------------------------------------------
-# PaddleOCR-VL(약 0.9B)을 ONNX로 돌린다는 가정. 파일명/개수는 실제 배포본을
-# 받아 확정한다. 지금은 자리표시자 — _MODEL_SOURCES가 비어 있어 다운로드가
-# 시작되지 않는다.
-_MODEL_FILES = (
-    "paddleocr_vl_visual.onnx",
-    "paddleocr_vl_decoder.onnx",
-    "paddleocr_vl_tokenizer.json",
-)
+# 스냅샷이 받아졌는지 판단할 대표 파일(HF repo 루트에 항상 있는 것).
+_MODEL_MARKER = "config.json"
 
-# TODO: 각 파일의 실제 다운로드 URL을 채운다. (파일명 -> URL)
-# 채우기 전까지 vl_installed()=False, download_models()는 거부한다.
-_MODEL_SOURCES = {}
+# VL 추론에 필요한 파이썬 패키지(무겁다 — 설치본에 없음, 사용자가 별도 설치).
+_RUNTIME_PKGS = ("torch", "transformers")
 
 
 def models_dir():
@@ -40,101 +38,175 @@ def models_dir():
     return d
 
 
+# --- 설치 상태 ----------------------------------------------------------
+
+def _have(pkg):
+    try:
+        return importlib.util.find_spec(pkg) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def runtime_present():
+    """torch + transformers가 깔려 있나(VL 추론 가능 여부의 절반)."""
+    return all(_have(p) for p in _RUNTIME_PKGS)
+
+
+def model_present():
+    """모델 스냅샷이 사용자 폴더에 받아져 있나."""
+    return os.path.exists(os.path.join(models_dir(), _MODEL_MARKER))
+
+
 def vl_installed():
-    """VL 모델이 전부 내려받아져 있나."""
-    d = models_dir()
-    return all(os.path.exists(os.path.join(d, f)) for f in _MODEL_FILES)
+    """VL을 실제로 쓸 수 있나 — 런타임 + 모델 둘 다 있어야 True."""
+    return runtime_present() and model_present()
 
 
-def missing_models():
-    d = models_dir()
-    return [f for f in _MODEL_FILES if not os.path.exists(os.path.join(d, f))]
+def install_hint():
+    """UI 안내용 — 지금 뭐가 빠졌는지 사람이 읽을 문구."""
+    missing = []
+    if not runtime_present():
+        missing.append("실행 런타임(torch, transformers)")
+    if not model_present():
+        missing.append("모델(약 2GB, 첫 실행 시 다운로드)")
+    return " · ".join(missing) if missing else "설치됨"
 
 
 # --- 런타임(가속기) 감지 ----------------------------------------------
 
 def detect_runtime():
-    """사용 가능한 최적 onnxruntime 실행 제공자를 고른다.
+    """VL이 쓸 가속기를 판별. 반환: (kind, 사람이 읽을 설명).
 
-    반환: ("cuda"|"directml"|"cpu", 사람이 읽을 설명).
-    - NVIDIA(CUDA) > DirectML(AMD/인텔/NVIDIA 공용, Windows) > CPU 순.
-    onnxruntime를 import하므로(Qt와 충돌) **자식 프로세스에서만 호출**할 것.
+    kind: "cuda" | "directml" | "cpu" | "none"(torch 자체가 없음).
+    torch를 lazy import 한다 — 설정 다이얼로그에서만 불리므로 부담이 적고,
+    torch가 없으면 즉시 "none"으로 답한다.
     """
+    if not _have("torch"):
+        return "none", "PyTorch 미설치 — VL 실행 불가 (torch/transformers 필요)"
     try:
-        import onnxruntime as ort
-        providers = ort.get_available_providers()
+        import torch
+        if torch.cuda.is_available():
+            try:
+                name = torch.cuda.get_device_name(0)
+            except Exception:
+                name = "CUDA"
+            return "cuda", "NVIDIA GPU (CUDA) — %s" % name
     except Exception:
-        return "cpu", "onnxruntime 없음 — CPU"
-    if "CUDAExecutionProvider" in providers:
-        return "cuda", "NVIDIA GPU (CUDA)"
-    if "DmlExecutionProvider" in providers:
+        pass
+    if _have("torch_directml"):
         return "directml", "GPU (DirectML)"
-    return "cpu", "CPU"
+    return "cpu", "CPU — VL은 CPU에서 매우 느림 (GPU 권장)"
 
 
 def runtime_summary():
-    """UI 표시용 — Qt 프로세스에서 자식으로 물어본다(직접 import 회피).
+    """UI 표시용. detect_runtime을 그대로 쓴다(별도 프로세스 불필요 —
+    torch는 onnxruntime 같은 Qt DLL 충돌이 없다)."""
+    return detect_runtime()
 
-    부모(Qt) 프로세스는 onnxruntime를 절대 import하면 안 되므로
-    (paths/ocr 참고), 감지도 자식 프로세스에 맡긴다. 실패하면 보수적으로
-    CPU로 답한다.
-    """
-    import json
+
+# --- 사양 조사 + 적합성 판단 --------------------------------------------
+# VL을 켜기 '전에' 하드웨어를 본다 — torch가 아직 없어도 동작해야 하므로
+# nvidia-smi(드라이버가 있으면 존재) + RAM으로 조사한다.
+
+def survey_specs():
+    """설치 전 하드웨어 조사. 반환 dict: gpu/vram_gb/ram_gb/cpu_cores."""
+    import shutil
     import subprocess
-    from .paths import ocr_command  # 워커 실행 명령 재사용
+
+    specs = {"gpu": None, "vram_gb": None,
+             "ram_gb": None, "cpu_cores": os.cpu_count()}
+
+    # 총 RAM (Windows: GlobalMemoryStatusEx, 실패 시 psutil)
     try:
-        cmd = ocr_command() + ["--detect-runtime"]
-        out = subprocess.check_output(
-            cmd, text=True, encoding="utf-8", timeout=30,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        for line in out.splitlines():
-            try:
-                m = json.loads(line)
-            except ValueError:
-                continue
-            if m.get("type") == "runtime":
-                return m["kind"], m["desc"]
+        import ctypes
+
+        class _MEM(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        m = _MEM()
+        m.dwLength = ctypes.sizeof(_MEM)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        specs["ram_gb"] = round(m.ullTotalPhys / 1e9, 1)
     except Exception:
-        pass
-    return "cpu", "감지 실패 — CPU 가정"
+        try:
+            import psutil
+            specs["ram_gb"] = round(psutil.virtual_memory().total / 1e9, 1)
+        except Exception:
+            pass
+
+    # NVIDIA GPU + VRAM (nvidia-smi가 있으면 드라이버가 설치된 것)
+    smi = shutil.which("nvidia-smi")
+    if smi:
+        try:
+            out = subprocess.check_output(
+                [smi, "--query-gpu=name,memory.total",
+                 "--format=csv,noheader,nounits"],
+                text=True, timeout=8, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            first = out.strip().splitlines()[0]
+            name, mem_mib = [x.strip() for x in first.split(",")]
+            specs["gpu"] = name
+            specs["vram_gb"] = round(float(mem_mib) / 1024, 1)
+        except Exception:
+            pass
+    return specs
 
 
-# --- 다운로드 (게이트) --------------------------------------------------
+def vl_suitability():
+    """이 PC가 VL을 돌릴 만한가 판단. 반환: (level, specs, 설명).
+
+    level: "good"(권장) | "marginal"(가능하나 부담) | "poor"(비권장).
+    기준: VL은 실질적으로 NVIDIA CUDA가 있어야 쓸 만하다. NVIDIA GPU가
+    없으면(내장/AMD, CPU) 매우 느려 비권장.
+    """
+    s = survey_specs()
+    ram = s["ram_gb"] or 0
+    vram = s["vram_gb"] or 0
+    if s["gpu"] and vram >= 6 and ram >= 16:
+        return "good", s, (
+            "NVIDIA GPU(%s, %.0fGB) + RAM %.0fGB — VL에 적합합니다."
+            % (s["gpu"], vram, ram))
+    if s["gpu"] and vram >= 4:
+        return "marginal", s, (
+            "GPU(%s, %.0fGB)가 있으나 여유가 크지 않습니다 — 동작은 하지만 "
+            "느리거나 메모리 부족이 날 수 있습니다." % (s["gpu"], vram))
+    where = "NVIDIA GPU 없음(내장/AMD 또는 CPU)" if not s["gpu"] \
+        else "GPU %s" % s["gpu"]
+    return "poor", s, (
+        "%s, RAM %.0fGB — VL은 이 사양에서 매우 느립니다. 설치를 권하지 "
+        "않습니다. 기본(RapidOCR) 엔진을 쓰세요." % (where, ram))
+
+
+# --- 다운로드 -----------------------------------------------------------
 
 def can_download():
-    """다운로드 소스가 준비됐나 — 지금은 False(URL을 채운 뒤 True)."""
-    return bool(_MODEL_SOURCES) and all(
-        f in _MODEL_SOURCES for f in _MODEL_FILES)
+    """모델을 받을 수 있나 — huggingface_hub가 있어야 한다.
+
+    (transformers를 깔면 대개 함께 들어온다. 없으면 런타임부터 설치 필요.)
+    """
+    return _have("huggingface_hub")
 
 
 def download_models(progress=None):
-    """VL 모델을 사용자 폴더로 내려받는다. progress(done_bytes, total, name).
+    """VL 모델 스냅샷을 사용자 폴더로 내려받는다(Hugging Face).
 
-    소스 URL이 없으면(can_download False) 조용히 거부한다 — 가짜 URL로
-    엉뚱한 걸 받는 사고를 막기 위한 게이트.
+    huggingface_hub가 없으면 명확한 안내와 함께 거부한다 — VL 런타임을
+    먼저 설치해야 한다는 신호.
+    progress: 현재 huggingface_hub 진행 콜백을 그대로 노출하기 어려워
+    자리만 둔다(TODO: 파일 단위 진행 표시).
     """
     if not can_download():
         raise RuntimeError(
-            "VL 모델 다운로드 소스가 아직 설정되지 않았습니다.\n"
-            "vl.py의 _MODEL_SOURCES에 PaddleOCR-VL ONNX URL을 채운 뒤 "
-            "사용하세요.")
-    import urllib.request
-    d = models_dir()
-    for name in missing_models():
-        url = _MODEL_SOURCES[name]
-        dst = os.path.join(d, name)
-        tmp = dst + ".part"
-        with urllib.request.urlopen(url) as resp:  # noqa: S310 (신뢰 URL)
-            total = int(resp.headers.get("Content-Length", 0))
-            done = 0
-            with open(tmp, "wb") as f:
-                while True:
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    done += len(chunk)
-                    if progress:
-                        progress(done, total, name)
-        os.replace(tmp, dst)
+            "VL 런타임이 설치되어 있지 않습니다.\n"
+            "먼저 다음을 설치하세요:\n"
+            "  pip install torch transformers huggingface_hub\n"
+            "(GPU 사용 시 CUDA 지원 torch 빌드 필요)")
+    from huggingface_hub import snapshot_download
+    snapshot_download(repo_id=_HF_REPO, local_dir=models_dir())
