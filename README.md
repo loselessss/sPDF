@@ -7,7 +7,7 @@
 
 ```bash
 pip install PyQt5 PyMuPDF
-pip install rapidocr onnxruntime   # OCR (한국어 모델은 첫 실행 때 자동 다운로드)
+pip install rapidocr onnxruntime   # OCR
 ```
 
 ## 실행
@@ -28,8 +28,9 @@ build_installer.bat  REM Inno Setup  -> Output\sPDF_Setup_X.X.X.exe
 
 - 아이콘은 `make_icons.py`가 Pillow로 생성한다(`assets\spdf.ico` 앱,
   `assets\spdf_doc.ico` 연결된 PDF 문서).
-- 설치본은 가볍게 유지 — OCR 모델(약 13MB)은 첫 OCR 때
-  `%LOCALAPPDATA%\sPDF\models`로 자동 다운로드.
+- OCR 모델(det+cls+한국어 rec, 약 21MB)은 설치본에 번들되어 **오프라인**
+  동작한다(`spdf.spec`의 `_KEEP_MODELS` 화이트리스트). 안 쓰는 중국어 rec은
+  제외.
 - 버전은 `pdfeditor\meta.py`의 `APP_VERSION`과 `installer.iss`의
   `MyAppVersion`을 **함께** 맞출 것(자동 동기화 안 됨).
 
