@@ -1,0 +1,23 @@
+# 파이썬 캐시
+__pycache__/
+*.pyc
+
+# 편집기 임시/백업
+*.bak
+*.tmp
+
+# 빌드 산출물 (PyInstaller + Inno Setup) — 용량 크고 재생성 가능
+/build/
+/dist/
+/Output/
+
+# OCR 모델 (설치본 빌드 시 rapidocr 패키지에서 가져옴 — 리포에 두지 않음)
+*.onnx
+
+# 테스트/개인 자료 — 절대 올리지 말 것
+#   test\ 에는 실제 영수증 등 개인정보가 든 PDF가 들어있다.
+/test/
+*.pdf
+
+# 아이콘 미리보기 PNG는 make_icons.py로 재생성 (원본 .ico만 커밋)
+assets/*_256.png
