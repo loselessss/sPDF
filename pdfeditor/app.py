@@ -573,7 +573,8 @@ class MainWindow(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                     "구성요소가 설치될 때까지 OCR은 기본 엔진으로 "
                     "동작합니다.\n\n설치 방법:\n"
                     "1) 명령 프롬프트에서\n"
-                    "   pip install torch transformers huggingface_hub\n"
+                    "   pip install torch torchvision transformers "
+                    "huggingface_hub\n"
                     "   (GPU 사용 시 CUDA 지원 torch 빌드)\n"
                     "2) 이 대화상자를 다시 열어 'AI 고품질로'를 선택하면\n"
                     "   모델 다운로드를 안내합니다." % vl.install_hint())

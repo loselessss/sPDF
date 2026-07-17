@@ -26,7 +26,8 @@ _HF_REPO = "PaddlePaddle/PaddleOCR-VL-1.5"
 _MODEL_MARKER = "config.json"
 
 # VL 추론에 필요한 파이썬 패키지(무겁다 — 설치본에 없음, 사용자가 별도 설치).
-_RUNTIME_PKGS = ("torch", "transformers")
+# torchvision: transformers의 이미지 프로세서가 요구한다(없으면 로드 실패).
+_RUNTIME_PKGS = ("torch", "torchvision", "transformers")
 
 
 def models_dir():
@@ -64,7 +65,7 @@ def install_hint():
     """UI 안내용 — 지금 뭐가 빠졌는지 사람이 읽을 문구."""
     missing = []
     if not runtime_present():
-        missing.append("실행 런타임(torch, transformers)")
+        missing.append("실행 런타임(torch, torchvision, transformers)")
     if not model_present():
         missing.append("모델(약 2GB, 첫 실행 시 다운로드)")
     return " · ".join(missing) if missing else "설치됨"
@@ -205,7 +206,7 @@ def download_models(progress=None):
         raise RuntimeError(
             "VL 런타임이 설치되어 있지 않습니다.\n"
             "먼저 다음을 설치하세요:\n"
-            "  pip install torch transformers huggingface_hub\n"
+            "  pip install torch torchvision transformers huggingface_hub\n"
             "(GPU 사용 시 CUDA 지원 torch 빌드 필요)")
     from huggingface_hub import snapshot_download
     snapshot_download(repo_id=_HF_REPO, local_dir=models_dir())
