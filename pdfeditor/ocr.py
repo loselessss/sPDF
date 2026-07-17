@@ -69,27 +69,49 @@ class OcrWorker(QThread):
             self._proc.terminate()
 
     def run(self):
-        from .paths import is_frozen, ocr_command, user_data_dir
+        from .paths import is_frozen, ocr_command, resource, user_data_dir
         env = dict(os.environ, PYTHONIOENCODING="utf-8")
         # 프로즌 EXE만 모델 저장 위치를 사용자 폴더로 돌린다 — 임시 추출
         # 폴더는 읽기 전용/휘발성이라 거기 받으면 매번 다시 받게 된다.
         # 개발 환경은 site-packages 기본 경로가 이미 잘 동작하므로 안 건드림.
+        cwd = None
         if is_frozen():
             env["RAPIDOCR_MODEL_DIR"] = os.path.join(user_data_dir(), "models")
+        else:
+            # 개발 실행: 워커를 `python -m pdfeditor.ocr_subprocess`로 띄운다.
+            # -m은 CWD를 sys.path에 얹어 패키지를 찾는데, 앱이 리포 밖에서
+            # 실행되면(PDF 더블클릭·바탕화면 등) CWD가 리포가 아니라
+            # ModuleNotFoundError로 워커가 조용히 죽는다(stderr=DEVNULL이라
+            # 부모는 눈치도 못 챈다 → "OCR이 아무 반응 없음"). 리포 루트를
+            # CWD로 고정하고 PYTHONPATH에도 넣어 실행 위치와 무관하게 한다.
+            repo_root = resource()
+            cwd = repo_root
+            old = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (repo_root + os.pathsep + old) if old \
+                else repo_root
+        # 자식 stderr을 임시 파일로 받는다 — 워커가 결과 한 줄 못 내고
+        # 죽으면(import 실패 등) 그 이유를 사용자에게 보여주기 위함.
+        # 예전엔 DEVNULL로 버려 "아무 반응 없음"이 됐다.
+        import tempfile
+        errf = tempfile.TemporaryFile(mode="w+", encoding="utf-8",
+                                      errors="replace")
         try:
             self._proc = subprocess.Popen(
                 ocr_command(),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-                env=env,
+                stderr=errf, text=True, encoding="utf-8",
+                env=env, cwd=cwd,
                 # 콘솔 창이 잠깐 뜨지 않도록(pythonw/EXE 실행 시)
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except Exception as e:
+            errf.close()
             self.failed.emit("OCR 프로세스를 시작할 수 없습니다: %s" % e)
             return
 
         job = {"path": self._path, "password": self._password,
                "pages": self._pages, "zoom": OCR_ZOOM, "engine": self._engine}
+        got_result = False   # page/error 메시지를 하나라도 받았나
+        clean_done = False    # 워커가 정상 종료(done) 신호를 줬나
         try:
             self._proc.stdin.write(json.dumps(job) + "\n")
             self._proc.stdin.flush()
@@ -106,16 +128,32 @@ class OcrWorker(QThread):
                     continue  # 자식이 찍은 로그 등 비-JSON 줄은 무시
                 t = msg.get("type")
                 if t == "page":
+                    got_result = True
                     self.page_done.emit(msg["page"], msg["items"])
                 elif t == "progress":
                     self.progress.emit(msg["done"], msg["total"])
                 elif t == "error":
+                    got_result = True
                     self.failed.emit(msg["message"])
                 elif t == "done":
+                    clean_done = True
                     break
         finally:
             if self._proc.poll() is None:
                 self._proc.terminate()
+            self._proc.wait()
+            # 결과도 정상종료 신호도 없이 끝났다 = 워커가 뻗었다.
+            # stderr 꼬리를 붙여 원인을 알린다(취소한 경우는 제외).
+            if not got_result and not clean_done and not self._cancel:
+                try:
+                    errf.seek(0)
+                    tail = "".join(errf.readlines()[-12:]).strip()
+                except Exception:
+                    tail = ""
+                hint = ("OCR 작업 프로세스가 시작하자마자 종료되었습니다"
+                        "(종료 코드 %s)." % self._proc.returncode)
+                self.failed.emit(hint + ("\n\n%s" % tail if tail else ""))
+            errf.close()
 
 
 class OcrMixin:
