@@ -171,13 +171,6 @@ class OcrMixin:
         if self._ocr_worker is not None:
             return  # 이미 진행 중
         self._ocr_added = 0
-        dlg = QProgressDialog(
-            "OCR 인식 중... (첫 페이지는 인식 엔진 준비로 몇 초 걸릴 수 있습니다)",
-            "취소", 0, len(pages), self)
-        dlg.setWindowTitle("OCR")
-        dlg.setMinimumDuration(0)
-        dlg.setValue(0)
-        self._ocr_dlg = dlg
 
         from . import settings, vl
         engine = settings.ocr_engine()
@@ -185,6 +178,16 @@ class OcrMixin:
         # 엔진으로 실제 실행한다(선택 자체는 유지 — 모델 붙으면 자동 반영).
         if engine == "vl" and not vl.vl_installed():
             engine = "rapidocr"
+
+        label = ("AI 고품질(VL) OCR 인식 중...\n"
+                 "(첫 페이지는 모델 로드로 수십 초 걸릴 수 있습니다)"
+                 if engine == "vl" else
+                 "OCR 인식 중... (첫 페이지는 인식 엔진 준비로 몇 초 걸릴 수 있습니다)")
+        dlg = QProgressDialog(label, "취소", 0, len(pages), self)
+        dlg.setWindowTitle("OCR")
+        dlg.setMinimumDuration(0)
+        dlg.setValue(0)
+        self._ocr_dlg = dlg
         w = OcrWorker(self.doc.path, self.doc._password, pages,
                       engine=engine, parent=self)
         self._ocr_worker = w

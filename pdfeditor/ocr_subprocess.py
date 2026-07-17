@@ -19,6 +19,7 @@ import하면 DLL 초기화가 실패한다(Windows, "DLL 초기화 루틴을 실
 """
 
 import json
+import re
 import sys
 
 
@@ -48,12 +49,16 @@ def _force_utf8_io():
 TARGET_LONG_PX = 5100.0
 ZOOM_MIN, ZOOM_MAX = 1.0, 6.0
 
+# VL은 프로세서가 어차피 약 1.6M 픽셀(2048*28*28)로 줄여서 보므로 고해상도
+# 렌더가 낭비다 — 긴 변 2000px이면 축소 후에도 여유가 있다.
+VL_TARGET_LONG_PX = 2000.0
 
-def _page_zoom(rect):
+
+def _page_zoom(rect, target=TARGET_LONG_PX):
     long_pt = max(rect.width, rect.height)
     if long_pt <= 0:
         return 3.0
-    return max(ZOOM_MIN, min(ZOOM_MAX, TARGET_LONG_PX / long_pt))
+    return max(ZOOM_MIN, min(ZOOM_MAX, target / long_pt))
 
 
 def _emit(obj):
@@ -62,38 +67,165 @@ def _emit(obj):
 
 
 def _build_engine(engine="rapidocr"):
-    """OCR 엔진 생성. engine="vl"이면 PaddleOCR-VL(고품질 AI) 시도.
+    """OCR 엔진 생성 — recognize(img_rgb) -> [[x0,y0,x1,y1,text],...] (픽셀).
 
-    VL은 모델이 사용자 폴더에 설치돼 있어야 한다(vl.py). 미설치거나 아직
-    구현 전이면 명확한 예외를 던져 호출부가 사용자에게 안내하게 한다 —
-    조용히 RapidOCR로 떨어지지 않는다(품질 기대가 다르므로).
+    engine="vl"이면 PaddleOCR-VL(고품질 AI). 모델이 사용자 폴더에 설치돼
+    있어야 한다(vl.py). 미설치면 명확한 예외를 던져 호출부가 사용자에게
+    안내하게 한다 — 조용히 RapidOCR로 떨어지지 않는다(품질 기대가 다르므로).
+
+    프로세스 공존: VL 경로는 torch/transformers만, rapidocr 경로는
+    onnxruntime만 import한다 — 한 작업에서 둘이 섞이지 않으므로 같은 워커
+    스크립트를 그대로 쓴다.
     """
     if engine == "vl":
-        return _build_vl_engine()
-    return _build_rapidocr_engine()
+        return _VLEngine()
+    return _RapidOCREngine()
 
 
-def _build_vl_engine():
-    # 뼈대 단계: 런타임/모델 설치 여부만 확인하고, 실추론 연결 전까지는
-    # 명확한 미구현 신호를 준다(조용히 다른 엔진으로 떨어지지 않음).
-    #
-    # 백엔드 주의: PaddleOCR-VL은 onnxruntime로 못 돌린다(vl.py 참고).
-    # transformers(PyTorch)로 로드해야 한다 — 즉 이 워커(onnxruntime 기반)와
-    # 별개의 torch 스택이 필요하다. 실제 연결 시 아래 TODO를 채운다.
-    from pdfeditor import vl
-    if not vl.vl_installed():
-        raise RuntimeError(
-            "VL을 쓸 수 없습니다 — 빠진 것: %s" % vl.install_hint())
-    # TODO: transformers로 PaddleOCR-VL 로드 후 페이지 파싱.
-    #   from transformers import AutoModelForCausalLM, AutoProcessor
-    #   device = "cuda" if vl.detect_runtime()[0] == "cuda" else "cpu"
-    #   model = ...from_pretrained(vl.models_dir()).to(device)
-    # torch와 이 워커의 onnxruntime가 한 프로세스에서 충돌하는지 여부는
-    # GPU 환경에서 확인해 필요하면 VL 전용 워커로 분리한다.
-    raise RuntimeError("VL 추론은 아직 연결되지 않았습니다.")
+# --- PaddleOCR-VL (transformers) ----------------------------------------
+# "Spotting:" 태스크가 줄 단위 텍스트+위치를 함께 준다. 파싱은 PaddleX의
+# post_process_for_spotting과 동일하게 두 형식을 지원한다:
+#   ① <|TEXT_START|>글자<|TEXT_END|> ... <|LOC_BEGIN|><|LOC_x|>*8<|LOC_END|>
+#   ② 글자<|LOC_x|>*8 줄바꿈 반복 (마커 없음 — 실측으로 이 모델이 내는 형식)
+# LOC 값은 입력 이미지 기준 0~1000 정규화 좌표(4점 폴리곤, x,y 교대).
+
+_SPOT_TEXT_RE = re.compile(r"<\|TEXT_START\|>(.*?)<\|TEXT_END\|>", re.S)
+_SPOT_BLOCK_RE = re.compile(r"<\|LOC_BEGIN\|>(.*?)<\|LOC_END\|>", re.S)
+_SPOT_LOC_RE = re.compile(r"<\|LOC_(\d+)\|>")
 
 
-def _build_rapidocr_engine():
+def _rect_from_locs(vals, w, h):
+    """LOC 정수 8개(0~1000 정규화 4점 폴리곤) → 픽셀 [x0,y0,x1,y1]."""
+    xs = [vals[j] / 1000.0 * w for j in range(0, 8, 2)]
+    ys = [vals[j] / 1000.0 * h for j in range(1, 8, 2)]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _parse_spotting(s, w, h):
+    items = []
+    texts = _SPOT_TEXT_RE.findall(s)
+    blocks = _SPOT_BLOCK_RE.findall(s)
+    for txt, blk in zip(texts, blocks):
+        txt = txt.strip()
+        locs = _SPOT_LOC_RE.findall(blk)
+        if not txt or len(locs) < 8:
+            continue
+        items.append(_rect_from_locs([int(v) for v in locs[:8]], w, h)
+                     + [txt])
+    if items:
+        return items
+    # 폴백(PaddleX와 동일): TEXT 마커 없이 "글자 <LOC>*8" 이 이어지는 형식
+    matches = list(_SPOT_LOC_RE.finditer(s))
+    last_end, i = 0, 0
+    while i + 7 < len(matches):
+        group = matches[i:i + 8]
+        txt = s[last_end:group[0].start()].strip()
+        if txt:
+            vals = [int(m.group(1)) for m in group]
+            items.append(_rect_from_locs(vals, w, h) + [txt])
+        last_end = group[-1].end()
+        i += 8
+    return items
+
+
+class _VLEngine:
+    """PaddleOCR-VL을 transformers로 로드해 페이지를 인식한다.
+
+    bf16 + CUDA 기준 모델 약 2GB VRAM. CPU면 fp32로 폴백(매우 느림 —
+    UI가 켜기 전에 사양 경고를 한다, app.show_ocr_engine_dialog).
+    """
+
+    _PROMPT = "Spotting:"
+    # 줄당 대략 (글자 토큰 + 특수 토큰 12개). 빽빽한 페이지도 수천 토큰이면
+    # 충분하고, 상한에 닿으면 그 줄부터 잘릴 뿐 앞의 결과는 유효하다.
+    _MAX_NEW_TOKENS = 8192
+    # 모델 카드 권장: spotting 입력 상한 2048*28*28 픽셀, 작은 이미지(긴 변
+    # <1500px)는 2배 확대. 좌표는 0~1000 상대값이라 확대해도 복원식이 같다.
+    _MAX_PIXELS = 2048 * 28 * 28
+    _UPSCALE_BELOW_PX = 1500
+
+    def __init__(self):
+        from pdfeditor import vl
+        if not vl.vl_installed():
+            raise RuntimeError(
+                "VL을 쓸 수 없습니다 — 빠진 것: %s" % vl.install_hint())
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+        self._torch = torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.bfloat16 if device == "cuda" else torch.float32
+        model_dir = vl.models_dir()
+        # trust_remote_code를 쓰지 않는다 — repo에 든 커스텀 모델링 코드는
+        # 구버전 transformers용이라 5.x 내장 구현과 충돌한다('text_config'
+        # AttributeError). transformers>=5.0은 PaddleOCR-VL을 내장 지원한다.
+        self._model = AutoModelForImageTextToText.from_pretrained(
+            model_dir, dtype=dtype).to(device).eval()
+        self._processor = AutoProcessor.from_pretrained(model_dir)
+
+    def recognize(self, img_rgb):
+        from PIL import Image
+        image = Image.fromarray(img_rgb)
+        w, h = image.size
+        if max(w, h) < self._UPSCALE_BELOW_PX:
+            image = image.resize((w * 2, h * 2), Image.Resampling.LANCZOS)
+        proc = self._processor
+        messages = [{"role": "user", "content": [
+            {"type": "image", "image": image},
+            {"type": "text", "text": self._PROMPT},
+        ]}]
+        # 최소 픽셀: 내장 프로세서는 size.shortest_edge, 구식(remote code)
+        # 프로세서는 min_pixels — 둘 다 지원한다.
+        ip = proc.image_processor
+        min_px = getattr(ip, "min_pixels", None)
+        if min_px is None:
+            min_px = ip.size.shortest_edge
+        inputs = proc.apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=True,
+            return_dict=True, return_tensors="pt",
+            images_kwargs={"size": {
+                "shortest_edge": min_px,
+                "longest_edge": self._MAX_PIXELS}},
+        ).to(self._model.device)
+        with self._torch.no_grad():
+            # use_cache=True 필수 — 이 모델의 generation_config는
+            # use_cache=false로 배포돼 있어 그대로 두면 토큰마다 전체
+            # 재계산이 일어난다(실측 1.2 tok/s, 페이지당 100초+).
+            out = self._model.generate(
+                **inputs, max_new_tokens=self._MAX_NEW_TOKENS,
+                do_sample=False, use_cache=True)
+        # LOC/TEXT 마커가 특수 토큰이라 skip_special_tokens면 좌표가 통째로
+        # 사라진다 — 반드시 남긴 채 디코드해서 직접 파싱한다.
+        text = proc.decode(out[0][inputs["input_ids"].shape[-1]:],
+                           skip_special_tokens=False)
+        return _parse_spotting(text, w, h)
+
+
+class _RapidOCREngine:
+    """RapidOCR(onnxruntime) — 기본 엔진을 공통 인터페이스로 감싼다."""
+
+    def __init__(self):
+        self._ocr = _build_rapidocr()
+
+    def recognize(self, img_rgb):
+        result = self._ocr(img_rgb)
+        out = []
+        if result is None:
+            return out
+        if hasattr(result, "boxes") and result.boxes is not None:
+            pairs = zip(result.boxes, result.txts or [])
+        else:
+            res = result[0] if isinstance(result, tuple) else result
+            if not res:
+                return out
+            pairs = ((item[0], item[1]) for item in res)
+        for box, text in pairs:
+            xs = [float(p[0]) for p in box]
+            ys = [float(p[1]) for p in box]
+            out.append([min(xs), min(ys), max(xs), max(ys), str(text)])
+        return out
+
+
+def _build_rapidocr():
     import os
 
     from rapidocr import RapidOCR
@@ -160,24 +292,10 @@ def _preprocess(img_rgb):
     return img
 
 
-def _recognize(ocr, img_rgb, zoom):
-    result = ocr(img_rgb)
-    out = []
-    if result is None:
-        return out
-    if hasattr(result, "boxes") and result.boxes is not None:
-        pairs = zip(result.boxes, result.txts or [])
-    else:
-        res = result[0] if isinstance(result, tuple) else result
-        if not res:
-            return out
-        pairs = ((item[0], item[1]) for item in res)
-    for box, text in pairs:
-        xs = [float(p[0]) for p in box]
-        ys = [float(p[1]) for p in box]
-        out.append([min(xs) / zoom, min(ys) / zoom,
-                    max(xs) / zoom, max(ys) / zoom, str(text)])
-    return out
+def _recognize(engine, img_rgb, zoom):
+    """엔진 실행 후 픽셀 좌표를 PDF 좌표(pt)로 되돌린다."""
+    return [[it[0] / zoom, it[1] / zoom, it[2] / zoom, it[3] / zoom, it[4]]
+            for it in engine.recognize(img_rgb)]
 
 
 def main():
@@ -208,8 +326,9 @@ def main():
         if doc.needs_pass:
             doc.authenticate(password or "")
         try:
+            target = VL_TARGET_LONG_PX if engine == "vl" else TARGET_LONG_PX
             for i, pno in enumerate(pages):
-                zoom = fixed_zoom or _page_zoom(doc[pno].rect)
+                zoom = fixed_zoom or _page_zoom(doc[pno].rect, target)
                 pix = doc[pno].get_pixmap(
                     matrix=fitz.Matrix(zoom, zoom), alpha=False)
                 img = np.frombuffer(pix.samples, dtype=np.uint8) \

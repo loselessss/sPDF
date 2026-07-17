@@ -60,7 +60,8 @@ python register_filetype.py --unregister # 해제
 - [x] **v0.8 새 창 + 휠 페이지 넘김 + OCR 품질** — 다른 파일은 새 창으로(Ctrl+N), 휠로 페이지 끝에서 다음/이전 장, OCR 전처리(deskew+sharpen)로 인식률 개선, 텍스트 있는 페이지 중복 OCR 방지
 - [x] **v0.9 스캔본 편집** — OCR 후 편집 모드에서 스캔 글자 클릭 → 주변 종이색을 샘플링해 덮고 새 글자 작성(옛 OCR 텍스트도 함께 제거해 검색 오염 방지). 빈 곳 클릭 = 자유 텍스트 박스. 일반 PDF/스캔본 자동 분기
 - [x] **v1.0 설치 파일** — PyInstaller 2-실행파일 빌드(GUI + OCR 워커 격리), 아이콘 자동 생성, Inno Setup 설치본, PDF 연결 등록 + 기본 프로그램 확인
-- [ ] (예정) AI OCR 옵션 (PaddleOCR-VL, Claude API)
+- [x] **v1.1 AI 고품질 OCR (PaddleOCR-VL)** — 도구→AI 고품질 OCR 설정에서 엔진 선택. PaddleOCR-VL 1.5(약 1B, transformers+torch)를 "Spotting" 태스크로 돌려 줄 단위 텍스트+좌표 인식, GPU(CUDA)에서 페이지당 수 초. 런타임(pip)·모델(약 2GB, 앱에서 다운로드)은 별도 설치, 미설치면 기본 엔진으로 자동 동작
+- [ ] (예정) AI OCR 옵션 — Claude API (손글씨 등 최후 수단)
 - [ ] (예정) OCR 품질 추가 개선 — 저해상도/2단 조판 논문
 
 ## 구조
@@ -76,7 +77,8 @@ pdfeditor/
   help.py     # 사용법 다이얼로그(F1)
   startpage.py# 시작 페이지(홈) — 열기/즐겨찾기/최근
   ocr.py      # OcrMixin + 서브프로세스 워커 (부모는 onnxruntime 미로드)
-  ocr_subprocess.py  # OCR 자식 프로세스 (Qt 없이 onnxruntime 실행)
+  ocr_subprocess.py  # OCR 자식 프로세스 (Qt 없이 onnxruntime/torch 실행)
+  vl.py       # VL(고품질 AI OCR) 설치 감지/사양 판정/모델 다운로드
   widgets.py  # PageCanvas/PageView, ThumbList
   settings.py # ~/.pdfeditor.json (최근 파일)
   app.py      # MainWindow — 믹스인 조립

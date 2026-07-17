@@ -2,11 +2,11 @@
 
 import os
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QAction, QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QListWidget, QMainWindow, QMessageBox, QPushButton,
-    QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QMainWindow, QMessageBox, QProgressDialog,
+    QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import settings
@@ -509,9 +509,9 @@ class MainWindow(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
     def show_ocr_engine_dialog(self):
         """OCR 엔진 선택 — 기본(RapidOCR) vs AI 고품질(VL).
 
-        VL은 아직 뼈대 단계라 미설치 상태에서 켜면 실제 OCR 때 명확한
-        안내가 뜬다(조용히 실패하지 않음). 여기서는 선택 저장 + 현재 상태
-        (가속기/모델 설치)만 보여준다.
+        여기서는 선택 저장 + 현재 상태(가속기/모델 설치)만 보여준다.
+        VL 구성요소가 아직 없으면 설치될 때까지 OCR은 기본 엔진으로
+        동작한다(ocr._start_ocr의 폴백 — 조용히 실패하지 않음).
         """
         from . import settings, vl
         _kind, desc = vl.runtime_summary()
@@ -553,15 +553,84 @@ class MainWindow(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                     self.statusBar().showMessage("기본 엔진 유지", 4000)
                     return
             settings.set_ocr_engine("vl")
-            if not installed:
+            if installed:
+                self.statusBar().showMessage("OCR 엔진: AI 고품질(VL)", 4000)
+            elif vl.runtime_present() and vl.can_download():
+                # 런타임은 있고 모델만 없다 — 지금 받을지 물어본다.
+                ret = QMessageBox.question(
+                    self, "VL 모델 다운로드",
+                    "AI 고품질(VL)을 선택했습니다.\n"
+                    "모델(약 2GB)을 지금 다운로드할까요?\n\n"
+                    "다운로드 전까지 OCR은 기본 엔진으로 동작합니다.",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if ret == QMessageBox.Yes:
+                    self._download_vl_models()
+            else:
                 QMessageBox.information(
                     self, "VL 준비 필요",
                     "AI 고품질(VL)을 선택했습니다(사양 확인됨).\n"
                     "빠진 것: %s\n\n"
-                    "VL은 준비 중입니다(실추론 연결 예정). 그전까지 OCR은 "
-                    "기본 엔진으로 동작합니다." % vl.install_hint())
+                    "구성요소가 설치될 때까지 OCR은 기본 엔진으로 "
+                    "동작합니다.\n\n설치 방법:\n"
+                    "1) 명령 프롬프트에서\n"
+                    "   pip install torch transformers huggingface_hub\n"
+                    "   (GPU 사용 시 CUDA 지원 torch 빌드)\n"
+                    "2) 이 대화상자를 다시 열어 'AI 고품질로'를 선택하면\n"
+                    "   모델 다운로드를 안내합니다." % vl.install_hint())
+
+    def _download_vl_models(self):
+        """VL 모델(약 2GB)을 백그라운드 스레드로 받는다.
+
+        huggingface_hub의 snapshot_download는 진행 콜백을 노출하기 어려워
+        (vl.download_models 참고) 불확정 진행바만 띄운다. 취소는 지원하지
+        않는다 — 스냅샷은 파일 단위로 이어받기가 되므로 창을 닫았다 다시
+        받아도 손해가 없다.
+        """
+        from . import vl
+
+        class _Dl(QThread):
+            failed = pyqtSignal(str)
+
+            def run(self):
+                try:
+                    vl.download_models()
+                except Exception as e:
+                    self.failed.emit(str(e))
+
+        dlg = QProgressDialog(
+            "VL 모델 다운로드 중... (약 2GB, 네트워크에 따라 수 분)",
+            None, 0, 0, self)
+        dlg.setWindowTitle("VL 모델 다운로드")
+        dlg.setCancelButton(None)
+        dlg.setMinimumDuration(0)
+
+        th = _Dl(self)
+        self._vl_dl_error = None
+
+        def _on_fail(msg):
+            self._vl_dl_error = msg
+
+        def _on_done():
+            dlg.close()
+            th.deleteLater()
+            if self._vl_dl_error:
+                QMessageBox.critical(
+                    self, "다운로드 실패",
+                    "VL 모델 다운로드에 실패했습니다.\n\n%s"
+                    % self._vl_dl_error)
+            elif vl.vl_installed():
+                self.statusBar().showMessage(
+                    "VL 모델 설치 완료 — OCR 엔진: AI 고품질(VL)", 6000)
             else:
-                self.statusBar().showMessage("OCR 엔진: AI 고품질(VL)", 4000)
+                QMessageBox.warning(
+                    self, "다운로드 미완료",
+                    "다운로드가 끝났지만 모델 확인에 실패했습니다.\n"
+                    "다시 시도해 주세요.")
+
+        th.failed.connect(_on_fail)
+        th.finished.connect(_on_done)
+        th.start()
+        dlg.exec_()
 
     def show_licenses(self):
         QMessageBox.information(self, "오픈소스 라이선스", (

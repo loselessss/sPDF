@@ -1,19 +1,17 @@
 """VL(고품질 AI OCR) 지원 — 런타임 감지 + 모델 설치 확인 + 다운로드.
 
-Qt 비의존(코어 계층). 실제 추론은 ocr_subprocess의 VL 어댑터가 한다.
-
-상태: **뼈대 단계.** 실제 VL 추론 연결은 GPU 환경에서 마무리한다.
+Qt 비의존(코어 계층). 실제 추론은 ocr_subprocess의 _VLEngine이 한다
+(transformers "Spotting:" 태스크 — 줄 단위 텍스트+좌표).
 
 백엔드 현실(2026-07 확인): PaddleOCR-VL은 **onnxruntime로 못 돌린다.**
 공식 배포는 Hugging Face의 transformers(=PyTorch) 경로뿐이고, ONNX 변환은
 아직 미지원(optimum 오픈 이슈, 그마저 transformers.js용). 따라서 VL을 쓰려면
 가벼운 onnxruntime가 아니라 **torch + transformers 스택**(수 GB, GPU 권장)이
 필요하다. 이건 설치 파일(exe)에 번들하지 않고, VL을 켤 때 별도로 받는다.
+transformers는 5.0 이상이어야 한다(모델 카드 요구 — VL 아키텍처 지원).
 
 - 모델: Hugging Face repo(_HF_REPO)를 사용자 폴더로 snapshot 다운로드.
 - 런타임: torch.cuda 유무로 CUDA/CPU 판별(DirectML은 torch-directml 별도).
-- 검증 가능한 부분(경로/감지/UI/게이트)만 먼저 확정하고, 실추론(transformers
-  로 모델 로드 + 페이지 파싱)은 GPU 환경에서 마무리한다.
 """
 
 import importlib.util
