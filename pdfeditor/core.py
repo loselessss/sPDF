@@ -160,8 +160,19 @@ class Document:
 
         items: (x0, y0, x1, y1, text) 목록, PDF 좌표계.
         render_mode=3이 '그리지 않는 텍스트' — 화면 외관은 그대로 두고
-        검색/선택만 가능하게 만든다. 폰트는 PyMuPDF 내장 CJK("korea")로
-        한글+영문을 모두 커버한다(임베드 파일 불필요).
+        검색/선택만 가능하게 만든다.
+
+        폰트: 영문만인 줄은 비례폭 Helvetica("helv")로 쓴다 — 내장 CJK
+        폰트("korea")는 라틴 글자를 전각(약 2배 폭)으로 그려 이미지 글자와
+        폭이 크게 어긋난다. 한글이 섞인 줄만 CJK("korea")를 쓴다.
+
+        가로 맞춤(중요): VL은 '줄 단위' 박스를 주는데 대체폰트의 글자 폭이
+        원본 이미지와 달라, 그냥 쓰면 줄 오른쪽으로 갈수록 보이지 않는
+        글자가 실제 글자에서 벗어나 검색/선택 하이라이트가 어긋난다(줄 끝
+        단어가 여백 밖으로까지 밀리기도 한다). 그래서 x0(줄 시작)을
+        고정점으로 글자열을 가로로만 스케일해 박스 폭에 맞춘다. 스케일 계수는
+        폰트 메트릭 예측이 아니라 '실제 렌더 폭'을 재서 구한다 — 폰트에 따라
+        예측이 크게 빗나가기 때문(예: korea 폰트의 전각 라틴).
         """
         page = self._doc[index]
         n = 0
@@ -169,13 +180,44 @@ class Document:
             if not text.strip():
                 continue
             h = y1 - y0
+            box_w = x1 - x0
+            fontsize = max(4.0, h * 0.85)
             # 베이스라인은 박스 바닥에서 살짝 위 — 선택 영역이 원문과
             # 대충 겹치기만 하면 된다(어차피 안 보이는 글자).
-            page.insert_text((x0, y1 - h * 0.18), text,
-                             fontsize=max(4.0, h * 0.85),
-                             fontname="korea", render_mode=3)
+            baseline = y1 - h * 0.18
+            fontname = "helv" if text.isascii() else "korea"
+            morph = None
+            actual_w = self._render_width(text, fontsize, fontname)
+            if actual_w > 1 and box_w > 1:
+                # [0.5,2.5]로 제한 — 오검출로 박스가 비정상일 때만 걸린다.
+                scale = max(0.5, min(2.5, box_w / actual_w))
+                morph = (fitz.Point(x0, baseline),
+                         fitz.Matrix(scale, 0, 0, 1, 0, 0))
+            page.insert_text((x0, baseline), text, fontsize=fontsize,
+                             fontname=fontname, render_mode=3, morph=morph)
             n += 1
         return n
+
+    # 실제 렌더 폭을 재는 스크래치 문서(insert_ocr_text 전용) — 폰트 메트릭
+    # 예측이 빗나가는 폰트(전각 라틴 등)에도 정확한 스케일을 얻기 위함.
+    _MEASURE_DOC = None
+
+    @classmethod
+    def _render_width(cls, text, fontsize, fontname):
+        """text를 fontname/fontsize로 실제로 써 봤을 때의 가로 폭(pt)."""
+        if cls._MEASURE_DOC is None:
+            cls._MEASURE_DOC = fitz.open()
+        doc = cls._MEASURE_DOC
+        page = doc.new_page(width=20000, height=100)
+        try:
+            page.insert_text((0, 50), text, fontsize=fontsize,
+                             fontname=fontname, render_mode=3)
+            words = page.get_text("words")
+            if not words:
+                return 0.0
+            return max(w[2] for w in words) - min(w[0] for w in words)
+        finally:
+            doc.delete_page(len(doc) - 1)
 
     # --- 텍스트 편집 (설계 §3.4) --------------------------------------
 
