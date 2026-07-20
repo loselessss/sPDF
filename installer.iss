@@ -36,6 +36,9 @@ Name: "desktopicon"; Description: "바탕화면에 아이콘 만들기"; GroupDe
 ; PDF 연결은 '연결 프로그램 후보'로만 등록(기본값을 강제로 뺏지 않음).
 ; 사용자가 나중에 Windows '기본 앱'에서 sPDF를 직접 고를 수 있다.
 Name: "associate"; Description: "PDF 파일 '연결 프로그램' 목록에 sPDF 추가"; GroupDescription: "파일 연결:"
+; Windows 8 이상에서는 설치 프로그램이 기본 앱을 직접 바꿀 수 없다.
+; 선택 시 설치 완료 후 Windows 기본 앱 설정을 열어 사용자가 확정한다.
+Name: "associate\defaultpdf"; Description: "설치 후 sPDF를 기본 PDF 앱으로 선택하기 (Windows 설정 열기)"; GroupDescription: "파일 연결:"; Flags: unchecked
 
 [Files]
 Source: "dist\sPDF\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -63,4 +66,5 @@ Root: HKA; Subkey: "Software\sPDF\Capabilities\FileAssociations"; ValueType: str
 Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: "Software\sPDF\Capabilities"; Flags: uninsdeletevalue; Tasks: associate
 
 [Run]
+Filename: "ms-settings:defaultapps"; Description: "sPDF를 기본 PDF 앱으로 선택하기"; Flags: shellexec nowait skipifsilent runasoriginaluser; Tasks: associate\defaultpdf
 Filename: "{app}\{#MyAppExeName}"; Description: "sPDF 실행"; Flags: nowait postinstall skipifsilent
