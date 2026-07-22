@@ -42,6 +42,69 @@ def _make_action(parent, text, shortcut, slot):
     return a
 
 
+def _show_default_app_settings(parent):
+    from .defaultapp import (
+        edge_external_pdf_enabled, friendly_handler_name, is_spdf_default,
+        open_default_apps_settings, set_edge_external_pdf,
+    )
+    while True:
+        current = friendly_handler_name()
+        spdf_default = is_spdf_default()
+        edge_external = edge_external_pdf_enabled()
+        edge_result = (
+            "sPDF로 열림" if edge_external and spdf_default else
+            "켜짐 — 현재 기본 앱(%s)으로 열림" % current
+            if edge_external else "꺼짐 — Edge 내장 뷰어로 열림"
+        )
+
+        box = QMessageBox(parent)
+        box.setWindowTitle("PDF 기본 프로그램 및 Edge 설정")
+        box.setIcon(QMessageBox.Information)
+        box.setText(
+            "Windows PDF 기본 앱: %s\n"
+            "Edge에서 PDF 링크 열기: %s\n\n"
+            "Edge에서 PDF를 sPDF로 열려면 두 설정이 모두 필요합니다.\n"
+            "1) Windows PDF 기본 앱: sPDF\n"
+            "2) Edge 외부 PDF 열기: 켜짐" % (current, edge_result))
+        toggle = box.addButton(
+            "Edge 외부 열기 끄기" if edge_external
+            else "Edge에서 외부 앱으로 열기 켜기",
+            QMessageBox.ActionRole)
+        defaults = box.addButton("Windows 기본 앱 설정", QMessageBox.ActionRole)
+        box.addButton("닫기", QMessageBox.RejectRole)
+        box.exec_()
+
+        clicked = box.clickedButton()
+        if clicked is toggle:
+            try:
+                set_edge_external_pdf(not edge_external)
+            except OSError as e:
+                QMessageBox.critical(
+                    parent, "Edge 설정 실패",
+                    "Edge PDF 설정을 변경하지 못했습니다.\n\n%s" % e)
+                continue
+            if not edge_external:
+                note = (
+                    "Edge에서 PDF 링크를 외부 앱으로 열도록 설정했습니다.\n"
+                    "Edge를 완전히 종료한 뒤 다시 실행하면 적용됩니다."
+                )
+                if not spdf_default:
+                    note += (
+                        "\n\n현재 기본 PDF 앱이 sPDF가 아닙니다. 아래의 "
+                        "'Windows 기본 앱 설정'에서 sPDF를 선택하세요."
+                    )
+                QMessageBox.information(parent, "Edge 설정 완료", note)
+            continue
+        if clicked is defaults:
+            if not open_default_apps_settings():
+                QMessageBox.warning(
+                    parent, "설정 열기 실패",
+                    "설정 화면을 열지 못했습니다.\n"
+                    "Windows 설정 → 앱 → 기본 앱에서 직접 변경하세요.")
+            continue
+        break
+
+
 _TAB_MIME = "application/x-spdf-tab"
 _dragged_tabs = {}
 
@@ -368,7 +431,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
         h = self.menuBar().addMenu("도움말(&H)")
         self._act(h, "사용법", "F1", self.show_help)
-        self._act(h, "PDF 기본 프로그램 확인...", None, self.check_default_app)
+        self._act(h, "PDF 기본 프로그램 / Edge 설정...", None,
+                  self.check_default_app)
         self._act(h, "오픈소스 라이선스", None, self.show_licenses)
         self._act(h, "정보", None, self.show_about)
 
@@ -546,31 +610,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         show_help(self)
 
     def check_default_app(self):
-        from .defaultapp import (friendly_handler_name, is_spdf_default,
-                                 open_default_apps_settings)
-        current = friendly_handler_name()
-        if is_spdf_default():
-            QMessageBox.information(
-                self, "PDF 기본 프로그램",
-                "PDF 파일의 기본 프로그램이 이미 sPDF로 설정되어 있습니다.\n\n"
-                "현재: %s" % current)
-            return
-        box = QMessageBox(self)
-        box.setWindowTitle("PDF 기본 프로그램")
-        box.setIcon(QMessageBox.Question)
-        box.setText("현재 PDF 기본 프로그램: %s\n\n"
-                    "sPDF로 바꾸려면 Windows '기본 앱' 설정에서 .pdf 항목을\n"
-                    "sPDF로 선택하세요. (보안상 프로그램이 자동으로 바꿀 수는\n"
-                    "없습니다.)\n\n설정 화면을 열까요?" % current)
-        box.setStandardButtons(QMessageBox.Open | QMessageBox.Cancel)
-        box.button(QMessageBox.Open).setText("설정 열기")
-        box.button(QMessageBox.Cancel).setText("닫기")
-        if box.exec_() == QMessageBox.Open:
-            if not open_default_apps_settings():
-                QMessageBox.warning(
-                    self, "설정 열기 실패",
-                    "설정 화면을 열지 못했습니다.\n"
-                    "Windows 설정 → 앱 → 기본 앱에서 직접 변경하세요.")
+        _show_default_app_settings(self)
 
     def show_about(self):
         QMessageBox.about(self, "정보", "%s %s" % (APP_NAME, APP_VERSION))
@@ -762,6 +802,9 @@ class AppWindow(QMainWindow):
         m.addAction(_make_action(self, "종료", "Ctrl+Q", self.close))
         h = mb.addMenu("도움말(&H)")
         h.addAction(_make_action(self, "사용법", "F1", self._shell_help))
+        h.addAction(_make_action(
+            self, "PDF 기본 프로그램 / Edge 설정...", None,
+            lambda: _show_default_app_settings(self)))
         h.addAction(_make_action(self, "오픈소스 라이선스", None,
                                  lambda: show_licenses(self)))
         h.addAction(_make_action(self, "정보", None, self._shell_about))

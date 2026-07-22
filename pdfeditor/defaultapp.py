@@ -9,6 +9,10 @@ import subprocess
 import sys
 
 
+_EDGE_POLICY_KEY = r"Software\Policies\Microsoft\Edge"
+_EDGE_EXTERNAL_PDF_VALUE = "AlwaysOpenPdfExternally"
+
+
 def current_pdf_handler():
     """.pdf의 현재 기본 연결 ProgId. 못 읽으면 None."""
     try:
@@ -57,3 +61,41 @@ def open_default_apps_settings():
         return True
     except OSError:
         return False
+
+
+def edge_external_pdf_enabled():
+    """Edge가 PDF를 내장 뷰어 대신 Windows 기본 앱으로 넘기는지 확인."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, _EDGE_POLICY_KEY) as key:
+            value, kind = winreg.QueryValueEx(key, _EDGE_EXTERNAL_PDF_VALUE)
+            return kind == winreg.REG_DWORD and value == 1
+    except OSError:
+        return False
+
+
+def set_edge_external_pdf(enabled):
+    """현재 사용자에만 Edge 외부 PDF 열기 정책을 적용하거나 해제한다.
+
+    Windows 기본 PDF 앱 지정은 UserChoice 보호 때문에 별도 설정 화면에서
+    사용자가 해야 하지만, Edge 정책은 HKCU라 관리자 권한 없이 변경할 수 있다.
+    """
+    if sys.platform != "win32":
+        raise OSError("Windows에서만 사용할 수 있는 설정입니다.")
+    import winreg
+    if enabled:
+        with winreg.CreateKey(
+                winreg.HKEY_CURRENT_USER, _EDGE_POLICY_KEY) as key:
+            winreg.SetValueEx(
+                key, _EDGE_EXTERNAL_PDF_VALUE, 0, winreg.REG_DWORD, 1)
+        return
+    try:
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, _EDGE_POLICY_KEY,
+                0, winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, _EDGE_EXTERNAL_PDF_VALUE)
+    except FileNotFoundError:
+        pass

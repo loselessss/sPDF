@@ -38,8 +38,9 @@ build_installer.bat  REM Inno Setup  -> Output\sPDF_Setup_X.X.X.exe
 우클릭 → "연결 프로그램"에 나타나고, Windows '기본 앱'에서 sPDF를 기본
 PDF 앱으로 고를 수 있다(보안상 설치 프로그램이 기본값을 강제로 바꾸지는
 않음). 하위 옵션인 "설치 후 sPDF를 기본 PDF 앱으로 선택하기"를 체크하면
-설치 완료 후 Windows 기본 앱 설정이 열린다. 도움말 → **PDF 기본 프로그램
-확인**에서도 현재 상태를 확인하고 설정을 열 수 있다.
+설치 완료 후 Windows 기본 앱 설정이 열린다. 도움말 → **PDF 기본 프로그램 /
+Edge 설정**에서는 현재 연결을 확인하고, Edge의 PDF 링크를 Windows 기본 PDF
+앱(sPDF)으로 넘기는 사용자별 정책을 켜고 끌 수 있다.
 
 ## 탐색기에서 열기 (설치 없이, 개발용)
 
