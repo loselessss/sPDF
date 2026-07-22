@@ -1,11 +1,11 @@
-; sPDF 설치 스크립트 (Inno Setup 6)
+﻿; sPDF 설치 스크립트 (Inno Setup 6)
 ; 빌드: build_installer.bat  (먼저 build_exe.bat로 dist\sPDF 생성)
 ;
 ; 버전은 bandwagon 방식대로 수동 동기화 — pdfeditor\meta.py의 APP_VERSION과
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.5.1"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"

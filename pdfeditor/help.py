@@ -74,6 +74,7 @@ HELP_HTML = """
 <table cellpadding="4">
 <tr><td><b>Ctrl+R</b></td><td>현재 페이지 OCR</td></tr>
 <tr><td><b>Ctrl+Shift+R</b></td><td>전체 문서 OCR (텍스트 없는 페이지만)</td></tr>
+<tr><td>OCR 메뉴 → 설정</td><td><b>RapidOCR</b> 또는 <b>AI 고품질(VL)</b> 엔진 선택</td></tr>
 </table>
 <p>스캔본에 보이지 않는 텍스트 층을 입혀 <b>검색·복사가 가능</b>해집니다
 (외관은 그대로). 한국어+영어. 첫 실행 때 인식 모델을 자동 내려받습니다.

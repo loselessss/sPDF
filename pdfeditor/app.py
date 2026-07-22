@@ -706,22 +706,22 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         box.setIcon(QMessageBox.Question)
         box.setText(
             "OCR 엔진을 선택하세요.\n\n"
-            "• 기본(RapidOCR): 가볍고 빠름, 한글+영문. CPU에서 잘 동작.\n"
+            "• RapidOCR: 가볍고 빠름, 한글+영문. CPU에서 잘 동작.\n"
             "• AI 고품질(VL): 저품질 스캔·복잡한 레이아웃에 강함.\n"
             "  실행에 torch+transformers(수 GB) + 모델(약 2GB) 필요, GPU 권장.\n\n"
             "현재 가속기: %s\n"
             "VL 상태: %s\n"
             "현재 선택: %s"
             % (desc, vl.install_hint(),
-               "AI 고품질(VL)" if cur == "vl" else "기본(RapidOCR)"))
-        b_basic = box.addButton("기본으로", QMessageBox.AcceptRole)
+               "AI 고품질(VL)" if cur == "vl" else "RapidOCR"))
+        b_basic = box.addButton("RapidOCR로", QMessageBox.AcceptRole)
         b_vl = box.addButton("AI 고품질로", QMessageBox.AcceptRole)
         box.addButton("취소", QMessageBox.RejectRole)
         box.exec_()
         clicked = box.clickedButton()
         if clicked is b_basic:
             settings.set_ocr_engine("rapidocr")
-            self.statusBar().showMessage("OCR 엔진: 기본(RapidOCR)", 4000)
+            self.statusBar().showMessage("OCR 엔진: RapidOCR", 4000)
         elif clicked is b_vl:
             level, _specs, reason = vl.vl_suitability()
             if level in ("poor", "marginal"):
@@ -730,7 +730,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                     "%s\n\n그래도 AI 고품질(VL)로 설정할까요?" % reason,
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 if ret != QMessageBox.Yes:
-                    self.statusBar().showMessage("기본 엔진 유지", 4000)
+                    self.statusBar().showMessage("RapidOCR 유지", 4000)
                     return
             settings.set_ocr_engine("vl")
             if installed:
@@ -740,7 +740,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                     self, "VL 모델 다운로드",
                     "AI 고품질(VL)을 선택했습니다.\n"
                     "모델(약 2GB)을 지금 다운로드할까요?\n\n"
-                    "다운로드 전까지 OCR은 기본 엔진으로 동작합니다.",
+                    "다운로드 전까지 OCR은 RapidOCR로 동작합니다.",
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
                 if ret == QMessageBox.Yes:
                     self._download_vl_models()
@@ -749,7 +749,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                     self, "VL 준비 필요",
                     "AI 고품질(VL)을 선택했습니다(사양 확인됨).\n"
                     "빠진 것: %s\n\n"
-                    "구성요소가 설치될 때까지 OCR은 기본 엔진으로 "
+                    "구성요소가 설치될 때까지 OCR은 RapidOCR로 "
                     "동작합니다.\n\n설치 방법:\n"
                     "1) 명령 프롬프트에서\n"
                     "   pip install torch torchvision transformers "

@@ -208,7 +208,7 @@ class _VLEngine:
 
 
 class _RapidOCREngine:
-    """RapidOCR(onnxruntime) — 기본 엔진을 공통 인터페이스로 감싼다."""
+    """RapidOCR(onnxruntime) 엔진을 공통 인터페이스로 감싼다."""
 
     def __init__(self):
         self._ocr = _build_rapidocr()
