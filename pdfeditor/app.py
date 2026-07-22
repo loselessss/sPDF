@@ -478,6 +478,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             action.setCheckable(True)
             self._interaction_group.addAction(action)
         self._select_tool_act.setChecked(True)
+        self._favorite_act = _make_action(
+            self, "★ 즐겨찾기 추가", None, self._toggle_favorite)
+        self._favorite_act.setEnabled(False)
 
         tool_bar = QToolBar("상호작용 도구", self)
         tool_bar.setObjectName("interaction_tools")
@@ -486,6 +489,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         tool_bar.addAction(self._hand_tool_act)
         tool_bar.addAction(self._select_tool_act)
+        tool_bar.addSeparator()
+        tool_bar.addAction(self._favorite_act)
         self.addToolBar(Qt.TopToolBarArea, tool_bar)
         self._interaction_toolbar = tool_bar
 
@@ -558,6 +563,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
     def _rebuild_fav_menu(self):
         self._fav_menu.clear()
+        self._sync_favorite_action()
         if self.doc is not None:
             if settings.is_favorite(self.doc.path):
                 self._fav_menu.addAction(
@@ -581,6 +587,21 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             act.setToolTip(p)
             act.triggered.connect(lambda _c=False, p=p: self._shell.open_recent(p))
 
+    def _sync_favorite_action(self):
+        """현재 문서의 즐겨찾기 여부를 도구 모음에 반영한다."""
+        if self.doc is None or not self.doc.path:
+            self._favorite_act.setText("★ 즐겨찾기 추가")
+            self._favorite_act.setToolTip("PDF를 연 뒤 즐겨찾기에 추가할 수 있습니다")
+            self._favorite_act.setEnabled(False)
+            return
+        favorite = settings.is_favorite(self.doc.path)
+        self._favorite_act.setEnabled(True)
+        self._favorite_act.setText(
+            "★ 즐겨찾기 해제" if favorite else "★ 즐겨찾기 추가")
+        self._favorite_act.setToolTip(
+            "현재 PDF를 즐겨찾기에서 제거합니다" if favorite else
+            "현재 PDF를 즐겨찾기에 추가합니다")
+
     def _toggle_favorite(self):
         if self.doc is None:
             return
@@ -590,6 +611,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         else:
             settings.add_favorite(self.doc.path)
             self.statusBar().showMessage("즐겨찾기에 추가됨", 3000)
+        self._sync_favorite_action()
         self._shell.refresh_start_page()
 
     # --- 문서 로드/정리 ------------------------------------------------
@@ -633,6 +655,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         """파일/전송 스냅샷에 공통인 문서 탭 초기화를 한곳에서 수행한다."""
         self.doc = doc
         self.page_index = 0
+        self._sync_favorite_action()
         self.thumbs.reset_pages(doc.page_count)
         self._update_title()
         settings.push_recent(path)
@@ -656,6 +679,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         if self.doc is not None:
             self.doc.close()
             self.doc = None
+        self._sync_favorite_action()
         self._cache.clear()
         self._reset_textsel()
         self._reset_annots()

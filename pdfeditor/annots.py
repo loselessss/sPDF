@@ -86,6 +86,7 @@ class AnnotMixin:
         # 이후 Ctrl+S는 새 경로에 저장되도록 현재 문서를 갈아탄다.
         self.doc.path = path
         self._dirty = False
+        self._sync_favorite_action()
         self._update_title()
         self.statusBar().showMessage("저장됨: %s" % path, 3000)
         return True
