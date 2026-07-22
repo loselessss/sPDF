@@ -91,9 +91,12 @@ HELP_HTML = """
 <tr><td><b>Ctrl+] / Ctrl+[</b></td><td>오른쪽 / 왼쪽으로 회전</td></tr>
 <tr><td><b>Ctrl+Delete</b></td><td>현재 페이지 삭제</td></tr>
 <tr><td>썸네일 <b>드래그</b></td><td>페이지 순서 변경</td></tr>
-<tr><td>페이지 메뉴</td><td>다른 PDF 병합 / 현재 페이지 추출</td></tr>
+<tr><td>페이지 → <b>PDF 병합</b></td><td>여러 PDF를 선택해 현재 페이지 뒤에 순서대로 삽입</td></tr>
+<tr><td>페이지 → <b>PDF 분리</b></td><td><code>*</code> 또는 <code>1-3;4,6;7-9</code> 형식으로 별도 PDF 생성</td></tr>
+<tr><td>페이지 → 현재 페이지 추출</td><td>현재 한 페이지만 새 PDF로 저장</td></tr>
 </table>
-<p>회전·삭제·순서변경·병합은 모두 <b>Ctrl+Z</b>로 되돌릴 수 있습니다.</p>
+<p>회전·삭제·순서변경·병합은 모두 <b>Ctrl+Z</b>로 되돌릴 수 있습니다.
+분리·추출은 원본을 바꾸지 않고 새 PDF를 만듭니다.</p>
 
 <p style="color:gray;">도움말 → 오픈소스 라이선스에서 사용된 오픈소스
 목록을 볼 수 있습니다.</p>

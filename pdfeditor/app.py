@@ -178,6 +178,15 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._act(e, "다음 찾기", "F3", self.search_next)
         self._act(e, "이전 찾기", "Shift+F3", self.search_prev)
 
+        p = self.menuBar().addMenu("페이지(&P)")
+        self._act(p, "오른쪽으로 회전", "Ctrl+]", self.rotate_page_cw)
+        self._act(p, "왼쪽으로 회전", "Ctrl+[", self.rotate_page_ccw)
+        self._act(p, "현재 페이지 삭제", "Ctrl+Delete", self.delete_current_page)
+        p.addSeparator()
+        self._act(p, "PDF 병합...", None, self.merge_pdf)
+        self._act(p, "PDF 분리...", None, self.split_pdf)
+        self._act(p, "현재 페이지 추출...", None, self.extract_current_page)
+
         a = self.menuBar().addMenu("주석(&A)")
         self._act(a, "선택 영역 형광펜", "Ctrl+H", self.highlight_selection)
         self._act(a, "메모 추가 (위치 클릭)", "Ctrl+M", self.start_note_mode)
@@ -343,20 +352,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         return ("*" if self._dirty else "") + os.path.basename(self.doc.path)
 
     def _update_title(self):
-        # 탭은 자식 창이라 setWindowTitle은 안 보이지만, 셸이 라벨/제목을
-        # 갱신하도록 신호를 쏜다.
-        self.title_changed.emit()
-
-    def _update_page_label(self):
-        if self.doc is None:
-            self._page_label.setText("")
-        else:
-            self._page_label.setText("%d / %d   %d%%" % (
-                self.page_index + 1, self.doc.page_count, round(self.view.zoom * 100)))
-
-    # --- 도움말/정보/OCR 설정 (탭 메뉴에서 호출) -----------------------
-
-    def show_help(self):
+        # 탭은 자식 창이라 ׽-�G����ƭy�p(self):
         from .help import show_help
         show_help(self)
 

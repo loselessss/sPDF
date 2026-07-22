@@ -6,7 +6,14 @@
 
 import os
 
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox
+
+from .core import PasswordRequired
+from .page_ranges import page_group_label, parse_page_groups
+
+
+class _MergeCancelled(Exception):
+    pass
 
 
 class PagesMixin:
@@ -43,7 +50,7 @@ class PagesMixin:
             % (self.page_index + 1))
         if ret != QMessageBox.Yes:
             return
-        self._push_undo()
+        self._push_undo(structural=True)
         self.doc.delete_page(self.page_index)
         self._after_structure_changed(keep_page=self.page_index)
         self.mark_dirty()
@@ -54,36 +61,126 @@ class PagesMixin:
         """썸네일을 드래그해 순서를 바꿨을 때 — 문서에 실제로 반영."""
         if self.doc is None or src == dst:
             return
-        self._push_undo()
+        self._push_undo(structural=True)
         self.doc.move_page(src, dst)
         self._after_structure_changed(keep_page=dst)
         self.mark_dirty()
         self.statusBar().showMessage(
             "%d쪽 → %d쪽으로 이동" % (src + 1, dst + 1), 3000)
 
-    # --- 병합 / 추출 -----------------------------------------------------
+    # --- 병합 / 분리 / 추출 ----------------------------------------------
 
     def merge_pdf(self):
         if self.doc is None:
             return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "병합할 PDF 선택", "", "PDF 파일 (*.pdf)")
-        if not path:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "병합할 PDF 선택 (여러 파일 선택 가능)", "", "PDF 파일 (*.pdf)")
+        if not paths:
             return
         # 현재 페이지 '뒤'에 끼워넣는 게 직관적
         at = self.page_index + 1
-        self._push_undo()
+        keep_page = self.page_index
+        undo_before = list(self._undo_stack)
+        redo_before = list(self._redo_stack)
+        undo_structural_before = list(self._undo_structural)
+        redo_structural_before = list(self._redo_structural)
+        self._push_undo(structural=True)
+        snapshot = self._undo_stack[-1]
+        total_pages = 0
         try:
-            n = self.doc.insert_pdf(path, at=at)
+            for path in paths:
+                password = None
+                while True:
+                    try:
+                        count = self.doc.insert_pdf(path, at=at, password=password)
+                        break
+                    except PasswordRequired:
+                        password, ok = QInputDialog.getText(
+                            self, "암호 필요",
+                            "%s 파일의 비밀번호를 입력하세요." % os.path.basename(path),
+                            QLineEdit.Password)
+                        if not ok:
+                            raise _MergeCancelled()
+                at += count
+                total_pages += count
+        except _MergeCancelled:
+            self.doc.restore(snapshot)
+            self._undo_stack = undo_before
+            self._redo_stack = redo_before
+            self._undo_structural = undo_structural_before
+            self._redo_structural = redo_structural_before
+            self._update_edit_actions()
+            self._after_structure_changed(keep_page=keep_page)
+            self.statusBar().showMessage("PDF 병합이 취소되었습니다.", 3000)
+            return
         except Exception as e:
-            self._undo_stack.pop()  # 실패했으니 방금 찍은 스냅샷은 버린다
+            # 여러 파일 중 하나라도 실패하면 앞에서 삽입한 파일까지 되돌린다.
+            self.doc.restore(snapshot)
+            self._undo_stack = undo_before
+            self._redo_stack = redo_before
+            self._undo_structural = undo_structural_before
+            self._redo_structural = redo_structural_before
+            self._update_edit_actions()
+            self._after_structure_changed(keep_page=keep_page)
             QMessageBox.critical(
                 self, "병합 실패", "PDF를 병합할 수 없습니다.\n\n%s" % e)
             return
-        self._after_structure_changed(keep_page=at)
+        first_inserted_page = self.page_index + 1
+        self._after_structure_changed(keep_page=first_inserted_page)
         self.mark_dirty()
         self.statusBar().showMessage(
-            "%s — %d페이지 병합됨" % (os.path.basename(path), n), 5000)
+            "%d개 파일, %d페이지 병합됨" % (len(paths), total_pages), 5000)
+
+    def split_pdf(self):
+        """입력한 페이지 그룹을 각각 별도 PDF로 저장한다."""
+        if self.doc is None:
+            return
+        spec, ok = QInputDialog.getText(
+            self, "PDF 분리",
+            "분리할 페이지 범위를 입력하세요.\n"
+            "* = 모든 페이지를 낱장으로 분리\n"
+            "세미콜론(;)마다 별도 PDF: 1-3;4,6;7-9",
+            QLineEdit.Normal, "*")
+        if not ok:
+            return
+        try:
+            groups = parse_page_groups(spec, self.doc.page_count)
+        except ValueError as e:
+            QMessageBox.warning(self, "범위 확인", str(e))
+            return
+
+        folder = QFileDialog.getExistingDirectory(
+            self, "분리한 PDF를 저장할 폴더", os.path.dirname(self.doc.path))
+        if not folder:
+            return
+
+        base = os.path.splitext(os.path.basename(self.doc.path))[0]
+        outputs = []
+        for number, indices in enumerate(groups, start=1):
+            name = "%s_split_%02d_%s.pdf" % (
+                base, number, page_group_label(indices))
+            outputs.append(os.path.join(folder, name))
+
+        existing = [path for path in outputs if os.path.exists(path)]
+        if existing:
+            answer = QMessageBox.question(
+                self, "파일 덮어쓰기",
+                "같은 이름의 파일 %d개가 있습니다. 모두 덮어쓸까요?" % len(existing))
+            if answer != QMessageBox.Yes:
+                return
+
+        completed = 0
+        try:
+            for indices, out_path in zip(groups, outputs):
+                self.doc.extract_pages(indices, out_path)
+                completed += 1
+        except Exception as e:
+            QMessageBox.critical(
+                self, "분리 실패",
+                "%d개 파일을 저장한 뒤 중단되었습니다.\n\n%s" % (completed, e))
+            return
+        self.statusBar().showMessage(
+            "%d개 PDF로 분리됨: %s" % (len(outputs), folder), 7000)
 
     def extract_current_page(self):
         """현재 페이지만 새 PDF로 저장 — 원본은 그대로."""

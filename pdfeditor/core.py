@@ -5,6 +5,7 @@ Qt에 의존하지 않는다(설계 계획서 §4). GUI 없이 단독 테스트�
 """
 import os
 import shutil
+import tempfile
 
 import fitz
 
@@ -377,13 +378,23 @@ class Document:
 
     def extract_pages(self, indices, out_path):
         """선택한 페이지만 새 PDF로 저장(분할). 원본은 그대로 둔다."""
+        if not indices:
+            raise ValueError("추출할 페이지가 없습니다.")
         new = fitz.open()
+        out_dir = os.path.dirname(os.path.abspath(out_path))
+        prefix = ".%s." % os.path.basename(out_path)
+        fd, tmp = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=out_dir)
+        os.close(fd)
+        os.unlink(tmp)  # PyMuPDF는 존재하지 않는 새 경로에 저장해야 한다.
         try:
             for i in indices:
                 new.insert_pdf(self._doc, from_page=i, to_page=i)
-            new.save(out_path, garbage=3, deflate=True)
+            new.save(tmp, garbage=3, deflate=True)
+            os.replace(tmp, out_path)
         finally:
             new.close()
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
     def snapshot(self):
         """현재 문서 전체를 바이트로 — 되돌리기 스택용(설계: 저널링 대신).

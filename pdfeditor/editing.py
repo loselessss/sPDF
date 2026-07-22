@@ -21,11 +21,15 @@ class EditMixin:
         self._edit_mode = False
         self._undo_stack = []  # 편집 전 스냅샷(bytes)들
         self._redo_stack = []
+        self._undo_structural = []  # 페이지 수/순서 변경 여부
+        self._redo_structural = []
 
     def _reset_edit(self):
         self._edit_mode = False
         self._undo_stack = []
         self._redo_stack = []
+        self._undo_structural = []
+        self._redo_structural = []
         self.view.canvas.set_edit_boxes([])
 
     # --- 페이지 전환 훅 -----------------------------------------------
@@ -124,19 +128,27 @@ class EditMixin:
 
     # --- undo / redo --------------------------------------------------
 
-    def _push_undo(self):
+    def _push_undo(self, structural=False):
         self._undo_stack.append(self.doc.snapshot())
+        self._undo_structural.append(structural)
         if len(self._undo_stack) > UNDO_LIMIT:
             self._undo_stack.pop(0)
+            self._undo_structural.pop(0)
         self._redo_stack.clear()
+        self._redo_structural.clear()
         self._update_edit_actions()
 
     def undo(self):
         if not self._undo_stack:
             return
         self._redo_stack.append(self.doc.snapshot())
+        structural = self._undo_structural.pop()
+        self._redo_structural.append(structural)
         self.doc.restore(self._undo_stack.pop())
-        self._after_page_content_changed()
+        if structural:
+            self._after_structure_changed(keep_page=self.page_index)
+        else:
+            self._after_page_content_changed()
         self.mark_dirty()
         self._update_edit_actions()
 
@@ -144,8 +156,13 @@ class EditMixin:
         if not self._redo_stack:
             return
         self._undo_stack.append(self.doc.snapshot())
+        structural = self._redo_structural.pop()
+        self._undo_structural.append(structural)
         self.doc.restore(self._redo_stack.pop())
-        self._after_page_content_changed()
+        if structural:
+            self._after_structure_changed(keep_page=self.page_index)
+        else:
+            self._after_page_content_changed()
         self.mark_dirty()
         self._update_edit_actions()
 
