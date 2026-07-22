@@ -119,6 +119,8 @@ class AnnotMixin:
     def start_note_mode(self):
         if self.doc is None:
             return
+        # 메모 위치 클릭이 손 도구의 이동으로 소비되지 않게 선택 도구로 전환.
+        self.set_interaction_mode("select", announce=False)
         self._note_mode = True
         self.statusBar().showMessage("메모를 붙일 위치를 클릭하세요 (Esc 취소)")
 
@@ -142,13 +144,17 @@ class AnnotMixin:
         """메모 아이콘 위에 마우스를 올리면 내용 툴팁."""
         if self.doc is None:
             return
+        if self.view.canvas.interaction_mode == "hand":
+            QToolTip.hideText()
+            self.view.canvas.refresh_cursor()
+            return
         a = self._annot_at(pt)
         if a is not None and a["kind"] == "Text" and a["text"]:
             QToolTip.showText(global_pos, a["text"], self.view.canvas)
             self.view.canvas.setCursor(Qt.PointingHandCursor)
         else:
             QToolTip.hideText()
-            self.view.canvas.setCursor(Qt.IBeamCursor)
+            self.view.canvas.refresh_cursor()
 
     def _add_note_at(self, pt):
         text, ok = QInputDialog.getMultiLineText(self, "메모 추가", "내용:")

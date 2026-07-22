@@ -53,6 +53,8 @@ class EditMixin:
         self._edit_mode = on
         self._edit_act.setChecked(on)
         if on:
+            # 손 도구에서는 클릭을 이동으로 소비하므로 편집 지점을 찍을 수 없다.
+            self.set_interaction_mode("select", announce=False)
             self._show_edit_boxes()
             self.statusBar().showMessage(
                 "편집 모드 — 글자를 클릭하면 수정, 빈 곳을 클릭하면 새 글자 "

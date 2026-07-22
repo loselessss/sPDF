@@ -14,10 +14,11 @@ import uuid
 from PyQt5.QtCore import QMimeData, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QDrag
 from PyQt5.QtWidgets import (
-    QAction, QCheckBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QMainWindow,
-    QMenuBar, QMessageBox, QProgressDialog, QPushButton, QStackedWidget, QTabBar,
-    QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QAction, QActionGroup, QCheckBox, QDialog, QDialogButtonBox, QDockWidget,
+    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QMainWindow, QMenuBar, QMessageBox, QProgressDialog, QPushButton,
+    QStackedWidget, QTabBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from . import settings
@@ -464,6 +465,29 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         v.addSeparator()
         self._act(v, "다음 페이지", "PgDown", self.next_page)
         self._act(v, "이전 페이지", "PgUp", self.prev_page)
+        v.addSeparator()
+        self._interaction_group = QActionGroup(self)
+        self._interaction_group.setExclusive(True)
+        self._select_tool_act = self._act(
+            v, "텍스트 선택 도구", None,
+            lambda: self.set_interaction_mode("select"))
+        self._hand_tool_act = self._act(
+            v, "손 도구", None,
+            lambda: self.set_interaction_mode("hand"))
+        for action in (self._select_tool_act, self._hand_tool_act):
+            action.setCheckable(True)
+            self._interaction_group.addAction(action)
+        self._select_tool_act.setChecked(True)
+
+        tool_bar = QToolBar("상호작용 도구", self)
+        tool_bar.setObjectName("interaction_tools")
+        tool_bar.setMovable(False)
+        tool_bar.setFloatable(False)
+        tool_bar.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        tool_bar.addAction(self._hand_tool_act)
+        tool_bar.addAction(self._select_tool_act)
+        self.addToolBar(Qt.TopToolBarArea, tool_bar)
+        self._interaction_toolbar = tool_bar
 
         h = self.menuBar().addMenu("도움말(&H)")
         self._act(h, "사용법", "F1", self.show_help)
@@ -473,6 +497,23 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._act(h, "정보", None, self.show_about)
 
     # --- 페이지 넘김/클릭 ---------------------------------------------
+
+    def set_interaction_mode(self, mode, announce=True):
+        if mode == "hand":
+            if self._edit_mode:
+                self.set_edit_mode(False)
+            if self._note_mode:
+                self.cancel_note_mode()
+        self.view.set_interaction_mode(mode)
+        self._hand_tool_act.setChecked(mode == "hand")
+        self._select_tool_act.setChecked(mode == "select")
+        if announce:
+            message = (
+                "손 도구 — PDF를 클릭한 채 드래그해 이동합니다"
+                if mode == "hand" else
+                "텍스트 선택 도구 — 글자를 드래그해 선택합니다"
+            )
+            self.statusBar().showMessage(message, 3000)
 
     def on_wheel_flip(self, direction):
         """휠로 페이지 끝에 닿았을 때 다음/이전 장으로."""

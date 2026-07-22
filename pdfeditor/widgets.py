@@ -1,6 +1,6 @@
 """재사용 위젯 — PageCanvas/PageView(메인 페이지 뷰), ThumbList(썸네일)."""
 
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QTimer, pyqtSignal
+from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QScrollArea, QWidget
 
@@ -36,6 +36,7 @@ class PageCanvas(QWidget):
     clicked = pyqtSignal(QPointF)       # 드래그 없는 단순 클릭 (메모 배치/열기)
     context_requested = pyqtSignal(QPointF, object)  # (PDF 좌표, 전역 좌표)
     hovered = pyqtSignal(QPointF, object)  # 마우스 이동 (메모 툴팁용)
+    pan_requested = pyqtSignal(QPoint)  # 손 도구 드래그의 화면 좌표 이동량
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,6 +48,8 @@ class PageCanvas(QWidget):
         self._edit_boxes = []
         self._drag_start = None
         self._dragged = False
+        self._interaction_mode = "select"
+        self._pan_last_global = None
         self.setCursor(Qt.IBeamCursor)
         self.setMouseTracking(True)  # 버튼 안 눌러도 hovered가 오도록
 
@@ -64,7 +67,10 @@ class PageCanvas(QWidget):
         self._search_rects = []
         self._search_cur = None
         self._edit_boxes = []
+        self._drag_start = None
+        self._pan_last_global = None
         self.resize(QSize(0, 0))
+        self.refresh_cursor()
         self.update()
 
     def set_selection(self, rects):
@@ -79,6 +85,23 @@ class PageCanvas(QWidget):
     def set_edit_boxes(self, rects):
         self._edit_boxes = rects
         self.update()
+
+    @property
+    def interaction_mode(self):
+        return self._interaction_mode
+
+    def set_interaction_mode(self, mode):
+        if mode not in ("select", "hand"):
+            raise ValueError("알 수 없는 상호작용 모드: %s" % mode)
+        self._interaction_mode = mode
+        self._drag_start = None
+        self._pan_last_global = None
+        self.refresh_cursor()
+
+    def refresh_cursor(self):
+        self.setCursor(
+            Qt.OpenHandCursor if self._interaction_mode == "hand"
+            else Qt.IBeamCursor)
 
     def paintEvent(self, _ev):
         if self._pix is None:
@@ -111,12 +134,21 @@ class PageCanvas(QWidget):
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton and self._pix is not None:
+            if self._interaction_mode == "hand":
+                self._pan_last_global = ev.globalPos()
+                self.setCursor(Qt.ClosedHandCursor)
+                ev.accept()
+                return
             self._drag_start = self._to_page(ev.pos())
             self._dragged = False
             self.selection_cleared.emit()
 
     def mouseMoveEvent(self, ev):
-        if self._drag_start is not None:
+        if self._pan_last_global is not None:
+            current = ev.globalPos()
+            self.pan_requested.emit(current - self._pan_last_global)
+            self._pan_last_global = current
+        elif self._drag_start is not None:
             self._dragged = True
             self.drag_selected.emit(self._drag_start, self._to_page(ev.pos()))
         elif self._pix is not None:
@@ -124,13 +156,19 @@ class PageCanvas(QWidget):
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.LeftButton:
+            if self._pan_last_global is not None:
+                self._pan_last_global = None
+                self.refresh_cursor()
+                ev.accept()
+                return
             # 드래그 없이 눌렀다 뗀 것만 '클릭' — 선택 드래그와 구분한다.
             if self._drag_start is not None and not self._dragged:
                 self.clicked.emit(self._to_page(ev.pos()))
             self._drag_start = None
 
     def mouseDoubleClickEvent(self, ev):
-        if ev.button() == Qt.LeftButton and self._pix is not None:
+        if ev.button() == Qt.LeftButton and self._pix is not None and \
+                self._interaction_mode == "select":
             self.word_picked.emit(self._to_page(ev.pos()))
 
     def contextMenuEvent(self, ev):
@@ -162,6 +200,17 @@ class PageView(QScrollArea):
         self.setAlignment(Qt.AlignCenter)
         self.zoom = 1.0
         self._flip_accum = 0
+        self.canvas.pan_requested.connect(self._pan_canvas)
+
+    def set_interaction_mode(self, mode):
+        self.canvas.set_interaction_mode(mode)
+
+    def _pan_canvas(self, delta):
+        """종이를 끌어가는 방향으로 보이도록 스크롤 값은 반대로 움직인다."""
+        hbar = self.horizontalScrollBar()
+        vbar = self.verticalScrollBar()
+        hbar.setValue(hbar.value() - delta.x())
+        vbar.setValue(vbar.value() - delta.y())
 
     def set_image(self, img):
         self.canvas.set_image(img, self.zoom)
