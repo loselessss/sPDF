@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 REM sPDF 실행 파일 빌드 — PyInstaller로 dist\sPDF\sPDF.exe 생성
 REM 사전: pip install pyinstaller  (그리고 앱 의존성 전부 설치)
 

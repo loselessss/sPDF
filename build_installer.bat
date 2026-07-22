@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 REM sPDF 설치 파일 빌드 — Inno Setup으로 Output\sPDF_Setup_X.X.X.exe 생성
 REM 사전: build_exe.bat 를 먼저 실행해 dist\sPDF 가 있어야 함
 
