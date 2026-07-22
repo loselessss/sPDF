@@ -14,10 +14,10 @@ import uuid
 from PyQt5.QtCore import QMimeData, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QDrag
 from PyQt5.QtWidgets import (
-    QAction, QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QListWidget, QMainWindow, QMenuBar, QMessageBox, QProgressDialog,
-    QPushButton, QStackedWidget, QTabBar, QTabWidget, QToolButton, QVBoxLayout,
-    QWidget,
+    QAction, QCheckBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QMainWindow,
+    QMenuBar, QMessageBox, QProgressDialog, QPushButton, QStackedWidget, QTabBar,
+    QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import settings
@@ -44,65 +44,101 @@ def _make_action(parent, text, shortcut, slot):
 
 def _show_default_app_settings(parent):
     from .defaultapp import (
-        edge_external_pdf_enabled, friendly_handler_name, is_spdf_default,
-        open_default_apps_settings, set_edge_external_pdf,
+        browser_external_pdf_enabled, friendly_handler_name, is_spdf_default,
+        open_default_apps_settings, set_browser_external_pdf,
     )
-    while True:
-        current = friendly_handler_name()
-        spdf_default = is_spdf_default()
-        edge_external = edge_external_pdf_enabled()
-        edge_result = (
-            "sPDF로 열림" if edge_external and spdf_default else
-            "켜짐 — 현재 기본 앱(%s)으로 열림" % current
-            if edge_external else "꺼짐 — Edge 내장 뷰어로 열림"
-        )
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("PDF 기본 프로그램 및 브라우저 설정")
+    dialog.setMinimumWidth(500)
+    layout = QVBoxLayout(dialog)
 
-        box = QMessageBox(parent)
-        box.setWindowTitle("PDF 기본 프로그램 및 Edge 설정")
-        box.setIcon(QMessageBox.Information)
-        box.setText(
-            "Windows PDF 기본 앱: %s\n"
-            "Edge에서 PDF 링크 열기: %s\n\n"
-            "Edge에서 PDF를 sPDF로 열려면 두 설정이 모두 필요합니다.\n"
-            "1) Windows PDF 기본 앱: sPDF\n"
-            "2) Edge 외부 PDF 열기: 켜짐" % (current, edge_result))
-        toggle = box.addButton(
-            "Edge 외부 열기 끄기" if edge_external
-            else "Edge에서 외부 앱으로 열기 켜기",
-            QMessageBox.ActionRole)
-        defaults = box.addButton("Windows 기본 앱 설정", QMessageBox.ActionRole)
-        box.addButton("닫기", QMessageBox.RejectRole)
-        box.exec_()
+    current = friendly_handler_name()
+    spdf_default = is_spdf_default()
+    default_label = QLabel("Windows PDF 기본 앱: <b>%s</b>" % current)
+    default_label.setTextFormat(Qt.RichText)
+    layout.addWidget(default_label)
+    if not spdf_default:
+        warning = QLabel(
+            "아래 옵션을 켜도 현재 기본 PDF 앱으로 열립니다. 먼저 Windows "
+            "기본 앱에서 sPDF를 선택하세요.")
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #b45309;")
+        layout.addWidget(warning)
 
-        clicked = box.clickedButton()
-        if clicked is toggle:
-            try:
-                set_edge_external_pdf(not edge_external)
-            except OSError as e:
-                QMessageBox.critical(
-                    parent, "Edge 설정 실패",
-                    "Edge PDF 설정을 변경하지 못했습니다.\n\n%s" % e)
-                continue
-            if not edge_external:
-                note = (
-                    "Edge에서 PDF 링크를 외부 앱으로 열도록 설정했습니다.\n"
-                    "Edge를 완전히 종료한 뒤 다시 실행하면 적용됩니다."
-                )
-                if not spdf_default:
-                    note += (
-                        "\n\n현재 기본 PDF 앱이 sPDF가 아닙니다. 아래의 "
-                        "'Windows 기본 앱 설정'에서 sPDF를 선택하세요."
-                    )
-                QMessageBox.information(parent, "Edge 설정 완료", note)
-            continue
-        if clicked is defaults:
-            if not open_default_apps_settings():
-                QMessageBox.warning(
-                    parent, "설정 열기 실패",
-                    "설정 화면을 열지 못했습니다.\n"
-                    "Windows 설정 → 앱 → 기본 앱에서 직접 변경하세요.")
-            continue
-        break
+    defaults = QPushButton("Windows 기본 앱 설정 열기")
+    layout.addWidget(defaults)
+    layout.addSpacing(8)
+
+    labels = {
+        "edge": "Microsoft Edge에서 PDF를 sPDF로 열기",
+        "chrome": "Google Chrome에서 PDF를 sPDF로 열기",
+        "firefox": "Mozilla Firefox에서 PDF를 sPDF로 열기",
+    }
+    states = {}
+    checks = {}
+    for browser, label in labels.items():
+        states[browser] = browser_external_pdf_enabled(browser)
+        check = QCheckBox(label)
+        check.setChecked(states[browser])
+        checks[browser] = check
+        layout.addWidget(check)
+
+    note = QLabel(
+        "브라우저의 내장 PDF 뷰어 대신 Windows 기본 앱을 사용합니다. "
+        "적용 후 브라우저를 완전히 종료했다 다시 실행하세요. Firefox는 "
+        "웹페이지에 삽입된 PDF를 계속 브라우저에 표시할 수 있습니다.\n\n"
+        "이 설정은 사용자별 브라우저 정책을 사용하므로 브라우저에 "
+        "'조직에서 관리'가 표시될 수 있습니다.")
+    note.setWordWrap(True)
+    layout.addSpacing(6)
+    layout.addWidget(note)
+
+    buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Close)
+    buttons.button(QDialogButtonBox.Save).setText("적용")
+    buttons.button(QDialogButtonBox.Close).setText("닫기")
+    layout.addWidget(buttons)
+
+    def _open_defaults():
+        if not open_default_apps_settings():
+            QMessageBox.warning(
+                dialog, "설정 열기 실패",
+                "설정 화면을 열지 못했습니다.\n"
+                "Windows 설정 → 앱 → 기본 앱에서 직접 변경하세요.")
+
+    def _apply_browser_settings():
+        changed = []
+        applied = []
+        try:
+            for browser, check in checks.items():
+                enabled = check.isChecked()
+                if enabled != states[browser]:
+                    set_browser_external_pdf(browser, enabled)
+                    applied.append(browser)
+                    changed.append(labels[browser].split("에서", 1)[0])
+        except (OSError, ValueError) as e:
+            # 일부 브라우저만 바뀐 채 남지 않도록 이번 적용분을 되돌린다.
+            for browser in reversed(applied):
+                try:
+                    set_browser_external_pdf(browser, states[browser])
+                except OSError:
+                    pass
+            QMessageBox.critical(
+                dialog, "브라우저 설정 실패",
+                "PDF 열기 설정을 변경하지 못했습니다.\n\n%s" % e)
+            return
+        if changed:
+            QMessageBox.information(
+                dialog, "브라우저 설정 완료",
+                "%s 설정을 변경했습니다.\n"
+                "브라우저를 완전히 종료한 뒤 다시 실행하세요."
+                % ", ".join(changed))
+        dialog.accept()
+
+    defaults.clicked.connect(lambda _checked=False: _open_defaults())
+    buttons.button(QDialogButtonBox.Save).clicked.connect(
+        lambda _checked=False: _apply_browser_settings())
+    buttons.rejected.connect(dialog.reject)
+    dialog.exec_()
 
 
 _TAB_MIME = "application/x-spdf-tab"
@@ -431,7 +467,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
         h = self.menuBar().addMenu("도움말(&H)")
         self._act(h, "사용법", "F1", self.show_help)
-        self._act(h, "PDF 기본 프로그램 / Edge 설정...", None,
+        self._act(h, "PDF 기본 프로그램 / 브라우저 설정...", None,
                   self.check_default_app)
         self._act(h, "오픈소스 라이선스", None, self.show_licenses)
         self._act(h, "정보", None, self.show_about)
@@ -803,7 +839,7 @@ class AppWindow(QMainWindow):
         h = mb.addMenu("도움말(&H)")
         h.addAction(_make_action(self, "사용법", "F1", self._shell_help))
         h.addAction(_make_action(
-            self, "PDF 기본 프로그램 / Edge 설정...", None,
+            self, "PDF 기본 프로그램 / 브라우저 설정...", None,
             lambda: _show_default_app_settings(self)))
         h.addAction(_make_action(self, "오픈소스 라이선스", None,
                                  lambda: show_licenses(self)))

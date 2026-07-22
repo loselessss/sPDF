@@ -52,7 +52,7 @@ class _FakeWinreg(types.ModuleType):
             raise FileNotFoundError(name)
 
 
-class EdgeExternalPdfSettingTests(unittest.TestCase):
+class BrowserExternalPdfSettingTests(unittest.TestCase):
     def setUp(self):
         self.winreg = _FakeWinreg()
         self.platform = patch.object(sys, "platform", "win32")
@@ -64,18 +64,40 @@ class EdgeExternalPdfSettingTests(unittest.TestCase):
         self.modules.stop()
         self.platform.stop()
 
-    def test_enable_and_disable_current_user_edge_policy(self):
-        self.assertFalse(defaultapp.edge_external_pdf_enabled())
-
-        defaultapp.set_edge_external_pdf(True)
-        self.assertTrue(defaultapp.edge_external_pdf_enabled())
-
-        defaultapp.set_edge_external_pdf(False)
-        self.assertFalse(defaultapp.edge_external_pdf_enabled())
+    def test_enable_and_disable_each_browser_policy(self):
+        expected = {
+            "edge": (r"Software\Policies\Microsoft\Edge",
+                     "AlwaysOpenPdfExternally"),
+            "chrome": (r"Software\Policies\Google\Chrome",
+                       "AlwaysOpenPdfExternally"),
+            "firefox": (r"Software\Policies\Mozilla\Firefox",
+                        "DisableBuiltinPDFViewer"),
+        }
+        for browser, (key_path, value_name) in expected.items():
+            with self.subTest(browser=browser):
+                self.assertFalse(
+                    defaultapp.browser_external_pdf_enabled(browser))
+                defaultapp.set_browser_external_pdf(browser, True)
+                self.assertTrue(
+                    defaultapp.browser_external_pdf_enabled(browser))
+                self.assertEqual(
+                    self.winreg.values[key_path][value_name],
+                    (1, self.winreg.REG_DWORD))
+                defaultapp.set_browser_external_pdf(browser, False)
+                self.assertFalse(
+                    defaultapp.browser_external_pdf_enabled(browser))
 
     def test_disabling_missing_policy_is_safe(self):
-        defaultapp.set_edge_external_pdf(False)
-        self.assertFalse(defaultapp.edge_external_pdf_enabled())
+        defaultapp.set_browser_external_pdf("chrome", False)
+        self.assertFalse(defaultapp.browser_external_pdf_enabled("chrome"))
+
+    def test_unknown_browser_is_rejected(self):
+        with self.assertRaises(ValueError):
+            defaultapp.set_browser_external_pdf("unknown", True)
+
+    def test_edge_compatibility_api_uses_edge_policy(self):
+        defaultapp.set_edge_external_pdf(True)
+        self.assertTrue(defaultapp.edge_external_pdf_enabled())
 
 
 if __name__ == "__main__":

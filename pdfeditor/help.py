@@ -17,7 +17,7 @@ HELP_HTML = """
 <table cellpadding="4">
 <tr><td><b>Ctrl+O</b> / <b>Ctrl+T</b></td><td>PDF 열기 — 새 <b>탭</b>으로</td></tr>
 <tr><td><b>Ctrl+Shift+N</b></td><td>새 sPDF 창</td></tr>
-<tr><td>도움말 메뉴</td><td><b>PDF 기본 프로그램 / Edge 설정</b> — 기본 앱 지정 및 Edge PDF 링크를 sPDF로 열기</td></tr>
+<tr><td>도움말 메뉴</td><td><b>PDF 기본 프로그램 / 브라우저 설정</b> — Edge·Chrome·Firefox의 PDF 링크를 sPDF로 열기</td></tr>
 <tr><td><b>Ctrl+S</b></td><td>저장 (원본은 <code>.bak</code>으로 자동 백업)</td></tr>
 <tr><td><b>Ctrl+Shift+S</b></td><td>다른 이름으로 저장</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>탭 닫기</td></tr>
