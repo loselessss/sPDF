@@ -53,6 +53,13 @@ ZOOM_MIN, ZOOM_MAX = 1.0, 6.0
 # 렌더가 낭비다 — 긴 변 2000px이면 축소 후에도 여유가 있다.
 VL_TARGET_LONG_PX = 2000.0
 
+# RapidOCR의 검출기는 큰 입력을 내부에서 다시 줄인다. 5100px 페이지를 한 번에
+# 넣으면 저해상도 작은 글씨와 2단 논문의 글자가 너무 작아지므로, 세로 구간과
+# 감지된 단을 겹쳐 잘라 인식한다. 겹침은 경계에 걸린 줄을 온전히 잡기 위함.
+OCR_TILE_SIZE = 2200
+OCR_TILE_OVERLAP = 200
+OCR_TILE_TRIGGER = 3000
+
 
 def _page_zoom(rect, target=TARGET_LONG_PX):
     long_pt = max(rect.width, rect.height)
@@ -254,7 +261,7 @@ def _build_rapidocr():
 
 
 def _preprocess(img_rgb):
-    """OCR 전처리 — 기울기 보정(deskew) + 언샤프 마스크(sharpen).
+    """OCR 전처리 — 기울기·저대비 보정 + 언샤프 마스크.
 
     실측(영수증 6배 렌더): 샤픈이 인식률을 21개 토큰 중 20→21로 올렸고,
     deskew는 똑바른 문서엔 무해(0도면 원본 그대로), 기울어진 스캔에서 효과.
@@ -286,16 +293,163 @@ def _preprocess(img_rgb):
             img = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC,
                                  borderMode=cv2.BORDER_REPLICATE)
 
+    # --- low contrast: 빛바랜 스캔만 국소 명암 보정 ---
+    # 깨끗한 디지털 PDF까지 CLAHE를 거치면 획 가장자리가 거칠어질 수 있어,
+    # 밝기 범위가 좁은 경우에만 L 채널을 완만하게 늘린다.
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    p02, p98 = np.percentile(gray, (2, 98))
+    clean_extremes = int(gray.min()) < 40 and int(gray.max()) > 245
+    if p98 - p02 < 110 and not clean_extremes and gray.std() > 3:
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        lch, ach, bch = cv2.split(lab)
+        lch = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8)).apply(lch)
+        img = cv2.cvtColor(cv2.merge((lch, ach, bch)), cv2.COLOR_LAB2RGB)
+
     # --- sharpen: 언샤프 마스크 ---
     blur = cv2.GaussianBlur(img, (0, 0), 3)
     img = cv2.addWeighted(img, 1.5, blur, -0.5, 0)
     return img
 
 
-def _recognize(engine, img_rgb, zoom):
+def _otsu_threshold(gray):
+    """OpenCV 없이도 단 판별 테스트가 가능하도록 작은 Otsu 구현을 둔다."""
+    import numpy as np
+    values = np.asarray(gray, dtype=np.uint8)
+    hist = np.bincount(values.ravel(), minlength=256).astype(np.float64)
+    total = hist.sum()
+    if total == 0:
+        return 0
+    weight_bg = np.cumsum(hist)
+    weight_fg = total - weight_bg
+    sum_bg = np.cumsum(hist * np.arange(256))
+    sum_total = sum_bg[-1]
+    valid = (weight_bg > 0) & (weight_fg > 0)
+    score = np.zeros(256, dtype=np.float64)
+    mean_bg = np.zeros(256, dtype=np.float64)
+    mean_fg = np.zeros(256, dtype=np.float64)
+    mean_bg[valid] = sum_bg[valid] / weight_bg[valid]
+    mean_fg[valid] = (sum_total - sum_bg[valid]) / weight_fg[valid]
+    score[valid] = weight_bg[valid] * weight_fg[valid] * \
+        (mean_bg[valid] - mean_fg[valid]) ** 2
+    return int(np.argmax(score))
+
+
+def _find_column_gutter(img_rgb, min_width=1600):
+    """가운데의 지속적인 세로 공백을 찾아 2단 분할 x 좌표를 반환한다."""
+    import numpy as np
+    h, w = img_rgb.shape[:2]
+    if w < min_width or h < 100:
+        return None
+    step = max(1, h // 1200)
+    sample = img_rgb[::step]
+    if sample.ndim == 3:
+        gray = sample[..., :3].mean(axis=2).astype(np.uint8)
+    else:
+        gray = sample.astype(np.uint8)
+    if int(gray.min()) == int(gray.max()):
+        return None
+    threshold = _otsu_threshold(gray)
+    ink = (gray <= threshold).mean(axis=0)
+    smooth_n = max(7, w // 100)
+    kernel = np.ones(smooth_n, dtype=np.float64) / smooth_n
+    smooth = np.convolve(ink, kernel, mode="same")
+
+    c0, c1 = int(w * 0.35), int(w * 0.65)
+    sides = np.concatenate((smooth[int(w * 0.12):c0],
+                            smooth[c1:int(w * 0.88)]))
+    baseline = float(np.median(sides)) if len(sides) else 0.0
+    if baseline < 0.002:
+        return None
+    split = c0 + int(np.argmin(smooth[c0:c1]))
+    valley = float(smooth[split])
+    if valley > min(0.03, baseline * 0.45):
+        return None
+    return split
+
+
+def _tile_starts(length, size=OCR_TILE_SIZE, overlap=OCR_TILE_OVERLAP):
+    """끝 조각이 지나치게 작지 않도록 마지막 타일을 끝에 맞춘다."""
+    import math
+    if length <= size:
+        return [0]
+    count = max(2, int(math.ceil((length - overlap) /
+                                 max(1, size - overlap))))
+    last = float(length - size)
+    return [int(round(last * i / (count - 1))) for i in range(count)]
+
+
+def _box_iou(a, b):
+    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+    x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+    if inter <= 0:
+        return 0.0
+    aa = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    ab = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+    return inter / max(1e-9, aa + ab - inter)
+
+
+def _merge_ocr_items(items):
+    """겹친 타일에서 같은 줄을 두 번 잡은 결과를 하나로 합친다."""
+    merged = []
+    for item in items:
+        text = " ".join(str(item[4]).split())
+        duplicate = None
+        for i, old in enumerate(merged):
+            old_text = " ".join(str(old[4]).split())
+            if text == old_text and _box_iou(item, old) >= 0.25:
+                duplicate = i
+                break
+        if duplicate is None:
+            merged.append(item)
+            continue
+        old = merged[duplicate]
+        old_area = max(0.0, old[2] - old[0]) * max(0.0, old[3] - old[1])
+        new_area = max(0.0, item[2] - item[0]) * max(0.0, item[3] - item[1])
+        if new_area > old_area:
+            merged[duplicate] = item
+    return merged
+
+
+def _recognize_tiled(engine, img_rgb, tile_size=OCR_TILE_SIZE,
+                     overlap=OCR_TILE_OVERLAP, trigger=OCR_TILE_TRIGGER):
+    """긴 페이지와 2단 문서를 확대 효과가 있는 겹친 조각으로 인식한다."""
+    h, w = img_rgb.shape[:2]
+    gutter = _find_column_gutter(img_rgb)
+    if gutter is None:
+        x_ranges = [(0, w)]
+    else:
+        pad = min(overlap, max(20, w // 20))
+        x_ranges = [(0, min(w, gutter + pad)),
+                    (max(0, gutter - pad), w)]
+    y_starts = _tile_starts(h, tile_size, overlap) if h > trigger else [0]
+    if gutter is None and len(y_starts) == 1:
+        return engine.recognize(img_rgb)
+
+    found = []
+    for x0, x1 in x_ranges:       # 왼쪽 단 전체 뒤 오른쪽 단 — 읽기 순서 유지
+        for y0 in y_starts:
+            y1 = min(h, y0 + tile_size)
+            tile = img_rgb[y0:y1, x0:x1]
+            for item in engine.recognize(tile):
+                if len(item) < 5 or not str(item[4]).strip():
+                    continue
+                found.append([
+                    max(0.0, float(item[0]) + x0),
+                    max(0.0, float(item[1]) + y0),
+                    min(float(w), float(item[2]) + x0),
+                    min(float(h), float(item[3]) + y0),
+                    str(item[4]),
+                ])
+    return _merge_ocr_items(found)
+
+
+def _recognize(engine, img_rgb, zoom, tiled=False):
     """엔진 실행 후 픽셀 좌표를 PDF 좌표(pt)로 되돌린다."""
+    raw = _recognize_tiled(engine, img_rgb) if tiled \
+        else engine.recognize(img_rgb)
     return [[it[0] / zoom, it[1] / zoom, it[2] / zoom, it[3] / zoom, it[4]]
-            for it in engine.recognize(img_rgb)]
+            for it in raw]
 
 
 def main():
@@ -335,7 +489,8 @@ def main():
                     .reshape(pix.height, pix.width, 3)
                 if job.get("preprocess", True):
                     img = _preprocess(img)
-                items = _recognize(ocr, img, zoom)
+                items = _recognize(
+                    ocr, img, zoom, tiled=(engine == "rapidocr"))
                 del pix, img
                 _emit({"type": "page", "page": pno, "items": items})
                 _emit({"type": "progress", "done": i + 1, "total": len(pages)})
