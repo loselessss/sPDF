@@ -1,29 +1,29 @@
 @echo off
 chcp 65001 >nul
-REM sPDF 설치 파일 빌드 — Inno Setup으로 Output\sPDF_Setup_X.X.X.exe 생성
-REM 사전: build_exe.bat 를 먼저 실행해 dist\sPDF 가 있어야 함
+REM Build Output\sPDF_Setup_X.X.X.exe with Inno Setup.
+REM Prerequisite: run build_exe.bat first to create dist\sPDF.
 
 if not exist dist\sPDF\sPDF.exe (
-  echo dist\sPDF\sPDF.exe 가 없습니다. 먼저 build_exe.bat 를 실행하세요.
+  echo dist\sPDF\sPDF.exe is missing. Run build_exe.bat first.
   exit /b 1
 )
 if not exist dist\sPDF-ocr\spdf-ocr.exe (
-  echo dist\sPDF-ocr\spdf-ocr.exe 가 없습니다. 먼저 build_exe.bat 를 실행하세요.
+  echo dist\sPDF-ocr\spdf-ocr.exe is missing. Run build_exe.bat first.
   exit /b 1
 )
 
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if not exist %ISCC% (
-  echo Inno Setup 6 을 찾을 수 없습니다: %ISCC%
-  echo https://jrsoftware.org/isdl.php 에서 설치하세요.
+  echo Inno Setup 6 was not found: %ISCC%
+  echo Install it from https://jrsoftware.org/isdl.php
   exit /b 1
 )
 
 %ISCC% installer.iss || goto :err
 echo.
-echo 완료: Output\sPDF_Setup_*.exe
+echo Complete: Output\sPDF_Setup_*.exe
 goto :eof
 
 :err
-echo *** 설치 파일 빌드 실패 ***
+echo *** Installer build failed ***
 exit /b 1
