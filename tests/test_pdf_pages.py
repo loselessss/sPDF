@@ -27,6 +27,23 @@ def _page_texts(path):
 
 
 class PdfPageOperationTests(unittest.TestCase):
+    def test_snapshot_reopens_as_dirty_transfer_document_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td) / "source.pdf"
+            _make_pdf(source, ["before"])
+            original = str(source)
+            doc = Document(original)
+            try:
+                doc.rotate_page(0, 90)
+                moved = Document.from_snapshot(original, doc.snapshot())
+                try:
+                    self.assertEqual(moved.path, original)
+                    self.assertEqual(moved._doc[0].rotation, 90)
+                finally:
+                    moved.close()
+            finally:
+                doc.close()
+
     def test_insert_pdf_preserves_selected_file_order(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

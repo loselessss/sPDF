@@ -24,6 +24,15 @@ class Document:
         self._password = password
         self._doc = self._open(path, password)
 
+    @classmethod
+    def from_snapshot(cls, path, data):
+        """다른 프로세스에서 받은 현재 편집 상태를 원래 경로의 문서로 연다."""
+        document = cls.__new__(cls)
+        document.path = path
+        document._password = None
+        document._doc = fitz.open("pdf", data)
+        return document
+
     @staticmethod
     def _open(path, password):
         doc = fitz.open(path)

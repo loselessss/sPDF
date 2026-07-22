@@ -1,4 +1,4 @@
-"""AppWindow(셸) + DocumentTab — 탭 기반 다중 문서.
+"""AppWindow(셸) + DocumentTab — 탭 기반 다중 문서/창.
 
 구조: 문서 하나 = DocumentTab(QMainWindow, 믹스인 전부). 바깥 AppWindow가
 탭들을 QTabWidget에 담고, 활성 탭의 메뉴바를 자기 창에 reparent한다(믹스인은
@@ -6,13 +6,18 @@
 문서가 하나도 없으면 시작 페이지를 보여준다.
 """
 
+import json
 import os
+import tempfile
+import uuid
 
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import QMimeData, Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtGui import QDrag
 from PyQt5.QtWidgets import (
     QAction, QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListWidget, QMainWindow, QMenuBar, QMessageBox, QProgressDialog,
-    QPushButton, QStackedWidget, QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QPushButton, QStackedWidget, QTabBar, QTabWidget, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from . import settings
@@ -35,6 +40,157 @@ def _make_action(parent, text, shortcut, slot):
         a.setShortcut(shortcut)
     a.triggered.connect(lambda _checked=False, s=slot: s())
     return a
+
+
+_TAB_MIME = "application/x-spdf-tab"
+_dragged_tabs = {}
+
+
+def _decode_tab_drag(mime):
+    if not mime.hasFormat(_TAB_MIME):
+        return None
+    try:
+        return json.loads(bytes(mime.data(_TAB_MIME)).decode("utf-8"))
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return None
+
+
+class TransferTabBar(QTabBar):
+    """창 안 재정렬은 Qt에 맡기고, 탭 막대 밖으로 나가면 창 간 드래그한다."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self._pressed_tab = None
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            i = self.tabAt(ev.pos())
+            self._pressed_tab = self.parentWidget().widget(i) if i >= 0 else None
+        super().mousePressEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        super().mouseReleaseEvent(ev)
+        self._pressed_tab = None
+
+    def mouseMoveEvent(self, ev):
+        tab = self._pressed_tab
+        if tab is not None and ev.buttons() & Qt.LeftButton and \
+                not self.rect().adjusted(-10, -10, 10, 10).contains(ev.pos()):
+            self._pressed_tab = None
+            self._start_transfer(tab)
+            return
+        super().mouseMoveEvent(ev)
+
+    def _start_transfer(self, tab):
+        shell = self.window()
+        if not isinstance(shell, AppWindow) or shell._tabs.indexOf(tab) < 0 or \
+                tab.doc is None:
+            return
+
+        token = uuid.uuid4().hex
+        snapshot_path = None
+        if tab._dirty:
+            try:
+                fd, snapshot_path = tempfile.mkstemp(
+                    prefix="spdf-tab-", suffix=".pdf")
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(tab.doc.snapshot())
+            except Exception as e:
+                if snapshot_path and os.path.exists(snapshot_path):
+                    os.remove(snapshot_path)
+                tab.statusBar().showMessage(
+                    "탭 이동용 임시 저장에 실패했습니다: %s" % e, 5000)
+                return
+
+        payload = {
+            "pid": os.getpid(),
+            "token": token,
+            "path": tab.doc.path,
+            "dirty": bool(tab._dirty),
+            "snapshot": snapshot_path,
+        }
+        mime = QMimeData()
+        mime.setData(_TAB_MIME, json.dumps(payload).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        i = shell._tabs.indexOf(tab)
+        if i >= 0:
+            drag.setPixmap(self.grab(self.tabRect(i)))
+
+        _dragged_tabs[token] = (shell, tab)
+        try:
+            result = drag.exec_(Qt.MoveAction)
+        finally:
+            _dragged_tabs.pop(token, None)
+
+        # 같은 프로세스면 dropEvent에서 이미 위젯을 떼어 대상 창에 붙인다.
+        # 아직 원래 창에 남아 있으면 다른 sPDF 프로세스가 경로를 받은 경우다.
+        moved_to_external_process = result == Qt.MoveAction and \
+            shell._tabs.indexOf(tab) >= 0
+        if moved_to_external_process:
+            shell._finish_external_tab_move(tab)
+        elif snapshot_path and os.path.exists(snapshot_path):
+            # 같은 프로세스 이동이나 취소에서는 임시본을 받을 프로세스가 없다.
+            os.remove(snapshot_path)
+
+    def dragEnterEvent(self, ev):
+        if self._can_accept(ev.mimeData()):
+            ev.setDropAction(Qt.MoveAction)
+            ev.accept()
+        else:
+            ev.ignore()
+
+    def dragMoveEvent(self, ev):
+        if self._can_accept(ev.mimeData()):
+            ev.setDropAction(Qt.MoveAction)
+            ev.accept()
+        else:
+            ev.ignore()
+
+    def dropEvent(self, ev):
+        payload = _decode_tab_drag(ev.mimeData())
+        if payload is None:
+            ev.ignore()
+            return
+
+        index = self.tabAt(ev.pos())
+        if index < 0:
+            index = self.count()
+        elif ev.pos().x() > self.tabRect(index).center().x():
+            index += 1
+
+        if self.window()._receive_tab_drop(payload, index):
+            ev.setDropAction(Qt.MoveAction)
+            ev.accept()
+        else:
+            ev.ignore()
+
+    def _can_accept(self, mime):
+        payload = _decode_tab_drag(mime)
+        if not payload or not payload.get("path"):
+            return False
+        if payload.get("pid") == os.getpid():
+            entry = _dragged_tabs.get(payload.get("token"))
+            return entry is not None and entry[0] is not self.window()
+        if not os.path.isfile(payload["path"]):
+            return False
+        if not payload.get("dirty"):
+            return True
+        snapshot = payload.get("snapshot")
+        if not snapshot or not self._is_transfer_snapshot(snapshot):
+            return False
+        return self.window()._find_open_tab(payload["path"]) is None
+
+    @staticmethod
+    def _is_transfer_snapshot(path):
+        try:
+            full = os.path.abspath(path)
+            return os.path.dirname(full) == os.path.abspath(tempfile.gettempdir()) \
+                and os.path.basename(full).startswith("spdf-tab-") \
+                and full.lower().endswith(".pdf") and os.path.isfile(full)
+        except (TypeError, ValueError):
+            return False
 
 
 # ======================================================================
@@ -146,8 +302,10 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
     def _build_menus(self):
         m = self.menuBar().addMenu("파일(&F)")
-        self._act(m, "열기...", "Ctrl+O", self._shell.open_dialog)
-        self._act(m, "새 탭", "Ctrl+T", self._shell.open_dialog)
+        self._act(m, "열기...", "Ctrl+O", lambda: self._shell.open_dialog())
+        self._act(m, "새 탭", "Ctrl+T", lambda: self._shell.open_dialog())
+        self._act(m, "새 창", "Ctrl+Shift+N",
+                  lambda: new_window(force_new=True))
         self._recent_menu = m.addMenu("최근 파일")
         self._recent_menu.setToolTipsVisible(True)
         self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
@@ -159,7 +317,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._act(m, "다른 이름으로 저장...", "Ctrl+Shift+S", self.save_as_dialog)
         m.addSeparator()
         self._act(m, "탭 닫기", "Ctrl+W", lambda: self._shell.close_tab(self))
-        self._act(m, "종료", "Ctrl+Q", self._shell.close)
+        self._act(m, "종료", "Ctrl+Q", lambda: self._shell.close())
 
         e = self.menuBar().addMenu("편집(&E)")
         self._undo_act = self._act(e, "실행 취소", "Ctrl+Z", self.undo)
@@ -314,6 +472,24 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                 QMessageBox.critical(self, "열기 실패", "파일을 열 수 없습니다.\n\n%s" % e)
                 return
 
+        self._set_document(doc, path)
+
+    def open_snapshot(self, data, original_path):
+        """다른 실행 창의 미저장 스냅샷을 원래 파일의 dirty 탭으로 연다."""
+        from .core import Document
+        try:
+            doc = Document.from_snapshot(original_path, data)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "탭 이동 실패", "편집 중인 문서를 옮길 수 없습니다.\n\n%s" % e)
+            return False
+        self._set_document(doc, original_path)
+        self._dirty = True
+        self._update_title()
+        return True
+
+    def _set_document(self, doc, path):
+        """파일/전송 스냅샷에 공통인 문서 탭 초기화를 한곳에서 수행한다."""
         self.doc = doc
         self.page_index = 0
         self.thumbs.reset_pages(doc.page_count)
@@ -556,6 +732,7 @@ class AppWindow(QMainWindow):
         self._start_page.back_to_doc.connect(self._show_tabs_if_any)
 
         self._tabs = QTabWidget()
+        self._tabs.setTabBar(TransferTabBar(self._tabs))
         self._tabs.setTabsClosable(True)
         self._tabs.setMovable(True)
         self._tabs.setDocumentMode(True)
@@ -579,6 +756,8 @@ class AppWindow(QMainWindow):
         m = mb.addMenu("파일(&F)")
         m.addAction(_make_action(self, "열기...", "Ctrl+O", self.open_dialog))
         m.addAction(_make_action(self, "새 탭", "Ctrl+T", self.open_dialog))
+        m.addAction(_make_action(
+            self, "새 창", "Ctrl+Shift+N", lambda: new_window(force_new=True)))
         m.addSeparator()
         m.addAction(_make_action(self, "종료", "Ctrl+Q", self.close))
         h = mb.addMenu("도움말(&H)")
@@ -632,22 +811,52 @@ class AppWindow(QMainWindow):
 
     def open_in_tab(self, path):
         """파일을 탭으로 연다. 이미 열려 있으면 그 탭으로 전환(중복 방지)."""
-        target = os.path.normcase(os.path.abspath(path))
-        for i in range(self._tabs.count()):
-            t = self._tabs.widget(i)
-            if t.doc is not None and \
-                    os.path.normcase(os.path.abspath(t.doc.path)) == target:
-                self._tabs.setCurrentIndex(i)
-                self._show_tabs()
-                return t
+        existing = self._find_open_tab(path)
+        if existing is not None:
+            self._tabs.setCurrentWidget(existing)
+            self._show_tabs()
+            return existing
         tab = DocumentTab(self)
-        tab.title_changed.connect(lambda t=tab: self._sync_tab_title(t))
+        self._connect_tab(tab)
         idx = self._tabs.addTab(tab, "불러오는 중...")
         self._tabs.setCurrentIndex(idx)
         self._show_tabs()
         # 레이아웃이 끝난 뒤 열어야 '창 너비 맞춤' 배율이 정확하다.
         QTimer.singleShot(0, lambda: self._load_into(tab, path))
         return tab
+
+    def _find_open_tab(self, path):
+        target = os.path.normcase(os.path.abspath(path))
+        for i in range(self._tabs.count()):
+            tab = self._tabs.widget(i)
+            if tab.doc is not None and \
+                    os.path.normcase(os.path.abspath(tab.doc.path)) == target:
+                return tab
+        return None
+
+    def open_snapshot_in_tab(self, snapshot_path, original_path):
+        """별도 sPDF 프로세스가 넘긴 미저장 PDF를 읽고 임시 파일을 회수한다."""
+        if self._find_open_tab(original_path) is not None:
+            return False
+        try:
+            with open(snapshot_path, "rb") as stream:
+                data = stream.read()
+            os.remove(snapshot_path)
+        except OSError as e:
+            QMessageBox.critical(
+                self, "탭 이동 실패", "임시 문서를 읽을 수 없습니다.\n\n%s" % e)
+            return False
+
+        tab = DocumentTab(self)
+        self._connect_tab(tab)
+        index = self._tabs.addTab(tab, "옮기는 중...")
+        self._tabs.setCurrentIndex(index)
+        self._show_tabs()
+        if not tab.open_snapshot(data, original_path):
+            self._remove_tab(tab)
+            return False
+        self._sync_tab_title(tab)
+        return True
 
     def _load_into(self, tab, path):
         tab.open_path(path)
@@ -657,6 +866,69 @@ class AppWindow(QMainWindow):
             self._sync_tab_title(tab)
 
     # --- 탭 제목/전환/닫기 ---------------------------------------------
+
+    def _connect_tab(self, tab):
+        """이동 전 창에 남은 제목 신호를 끊고 현재 셸에 다시 연결한다."""
+        old_slot = getattr(tab, "_shell_title_slot", None)
+        if old_slot is not None:
+            try:
+                tab.title_changed.disconnect(old_slot)
+            except TypeError:
+                pass
+        tab._shell = self
+        slot = lambda t=tab, shell=self: shell._sync_tab_title(t)
+        tab._shell_title_slot = slot
+        tab.title_changed.connect(slot)
+
+    def _adopt_tab(self, source, tab, index):
+        """같은 프로세스의 다른 창에서 문서 위젯과 편집 상태를 그대로 받는다."""
+        source_index = source._tabs.indexOf(tab)
+        if source_index < 0:
+            return
+        title = tab.tab_title()
+        tooltip = tab.doc.path if tab.doc else ""
+        source._tabs.removeTab(source_index)
+
+        self._connect_tab(tab)
+        index = max(0, min(index, self._tabs.count()))
+        new_index = self._tabs.insertTab(index, tab, title)
+        self._tabs.setTabToolTip(new_index, tooltip)
+        self._tabs.setCurrentIndex(new_index)
+        self._show_tabs()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        source._close_if_empty_after_move()
+
+    def _receive_tab_drop(self, payload, index):
+        """탭 막대와 빈 창 시작 화면이 함께 쓰는 창 간 이동 처리."""
+        if not payload or not payload.get("path"):
+            return False
+        entry = _dragged_tabs.get(payload.get("token")) \
+            if payload.get("pid") == os.getpid() else None
+        if entry is not None:
+            source, tab = entry
+            if source is self:
+                return False
+            self._adopt_tab(source, tab, index)
+            return True
+        if payload.get("dirty"):
+            # 프로세스 경계를 넘으면 QWidget 대신 현재 PDF 스냅샷을 복원한다.
+            return self.open_snapshot_in_tab(
+                payload.get("snapshot"), payload.get("path"))
+        self.open_in_tab(payload.get("path"))
+        return True
+
+    def _finish_external_tab_move(self, tab):
+        """다른 프로세스가 저장된 파일을 받은 뒤 원본 탭 자원을 정리한다."""
+        self._remove_tab(tab)
+        self._close_if_empty_after_move()
+
+    def _close_if_empty_after_move(self):
+        if self._tabs.count() == 0:
+            # 드롭 이벤트/QDrag 중에 창을 파괴하면 Qt가 소스 객체를 다시
+            # 참조할 수 있으므로 이벤트 루프로 돌아간 뒤 닫는다.
+            QTimer.singleShot(0, self.close)
 
     def _sync_tab_title(self, tab):
         i = self._tabs.indexOf(tab)
@@ -705,13 +977,27 @@ class AppWindow(QMainWindow):
                 ev.ignore()
                 return
         super().closeEvent(ev)
+        if ev.isAccepted() and self in _app_windows:
+            _app_windows.remove(self)
 
     def dragEnterEvent(self, ev):
+        if self._tabs.tabBar()._can_accept(ev.mimeData()):
+            ev.setDropAction(Qt.MoveAction)
+            ev.accept()
+            return
         urls = ev.mimeData().urls()
         if urls and urls[0].toLocalFile().lower().endswith(".pdf"):
             ev.acceptProposedAction()
 
     def dropEvent(self, ev):
+        payload = _decode_tab_drag(ev.mimeData())
+        if payload is not None:
+            if self._receive_tab_drop(payload, self._tabs.count()):
+                ev.setDropAction(Qt.MoveAction)
+                ev.accept()
+            else:
+                ev.ignore()
+            return
         for url in ev.mimeData().urls():
             p = url.toLocalFile()
             if p.lower().endswith(".pdf"):
@@ -719,21 +1005,25 @@ class AppWindow(QMainWindow):
 
 
 # ======================================================================
-# 진입점 — 단일 AppWindow(탭 방식)
+# 진입점 — 여러 AppWindow가 탭을 서로 주고받을 수 있다
 # ======================================================================
 
-_app_window = None
+_app_windows = []
 
 
-def new_window(path=None):
-    """앱 창을 띄운다(하나만 유지). path가 있으면 탭으로 연다."""
-    global _app_window
-    if _app_window is None:
-        _app_window = AppWindow()
-        _app_window.show()
+def new_window(path=None, force_new=False):
+    """기본 창을 재사용하되, 요청하면 탭을 받을 새 창을 만든다."""
+    if force_new or not _app_windows:
+        window = AppWindow()
+        if _app_windows:
+            previous = _app_windows[-1]
+            window.move(previous.x() + 30, previous.y() + 30)
+        _app_windows.append(window)
+        window.show()
     else:
-        _app_window.raise_()
-        _app_window.activateWindow()
+        window = _app_windows[0]
+        window.raise_()
+        window.activateWindow()
     if path:
-        QTimer.singleShot(0, lambda: _app_window.open_in_tab(path))
-    return _app_window
+        QTimer.singleShot(0, lambda: window.open_in_tab(path))
+    return window
