@@ -372,6 +372,21 @@ class Document:
         # 옮길 때 한 칸 밀린다 — 사용자가 기대하는 최종 인덱스로 맞춘다.
         self._doc.move_page(src, dst + 1 if dst > src else dst)
 
+    def reorder_pages(self, order):
+        """현재 페이지를 ``order`` 순서로 재배열한다."""
+        order = list(order)
+        if sorted(order) != list(range(self.page_count)):
+            raise ValueError("페이지 순서는 모든 페이지를 정확히 한 번 포함해야 합니다.")
+        self._doc.select(order)
+
+    def delete_pages(self, indices):
+        """여러 페이지를 원래 인덱스 기준으로 한 번에 삭제한다."""
+        indices = sorted(set(indices), reverse=True)
+        if self.page_count - len(indices) < 1:
+            raise ValueError("문서에는 최소 한 페이지가 남아 있어야 합니다.")
+        for index in indices:
+            self._doc.delete_page(index)
+
     def insert_pdf(self, path, at=None, password=None):
         """다른 PDF를 통째로 끼워넣는다(병합). at=None이면 맨 뒤.
 

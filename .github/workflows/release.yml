@@ -1,0 +1,77 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: >-
+          python -m pip install PyQt5 PyMuPDF Pillow PyInstaller
+          rapidocr onnxruntime opencv-python-headless numpy
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        run: |
+          cmd /c build_exe.bat
+          cmd /c build_installer.bat
+
+      - name: Create checksums and latest alias
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          $installer = "Output\sPDF_Setup_$version.exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Installer was not created: $installer"
+          }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          "$hash  sPDF_Setup_$version.exe" |
+            Set-Content -Encoding ascii -LiteralPath "$installer.sha256"
+          $latestInstaller = "Output\sPDF_Setup_latest.exe"
+          Copy-Item -LiteralPath $installer -Destination $latestInstaller
+          "$hash  sPDF_Setup_latest.exe" |
+            Set-Content -Encoding ascii -LiteralPath "$latestInstaller.sha256"
+
+      - name: Preserve installer as workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sPDF-${{ github.ref_name }}-windows
+          path: |
+            Output/sPDF_Setup_*.exe
+            Output/sPDF_Setup_*.exe.sha256
+          compression-level: 0
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.TrimStart("v")
+          $installer = "Output\sPDF_Setup_$version.exe"
+          $latestInstaller = "Output\sPDF_Setup_latest.exe"
+          gh release create $tag $installer "$installer.sha256" `
+            $latestInstaller "$latestInstaller.sha256" `
+            --verify-tag --title "sPDF $version" --generate-notes

@@ -19,6 +19,12 @@ python run.py 파일.pdf   # PDF를 열면서 시작
 
 `run.pyw`는 콘솔 없이 더블클릭/탐색기 연동용.
 
+Windows 설치본은 [GitHub 최신 릴리스](https://github.com/loselessss/sPDF/releases/latest)
+에서 받을 수 있습니다. 설치된 앱은 시작 후 새 릴리스를 확인하며, 도움말 →
+**업데이트 확인**에서 수동으로 확인할 수도 있습니다. 앱 내부에서는 버전과
+정확히 일치하는 설치 파일만 내려받고 GitHub가 제공한 SHA-256을 검증한 뒤
+설치를 실행합니다.
+
 ## 설치 파일 빌드 (Windows)
 
 ```bat
@@ -33,6 +39,8 @@ build_installer.bat  REM Inno Setup  -> Output\sPDF_Setup_X.X.X.exe
   제외.
 - 버전은 `pdfeditor\meta.py`의 `APP_VERSION`과 `installer.iss`의
   `MyAppVersion`을 **함께** 맞출 것(자동 동기화 안 됨).
+- `vX.Y.Z` 태그를 푸시하면 GitHub Actions가 테스트와 Windows 빌드를 실행하고
+  `sPDF_Setup_X.Y.Z.exe`, 최신 별칭, SHA-256 파일을 GitHub Release에 게시한다.
 
 설치 시 "PDF 파일 '연결 프로그램' 목록에 sPDF 추가"를 선택하면 탐색기
 우클릭 → "연결 프로그램"에 나타나고, Windows '기본 앱'에서 sPDF를 기본
@@ -96,6 +104,7 @@ python paper_organizer.py
 - [x] **v1.5.1 OCR 엔진 명칭 개선** — OCR 설정의 모호한 '기본' 표현을 실제 엔진 이름인 RapidOCR로 통일
 - [x] **v1.5.2 Windows 빌드 출력 수정** — 빌드 배치 파일의 한글 인코딩 오해로 깨진 문구와 가짜 명령 오류가 출력되던 문제 해결
 - [x] **v1.5.3 즐겨찾기 도구** — 손 도구·텍스트 선택 도구 옆에서 현재 PDF를 바로 즐겨찾기에 추가하거나 해제
+- [x] **v1.6 페이지 구성 창** — 여러 페이지 묶음/한 장 이동, 외부 PDF 드롭 삽입, 복수 페이지 삭제를 별도 창에서 처리하고 모든 변경을 실행 취소
 - [ ] (예정) AI OCR 옵션 — Claude API (손글씨 등 최후 수단)
 
 ## 구조

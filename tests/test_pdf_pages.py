@@ -5,6 +5,7 @@ from pathlib import Path
 import fitz
 
 from pdfeditor.core import Document
+from pdfeditor.pages import page_order_after_move
 
 
 def _make_pdf(path, labels):
@@ -27,6 +28,30 @@ def _page_texts(path):
 
 
 class PdfPageOperationTests(unittest.TestCase):
+    def test_page_order_moves_single_page_between_pages(self):
+        order, selected = page_order_after_move(5, [0], 4)
+        self.assertEqual(order, [1, 2, 3, 0, 4])
+        self.assertEqual(selected, [3])
+
+    def test_page_order_moves_selected_pages_as_group(self):
+        order, selected = page_order_after_move(6, [1, 3], 6)
+        self.assertEqual(order, [0, 2, 4, 5, 1, 3])
+        self.assertEqual(selected, [4, 5])
+
+    def test_reorder_and_delete_pages(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source.pdf"
+            output = Path(temp) / "output.pdf"
+            _make_pdf(source, ["one", "two", "three", "four"])
+            document = Document(str(source))
+            try:
+                document.reorder_pages([2, 0, 3, 1])
+                document.delete_pages([1, 3])
+                document.extract_pages(range(document.page_count), str(output))
+            finally:
+                document.close()
+            self.assertEqual(_page_texts(output), ["three", "four"])
+
     def test_snapshot_reopens_as_dirty_transfer_document_path(self):
         with tempfile.TemporaryDirectory() as td:
             source = Path(td) / "source.pdf"

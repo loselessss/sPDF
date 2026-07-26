@@ -14,9 +14,9 @@ import uuid
 from PyQt5.QtCore import QMimeData, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QDrag
 from PyQt5.QtWidgets import (
-    QAction, QActionGroup, QCheckBox, QDialog, QDialogButtonBox, QDockWidget,
-    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QMainWindow, QMenuBar, QMessageBox, QProgressDialog, QPushButton,
+    QAction, QActionGroup, QApplication, QCheckBox, QDialog, QDialogButtonBox,
+    QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QMainWindow, QMenuBar, QMessageBox, QProgressDialog, QPushButton,
     QStackedWidget, QTabBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout,
     QWidget,
 )
@@ -29,6 +29,8 @@ from .ocr import OcrMixin
 from .pages import PagesMixin
 from .startpage import StartPage
 from .textsel import TextSelectMixin
+from .update_dialog import UpdateCheckWorker, UpdateDialog
+from .update_service import GitHubUpdateService, UpdateError
 from .viewer import ViewerMixin
 from .widgets import PageView, ThumbList
 
@@ -437,6 +439,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._act(e, "이전 찾기", "Shift+F3", self.search_prev)
 
         p = self.menuBar().addMenu("페이지(&P)")
+        self._act(p, "페이지 구성...", "Ctrl+Shift+P",
+                  self.show_page_organizer)
+        p.addSeparator()
         self._act(p, "오른쪽으로 회전", "Ctrl+]", self.rotate_page_cw)
         self._act(p, "왼쪽으로 회전", "Ctrl+[", self.rotate_page_ccw)
         self._act(p, "현재 페이지 삭제", "Ctrl+Delete", self.delete_current_page)
@@ -496,6 +501,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
         h = self.menuBar().addMenu("도움말(&H)")
         self._act(h, "사용법", "F1", self.show_help)
+        self._act(h, "업데이트 확인...", None,
+                  lambda: self._shell.check_for_updates(True))
         self._act(h, "PDF 기본 프로그램 / 브라우저 설정...", None,
                   self.check_default_app)
         self._act(h, "오픈소스 라이선스", None, self.show_licenses)
@@ -866,6 +873,9 @@ class AppWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.resize(1100, 800)
         self.setAcceptDrops(True)
+        self._update_service = GitHubUpdateService(APP_VERSION)
+        self._update_worker = None
+        self._available_update = None
 
         self._start_page = StartPage()
         self._start_page.open_file.connect(self.open_in_tab)
@@ -891,6 +901,10 @@ class AppWindow(QMainWindow):
         self._shell_menubar = self._build_shell_menu()
         self.setMenuBar(self._shell_menubar)
         self._show_start()
+        if not any(getattr(window, "_auto_update_started", False)
+                   for window in _app_windows):
+            self._auto_update_started = True
+            QTimer.singleShot(5000, lambda: self.check_for_updates(False))
 
     def _build_shell_menu(self):
         mb = QMenuBar(self)
@@ -903,6 +917,9 @@ class AppWindow(QMainWindow):
         m.addAction(_make_action(self, "종료", "Ctrl+Q", self.close))
         h = mb.addMenu("도움말(&H)")
         h.addAction(_make_action(self, "사용법", "F1", self._shell_help))
+        h.addAction(_make_action(
+            self, "업데이트 확인...", None,
+            lambda: self.check_for_updates(True)))
         h.addAction(_make_action(
             self, "PDF 기본 프로그램 / 브라우저 설정...", None,
             lambda: _show_default_app_settings(self)))
@@ -917,6 +934,83 @@ class AppWindow(QMainWindow):
 
     def _shell_about(self):
         QMessageBox.about(self, "정보", "%s %s" % (APP_NAME, APP_VERSION))
+
+    # --- GitHub Releases 업데이트 ------------------------------------
+
+    def check_for_updates(self, manual=True):
+        if self._update_worker is not None and self._update_worker.isRunning():
+            if manual:
+                self.statusBar().showMessage(
+                    "업데이트를 확인하고 있습니다…", 3000)
+            return
+        if manual:
+            self.statusBar().showMessage(
+                "GitHub에서 최신 버전을 확인하는 중입니다…")
+        worker = UpdateCheckWorker(self._update_service, self)
+        worker.completed.connect(
+            lambda update: self._update_check_completed(update, manual))
+        worker.failed.connect(
+            lambda message: self._update_check_failed(message, manual))
+        worker.finished.connect(self._update_check_finished)
+        self._update_worker = worker
+        worker.start()
+
+    def _update_check_completed(self, update, manual):
+        self.statusBar().clearMessage()
+        if update is None:
+            if manual:
+                QMessageBox.information(
+                    self, "업데이트 확인",
+                    "현재 sPDF %s가 최신 버전입니다." % APP_VERSION)
+            return
+        self._available_update = update
+        if manual:
+            self._show_available_update()
+        else:
+            answer = QMessageBox.question(
+                self, "sPDF 업데이트",
+                "sPDF %s 업데이트가 있습니다.\n자세히 볼까요?"
+                % update.version)
+            if answer == QMessageBox.Yes:
+                self._show_available_update()
+
+    def _update_check_failed(self, message, manual):
+        self.statusBar().clearMessage()
+        if manual:
+            QMessageBox.warning(self, "업데이트 확인 실패", message)
+
+    def _update_check_finished(self):
+        worker = self._update_worker
+        self._update_worker = None
+        if worker is not None:
+            worker.deleteLater()
+
+    def _show_available_update(self):
+        update = self._available_update
+        if update is None:
+            return
+        self._available_update = None
+        dialog = UpdateDialog(self._update_service, update, self)
+        dialog.install_requested.connect(self._launch_update_installer)
+        dialog.exec_()
+
+    def _launch_update_installer(self, path):
+        answer = QMessageBox.question(
+            self, "업데이트 설치",
+            "설치 프로그램을 실행합니다.\n"
+            "저장하지 않은 문서를 확인한 뒤 sPDF를 종료합니다. 계속할까요?")
+        if answer != QMessageBox.Yes:
+            return
+        for window in list(_app_windows):
+            for index in range(window._tabs.count()):
+                if not window._tabs.widget(index).maybe_save():
+                    return
+        try:
+            self._update_service.launch_installer(path)
+        except UpdateError as error:
+            QMessageBox.warning(self, "업데이트 실행 실패", str(error))
+            return
+        QApplication.instance().quit()
 
     # --- 화면 전환 -----------------------------------------------------
 
@@ -1121,6 +1215,10 @@ class AppWindow(QMainWindow):
                 ev.ignore()
                 return
         super().closeEvent(ev)
+        if ev.isAccepted() and self._update_worker is not None and \
+                self._update_worker.isRunning():
+            self._update_worker.requestInterruption()
+            self._update_worker.wait(1000)
         if ev.isAccepted() and self in _app_windows:
             _app_windows.remove(self)
 

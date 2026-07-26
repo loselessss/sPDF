@@ -10,6 +10,20 @@ from PyQt5.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox
 
 from .core import PasswordRequired
 from .page_ranges import page_group_label, parse_page_groups
+from .page_organizer import PageOrganizerDialog
+
+
+def page_order_after_move(page_count, selected, insertion_index):
+    """선택 페이지를 안정적으로 묶어 insertion_index 앞에 놓은 새 순서."""
+    selected = sorted(set(int(index) for index in selected))
+    if not selected or any(index < 0 or index >= page_count for index in selected):
+        raise ValueError("옮길 페이지가 올바르지 않습니다.")
+    insertion_index = max(0, min(int(insertion_index), page_count))
+    remaining = [index for index in range(page_count) if index not in selected]
+    adjusted = insertion_index - sum(index < insertion_index for index in selected)
+    adjusted = max(0, min(adjusted, len(remaining)))
+    order = remaining[:adjusted] + selected + remaining[adjusted:]
+    return order, list(range(adjusted, adjusted + len(selected)))
 
 
 class _MergeCancelled(Exception):
@@ -17,6 +31,95 @@ class _MergeCancelled(Exception):
 
 
 class PagesMixin:
+    def show_page_organizer(self):
+        if self.doc is None:
+            return
+        dialog = PageOrganizerDialog(self)
+        dialog.exec_()
+
+    def organizer_move_pages(self, rows, at):
+        if self.doc is None:
+            return None
+        try:
+            order, new_rows = page_order_after_move(
+                self.doc.page_count, rows, at)
+        except ValueError as error:
+            QMessageBox.warning(self, "페이지 이동", str(error))
+            return None
+        if order == list(range(self.doc.page_count)):
+            return new_rows
+        self._push_undo(structural=True)
+        self.doc.reorder_pages(order)
+        self._after_structure_changed(keep_page=new_rows[0])
+        self.mark_dirty()
+        self.statusBar().showMessage(
+            "%d개 페이지를 %d페이지 위치로 이동" %
+            (len(new_rows), new_rows[0] + 1), 3000)
+        return new_rows
+
+    def organizer_delete_pages(self, rows):
+        rows = sorted(set(rows))
+        self._push_undo(structural=True)
+        self.doc.delete_pages(rows)
+        keep = min(rows[0], self.doc.page_count - 1)
+        self._after_structure_changed(keep_page=keep)
+        self.mark_dirty()
+        self.statusBar().showMessage(
+            "%d개 페이지 삭제" % len(rows), 3000)
+        return keep
+
+    def organizer_insert_pdfs(self, paths, at):
+        if self.doc is None or not paths:
+            return 0
+        at = max(0, min(at, self.doc.page_count))
+        undo_before = list(self._undo_stack)
+        redo_before = list(self._redo_stack)
+        undo_structural_before = list(self._undo_structural)
+        redo_structural_before = list(self._redo_structural)
+        self._push_undo(structural=True)
+        snapshot = self._undo_stack[-1]
+        total = 0
+        try:
+            for path in paths:
+                password = None
+                while True:
+                    try:
+                        count = self.doc.insert_pdf(
+                            path, at=at + total, password=password)
+                        break
+                    except PasswordRequired:
+                        password, ok = QInputDialog.getText(
+                            self, "암호 필요",
+                            "%s 파일의 비밀번호를 입력하세요."
+                            % os.path.basename(path), QLineEdit.Password)
+                        if not ok:
+                            raise _MergeCancelled()
+                total += count
+        except _MergeCancelled:
+            self.doc.restore(snapshot)
+            self._undo_stack = undo_before
+            self._redo_stack = redo_before
+            self._undo_structural = undo_structural_before
+            self._redo_structural = redo_structural_before
+            self._update_edit_actions()
+            return 0
+        except Exception as error:
+            self.doc.restore(snapshot)
+            self._undo_stack = undo_before
+            self._redo_stack = redo_before
+            self._undo_structural = undo_structural_before
+            self._redo_structural = redo_structural_before
+            self._update_edit_actions()
+            QMessageBox.critical(
+                self, "PDF 추가 실패",
+                "PDF를 추가할 수 없습니다.\n\n%s" % error)
+            return 0
+        self._after_structure_changed(keep_page=at)
+        self.mark_dirty()
+        self.statusBar().showMessage(
+            "%d개 파일에서 %d페이지 추가" % (len(paths), total), 5000)
+        return total
+
     # --- 회전 ----------------------------------------------------------
 
     def rotate_page_cw(self):
