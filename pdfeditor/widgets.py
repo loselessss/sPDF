@@ -17,14 +17,16 @@ SEARCH_CUR_COLOR = QColor(255, 120, 0, 110)
 EDIT_BOX_COLOR = QColor(0, 160, 90, 160)  # 편집 가능한 span 테두리(초록)
 
 
-def qimage_from_render(w, h, stride, samples):
+def qimage_from_render(w, h, stride, samples, device_pixel_ratio=1.0):
     """core.Document.render() 결과를 QImage로.
 
     copy()가 필요한 이유: samples는 PyMuPDF가 소유한 버퍼라 pixmap이
     해제되면 사라진다. QImage는 기본적으로 버퍼를 참조만 하므로 복사본을
     쥐고 있어야 나중에 그릴 때 깨지지 않는다.
     """
-    return QImage(samples, w, h, stride, QImage.Format_RGB888).copy()
+    image = QImage(samples, w, h, stride, QImage.Format_RGB888).copy()
+    image.setDevicePixelRatio(max(1.0, float(device_pixel_ratio)))
+    return image
 
 
 class PageCanvas(QWidget):
@@ -62,7 +64,13 @@ class PageCanvas(QWidget):
     def set_image(self, img, zoom):
         self._pix = QPixmap.fromImage(img)
         self.zoom = zoom
-        self.resize(self._pix.size())
+        ratio = max(1.0, self._pix.devicePixelRatio())
+        self.resize(
+            QSize(
+                round(self._pix.width() / ratio),
+                round(self._pix.height() / ratio),
+            )
+        )
         self.update()
 
     def clear(self):

@@ -47,6 +47,24 @@ class InteractionToolTests(unittest.TestCase):
         self.assertEqual(vbar.value(), 230)
         view.close()
 
+    def test_hidpi_render_keeps_logical_page_size(self):
+        from pdfeditor.widgets import PageCanvas, qimage_from_render
+
+        image = qimage_from_render(
+            4,
+            4,
+            12,
+            bytes([255] * 48),
+            device_pixel_ratio=2.0,
+        )
+        canvas = PageCanvas()
+        canvas.set_image(image, 1.0)
+
+        self.assertEqual(image.devicePixelRatio(), 2.0)
+        self.assertEqual(canvas.width(), 2)
+        self.assertEqual(canvas.height(), 2)
+        canvas.close()
+
 
 if __name__ == "__main__":
     unittest.main()

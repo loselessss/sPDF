@@ -45,10 +45,18 @@ class ViewerMixin:
         self._update_page_label()
 
     def _render_current(self):
-        key = (self.page_index, round(self.view.zoom, 3))
+        pixel_ratio = max(1.0, self.view.devicePixelRatioF())
+        key = (
+            self.page_index,
+            round(self.view.zoom, 3),
+            round(pixel_ratio, 2),
+        )
         img = self._cache.get(key)
         if img is None:
-            img = qimage_from_render(*self.doc.render(self.page_index, self.view.zoom))
+            img = qimage_from_render(
+                *self.doc.render(self.page_index, self.view.zoom * pixel_ratio),
+                device_pixel_ratio=pixel_ratio,
+            )
             self._cache[key] = img
         self.view.set_image(img)
 
@@ -122,7 +130,14 @@ class ViewerMixin:
                 continue
             pw, _ = self.doc.page_size(row)
             zoom = THUMB_W / pw if pw else 0.2
-            self.thumbs.set_thumb(row, qimage_from_render(*self.doc.render(row, zoom)))
+            pixel_ratio = max(1.0, self.thumbs.devicePixelRatioF())
+            self.thumbs.set_thumb(
+                row,
+                qimage_from_render(
+                    *self.doc.render(row, zoom * pixel_ratio),
+                    device_pixel_ratio=pixel_ratio,
+                ),
+            )
 
     def on_thumbnail_splitter_moved(self, _pos, index):
         """사용자가 놓은 썸네일 패널 너비를 잦은 디스크 쓰기 없이 기억한다."""
