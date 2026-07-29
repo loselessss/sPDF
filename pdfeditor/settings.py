@@ -6,6 +6,9 @@ import os
 PATH = os.path.expanduser("~/.spdf.json")
 _OLD_PATH = os.path.expanduser("~/.pdfeditor.json")  # 개명 전 설정 파일
 MAX_RECENT = 10
+DEFAULT_THUMBNAIL_WIDTH = 160
+MIN_THUMBNAIL_WIDTH = 96
+MAX_THUMBNAIL_WIDTH = 480
 
 
 def _load():
@@ -51,6 +54,24 @@ def remove_recent(path):
 def clear_recent():
     d = _load()
     d["recent"] = []
+    _save(d)
+
+
+# --- 문서 보기 ----------------------------------------------------------
+
+def thumbnail_width():
+    try:
+        width = int(_load().get("thumbnail_width", DEFAULT_THUMBNAIL_WIDTH))
+    except (TypeError, ValueError):
+        width = DEFAULT_THUMBNAIL_WIDTH
+    return max(MIN_THUMBNAIL_WIDTH, min(width, MAX_THUMBNAIL_WIDTH))
+
+
+def set_thumbnail_width(width):
+    width = max(MIN_THUMBNAIL_WIDTH,
+                min(int(width), MAX_THUMBNAIL_WIDTH))
+    d = _load()
+    d["thumbnail_width"] = width
     _save(d)
 
 

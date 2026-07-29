@@ -2,9 +2,13 @@
 
 from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPixmap
-from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QScrollArea, QWidget
+from PyQt5.QtWidgets import (
+    QAbstractItemView, QListWidget, QListWidgetItem, QScrollArea, QWidget,
+)
 
 THUMB_W = 120  # 썸네일 가로 픽셀
+THUMB_H = int(THUMB_W * 1.5)
+THUMB_ITEM_H = THUMB_H + 28
 
 # 오버레이 색 — 선택은 파랑, 검색은 노랑, 현재 검색 항목은 주황
 SEL_COLOR = QColor(0, 120, 215, 70)
@@ -279,9 +283,11 @@ class ThumbList(QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(THUMB_W + 40)
-        self.setIconSize(QSize(THUMB_W, int(THUMB_W * 1.5)))
+        self.setMinimumWidth(96)
+        self.setIconSize(QSize(THUMB_W, THUMB_H))
         self.setSpacing(4)
+        self.setUniformItemSizes(True)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setDragDropMode(QListWidget.InternalMove)
         self.currentRowChanged.connect(self._on_row)
         self._drag_src = None
@@ -309,6 +315,9 @@ class ThumbList(QListWidget):
         for i in range(count):
             it = QListWidgetItem("%d" % (i + 1))
             it.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
+            # 아직 렌더되지 않은 항목도 완성된 썸네일과 같은 높이를 가져야
+            # 전체 스크롤 범위와 보이는 행 계산이 중간에서 바뀌지 않는다.
+            it.setSizeHint(QSize(THUMB_W + 16, THUMB_ITEM_H))
             it.setData(Qt.UserRole, False)  # 렌더 완료 여부
             self.addItem(it)
 
@@ -316,14 +325,33 @@ class ThumbList(QListWidget):
         """현재 화면에 보이는 항목 행 번호 — 이 범위만 렌더하면 된다."""
         if self.count() == 0:
             return []
-        top = self.indexAt(self.viewport().rect().topLeft()).row()
-        bot = self.indexAt(self.viewport().rect().bottomLeft()).row()
+        top = self._row_near_viewport_edge(from_top=True)
+        bot = self._row_near_viewport_edge(from_top=False)
         if top < 0:
             top = 0
         if bot < 0:
             # 레이아웃 전이라 판단 불가 — 상한을 두지 않으면 전 페이지 렌더.
             bot = min(top + self.FALLBACK_WINDOW, self.count() - 1)
         return list(range(top, min(bot + 2, self.count())))
+
+    def _row_near_viewport_edge(self, from_top):
+        """항목 사이 여백을 피해 뷰포트 가장자리와 가까운 실제 행을 찾는다.
+
+        QListWidget 항목은 좌우와 위아래에 여백이 있어 rect().topLeft()처럼
+        x=0인 점을 indexAt에 넘기면 스크롤 위치와 무관하게 -1이 나온다.
+        중앙 x에서 가장자리부터 안쪽으로 훑어 첫 항목을 찾는다.
+        """
+        rect = self.viewport().rect()
+        x = rect.center().x()
+        if from_top:
+            positions = range(rect.top(), rect.bottom() + 1)
+        else:
+            positions = range(rect.bottom(), rect.top() - 1, -1)
+        for y in positions:
+            row = self.indexAt(QPoint(x, y)).row()
+            if row >= 0:
+                return row
+        return -1
 
     def set_thumb(self, row, img):
         it = self.item(row)

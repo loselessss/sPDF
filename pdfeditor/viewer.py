@@ -6,6 +6,7 @@
 
 from PyQt5.QtCore import Qt, QTimer
 
+from . import settings
 from .widgets import THUMB_W, qimage_from_render
 
 CACHE_RADIUS = 2  # 현재 페이지 기준 앞뒤로 유지할 페이지 수
@@ -21,6 +22,12 @@ class ViewerMixin:
         self._thumb_timer.setSingleShot(True)
         self._thumb_timer.setInterval(80)
         self._thumb_timer.timeout.connect(self._render_visible_thumbs)
+        self._pending_thumbnail_width = None
+        self._thumbnail_width_timer = QTimer(self)
+        self._thumbnail_width_timer.setSingleShot(True)
+        self._thumbnail_width_timer.setInterval(250)
+        self._thumbnail_width_timer.timeout.connect(
+            self._save_thumbnail_width)
 
     # --- 페이지 표시 -------------------------------------------------
 
@@ -116,3 +123,16 @@ class ViewerMixin:
             pw, _ = self.doc.page_size(row)
             zoom = THUMB_W / pw if pw else 0.2
             self.thumbs.set_thumb(row, qimage_from_render(*self.doc.render(row, zoom)))
+
+    def on_thumbnail_splitter_moved(self, _pos, index):
+        """사용자가 놓은 썸네일 패널 너비를 잦은 디스크 쓰기 없이 기억한다."""
+        if index != 1:
+            return
+        self._pending_thumbnail_width = self.thumbs.width()
+        self._thumbnail_width_timer.start()
+
+    def _save_thumbnail_width(self):
+        if self._pending_thumbnail_width is None:
+            return
+        settings.set_thumbnail_width(self._pending_thumbnail_width)
+        self._pending_thumbnail_width = None

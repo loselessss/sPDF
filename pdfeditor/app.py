@@ -17,8 +17,8 @@ from PyQt5.QtWidgets import (
     QAction, QActionGroup, QApplication, QCheckBox, QDialog, QDialogButtonBox,
     QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMenuBar, QMessageBox, QProgressDialog, QPushButton,
-    QStackedWidget, QTabBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout,
-    QWidget,
+    QSplitter, QStackedWidget, QTabBar, QTabWidget, QToolBar, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from . import settings
@@ -335,8 +335,17 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         rlay.addWidget(self._build_search_bar())
         rlay.addWidget(self.view, 1)
 
-        lay.addWidget(self.thumbs)
-        lay.addWidget(right, 1)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(self.thumbs)
+        splitter.addWidget(right)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([settings.thumbnail_width(), 900])
+        splitter.splitterMoved.connect(self.on_thumbnail_splitter_moved)
+        lay.addWidget(splitter)
+        self._viewer_splitter = splitter
         self.setCentralWidget(viewer)
 
         self.thumbs.page_selected.connect(self.show_page)
@@ -676,6 +685,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
     def close_doc(self):
         """탭이 닫힐 때 자원 정리. OCR 워커가 돌면 취소하고 문서를 닫는다."""
+        self._save_thumbnail_width()
         w = getattr(self, "_ocr_worker", None)
         if w is not None:
             try:
