@@ -53,6 +53,41 @@ class ThumbnailTests(unittest.TestCase):
         self.assertGreater(thumbs.width(), initial_width)
         splitter.close()
 
+    def test_thumbnail_content_follows_panel_width_without_losing_labels(self):
+        from pdfeditor.widgets import ThumbList
+
+        thumbs = ThumbList()
+        thumbs.resize(180, 700)
+        thumbs.reset_pages(3)
+        thumbs.show()
+        self.app.processEvents()
+        narrow = thumbs.thumbnail_width()
+        narrow_height = thumbs.item(0).sizeHint().height()
+
+        thumbs.resize(320, 700)
+        self.app.processEvents()
+
+        self.assertGreater(thumbs.thumbnail_width(), narrow)
+        self.assertGreater(thumbs.item(0).sizeHint().height(), narrow_height)
+        self.assertEqual([thumbs.item(i).text() for i in range(3)],
+                         ["1", "2", "3"])
+        thumbs.close()
+
+    def test_viewport_marker_can_be_updated_without_changing_item_geometry(self):
+        from PyQt5.QtCore import QRectF
+        from pdfeditor.widgets import ThumbList
+
+        thumbs = ThumbList()
+        thumbs.resize(180, 500)
+        thumbs.reset_pages(2)
+        before = thumbs.item(0).sizeHint()
+        thumbs.set_viewport_marker(0, QRectF(0.2, 0.3, 0.4, 0.5))
+
+        self.assertEqual(thumbs.item(0).sizeHint(), before)
+        self.assertEqual(thumbs._viewport_page, 0)
+        self.assertEqual(thumbs._viewport_rect, QRectF(0.2, 0.3, 0.4, 0.5))
+        thumbs.close()
+
 
 if __name__ == "__main__":
     unittest.main()

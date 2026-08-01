@@ -65,6 +65,33 @@ class InteractionToolTests(unittest.TestCase):
         self.assertEqual(canvas.height(), 2)
         canvas.close()
 
+    def test_render_pixel_ratio_always_supersamples_at_least_twice(self):
+        from PyQt5.QtWidgets import QWidget
+        from pdfeditor.viewer import render_pixel_ratio
+
+        widget = QWidget()
+        self.assertGreaterEqual(render_pixel_ratio(widget), 2.0)
+        widget.close()
+
+    def test_visible_page_rect_tracks_scroll_position(self):
+        from pdfeditor.widgets import PageView
+
+        view = PageView()
+        view.resize(240, 240)
+        view.canvas.resize(1000, 800)
+        view.show()
+        self.app.processEvents()
+        view.horizontalScrollBar().setValue(200)
+        view.verticalScrollBar().setValue(160)
+        rect = view.visible_page_rect()
+
+        self.assertIsNotNone(rect)
+        self.assertAlmostEqual(rect.x(), 0.2, places=2)
+        self.assertAlmostEqual(rect.y(), 0.2, places=2)
+        self.assertLess(rect.width(), 0.25)
+        self.assertLess(rect.height(), 0.3)
+        view.close()
+
 
 if __name__ == "__main__":
     unittest.main()

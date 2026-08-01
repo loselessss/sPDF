@@ -34,8 +34,11 @@ HELP_HTML = """
 
 <h3>🔍 보기 · 이동</h3>
 <table cellpadding="4">
-<tr><td><b>Ctrl + 마우스휠</b></td><td>확대/축소</td></tr>
-<tr><td><b>Ctrl++ / Ctrl+-</b></td><td>확대 / 축소</td></tr>
+<tr><td><b>Ctrl + 마우스휠</b></td><td>큰 단계 확대/축소</td></tr>
+<tr><td><b>Ctrl++ / Ctrl+-</b></td><td>큰 단계 확대 / 축소</td></tr>
+<tr><td><b>Alt + 마우스휠</b></td><td>1% 단위 확대/축소</td></tr>
+<tr><td><b>Alt++ / Alt+-</b></td><td>1% 단위 확대 / 축소</td></tr>
+<tr><td><b>하단 배율</b></td><td>10~800% 직접 입력</td></tr>
 <tr><td><b>Ctrl+0</b></td><td>창 너비에 맞춤</td></tr>
 <tr><td><b>PgUp / PgDown</b></td><td>이전 / 다음 페이지</td></tr>
 <tr><td>왼쪽 <b>썸네일</b> 클릭</td><td>해당 페이지로 이동</td></tr>

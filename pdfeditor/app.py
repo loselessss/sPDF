@@ -8,6 +8,7 @@
 
 import json
 import os
+import subprocess
 import tempfile
 import uuid
 
@@ -17,8 +18,8 @@ from PyQt5.QtWidgets import (
     QAction, QActionGroup, QApplication, QCheckBox, QDialog, QDialogButtonBox,
     QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMenuBar, QMessageBox, QProgressDialog, QPushButton,
-    QSplitter, QStackedWidget, QTabBar, QTabWidget, QToolBar, QToolButton,
-    QVBoxLayout, QWidget,
+    QSpinBox, QSplitter, QStackedWidget, QTabBar, QTabWidget, QToolBar,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import settings
@@ -352,7 +353,11 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.thumbs.page_moved.connect(self.on_thumb_moved)
         self.thumbs.verticalScrollBar().valueChanged.connect(
             lambda _v: self._schedule_thumbs())
+        self.thumbs.thumbnail_width_changed.connect(
+            self.on_thumbnail_width_changed)
         self.view.zoom_changed.connect(self.on_zoom_changed)
+        self.view.viewport_changed.connect(
+            self.update_thumbnail_viewport_marker)
         self.view.page_flip.connect(self.on_wheel_flip)
         self.view.canvas.drag_selected.connect(self.on_drag_selected)
         self.view.canvas.selection_cleared.connect(self._clear_selection)
@@ -372,6 +377,17 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
         self._page_label = QLabel("")
         self.statusBar().addPermanentWidget(self._page_label)
+        self._zoom_input = QSpinBox()
+        self._zoom_input.setRange(
+            round(self.view.ZOOM_MIN * 100), round(self.view.ZOOM_MAX * 100))
+        self._zoom_input.setSingleStep(1)
+        self._zoom_input.setSuffix("%")
+        self._zoom_input.setKeyboardTracking(False)
+        self._zoom_input.setValue(100)
+        self._zoom_input.setToolTip("10~800% 범위를 1% 단위로 입력")
+        self._zoom_input.valueChanged.connect(
+            lambda value: self.set_zoom(value / 100.0))
+        self.statusBar().addPermanentWidget(self._zoom_input)
 
         self._build_menus()
 
@@ -426,6 +442,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         m.addSeparator()
         self._act(m, "저장", "Ctrl+S", self.save)
         self._act(m, "다른 이름으로 저장...", "Ctrl+Shift+S", self.save_as_dialog)
+        self._act(m, "탐색기에서 현재 위치 열기", None,
+                  self.open_current_location)
         m.addSeparator()
         self._act(m, "탭 닫기", "Ctrl+W", lambda: self._shell.close_tab(self))
         self._act(m, "종료", "Ctrl+Q", lambda: self._shell.close())
@@ -475,6 +493,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         v = self.menuBar().addMenu("보기(&V)")
         self._act(v, "확대", "Ctrl++", self.zoom_in)
         self._act(v, "축소", "Ctrl+-", self.zoom_out)
+        self._act(v, "1% 확대", "Alt++", self.zoom_in_fine)
+        self._act(v, "1% 축소", "Alt+-", self.zoom_out_fine)
         self._act(v, "창 너비에 맞춤", "Ctrl+0", self.zoom_fit)
         v.addSeparator()
         self._act(v, "다음 페이지", "PgDown", self.next_page)
@@ -677,6 +697,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         settings.push_recent(path)
         self._set_fit_zoom(0)
         self.show_page(0)
+        # 탭이 실제 화면에 배치된 뒤 확정된 폭과 모니터 DPR로 다시 맞춘다.
+        QTimer.singleShot(0, lambda d=doc: self.finish_initial_layout(d))
         self._schedule_thumbs()
         self._notes_changed()
         if not doc.has_text(0):
@@ -718,8 +740,28 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         if self.doc is None:
             self._page_label.setText("")
         else:
-            self._page_label.setText("%d / %d   %d%%" % (
-                self.page_index + 1, self.doc.page_count, round(self.view.zoom * 100)))
+            self._page_label.setText("%d / %d" % (
+                self.page_index + 1, self.doc.page_count))
+            if hasattr(self, "_zoom_input"):
+                self._zoom_input.blockSignals(True)
+                self._zoom_input.setValue(round(self.view.zoom * 100))
+                self._zoom_input.blockSignals(False)
+
+    def open_current_location(self):
+        """현재 PDF를 선택한 상태로 Windows 탐색기를 연다."""
+        if self.doc is None:
+            return
+        path = os.path.abspath(self.doc.path)
+        if not os.path.exists(path):
+            QMessageBox.warning(
+                self, "파일 위치 열기", "현재 파일을 찾을 수 없습니다.\n%s" % path)
+            return
+        try:
+            subprocess.Popen(["explorer.exe", "/select,", os.path.normpath(path)])
+        except OSError as error:
+            QMessageBox.warning(
+                self, "파일 위치 열기",
+                "Windows 탐색기를 열 수 없습니다.\n\n%s" % error)
 
     # --- 도움말/정보/OCR 설정 (탭 메뉴에서 호출) -----------------------
 

@@ -1,7 +1,7 @@
 """재사용 위젯 — PageCanvas/PageView(메인 페이지 뷰), ThumbList(썸네일)."""
 
 from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView, QListWidget, QListWidgetItem, QScrollArea, QWidget,
 )
@@ -9,6 +9,8 @@ from PyQt5.QtWidgets import (
 THUMB_W = 120  # 썸네일 가로 픽셀
 THUMB_H = int(THUMB_W * 1.5)
 THUMB_ITEM_H = THUMB_H + 28
+THUMB_MIN_W = 72
+THUMB_MAX_W = 360
 
 # 오버레이 색 — 선택은 파랑, 검색은 노랑, 현재 검색 항목은 주황
 SEL_COLOR = QColor(0, 120, 215, 70)
@@ -198,6 +200,7 @@ class PageView(QScrollArea):
 
     zoom_changed = pyqtSignal(float)
     page_flip = pyqtSignal(int)  # +1 다음 장, -1 이전 장
+    viewport_changed = pyqtSignal()
 
     ZOOM_MIN, ZOOM_MAX = 0.1, 8.0
     # 마우스 휠 한 칸 = 120. 트랙패드는 잘게 쪼개 보내므로 누적해서 이 값을
@@ -213,6 +216,10 @@ class PageView(QScrollArea):
         self.zoom = 1.0
         self._flip_accum = 0
         self.canvas.pan_requested.connect(self._pan_canvas)
+        self.horizontalScrollBar().valueChanged.connect(
+            lambda _value: self.viewport_changed.emit())
+        self.verticalScrollBar().valueChanged.connect(
+            lambda _value: self.viewport_changed.emit())
 
     def set_interaction_mode(self, mode):
         self.canvas.set_interaction_mode(mode)
@@ -226,9 +233,36 @@ class PageView(QScrollArea):
 
     def set_image(self, img):
         self.canvas.set_image(img, self.zoom)
+        self.viewport_changed.emit()
 
     def clear(self):
         self.canvas.clear()
+        self.viewport_changed.emit()
+
+    def visible_page_rect(self):
+        """현재 뷰포트가 차지하는 페이지 비율(0~1 좌표)을 반환한다."""
+        canvas = self.canvas.size()
+        viewport = self.viewport().size()
+        if canvas.width() <= 0 or canvas.height() <= 0:
+            return None
+        if canvas.width() <= viewport.width():
+            x, width = 0.0, 1.0
+        else:
+            x = self.horizontalScrollBar().value() / canvas.width()
+            width = viewport.width() / canvas.width()
+        if canvas.height() <= viewport.height():
+            y, height = 0.0, 1.0
+        else:
+            y = self.verticalScrollBar().value() / canvas.height()
+            height = viewport.height() / canvas.height()
+        rect = QRectF(x, y, min(1.0, width), min(1.0, height))
+        if rect.width() >= 0.999 and rect.height() >= 0.999:
+            return None
+        return rect
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.viewport_changed.emit()
 
     def ensure_rect_visible(self, rect):
         """PDF 좌표 rect가 보이도록 스크롤."""
@@ -238,10 +272,20 @@ class PageView(QScrollArea):
         self.ensureVisible(cx, cy, 120, 120)
 
     def wheelEvent(self, ev):
-        # Ctrl+휠은 줌.
+        # Ctrl+휠은 큰 단계, Alt+휠은 1% 미세 단계 줌.
         if ev.modifiers() & Qt.ControlModifier:
             step = 1.25 if ev.angleDelta().y() > 0 else 1 / 1.25
             new = max(self.ZOOM_MIN, min(self.ZOOM_MAX, self.zoom * step))
+            if new != self.zoom:
+                self.zoom = new
+                self.zoom_changed.emit(new)
+            ev.accept()
+            return
+        if ev.modifiers() & Qt.AltModifier:
+            step = 0.01 if ev.angleDelta().y() > 0 else -0.01
+            new = round(max(
+                self.ZOOM_MIN, min(self.ZOOM_MAX, self.zoom + step)) * 100
+            ) / 100.0
             if new != self.zoom:
                 self.zoom = new
                 self.zoom_changed.emit(new)
@@ -284,6 +328,7 @@ class ThumbList(QListWidget):
 
     page_selected = pyqtSignal(int)
     page_moved = pyqtSignal(int, int)  # (원래 행, 옮긴 행)
+    thumbnail_width_changed = pyqtSignal(int)
 
     # 뷰포트 크기를 모를 때(레이아웃 전) 렌더할 최대 항목 수 — 여기서
     # count-1까지 그려버리면 대용량 PDF에서 전 페이지를 렌더하게 된다.
@@ -292,13 +337,16 @@ class ThumbList(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumWidth(96)
-        self.setIconSize(QSize(THUMB_W, THUMB_H))
         self.setSpacing(4)
         self.setUniformItemSizes(True)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setDragDropMode(QListWidget.InternalMove)
         self.currentRowChanged.connect(self._on_row)
         self._drag_src = None
+        self._viewport_page = -1
+        self._viewport_rect = None
+        self._thumb_width = 0
+        self._apply_responsive_size()
 
     def _on_row(self, row):
         if row >= 0:
@@ -325,8 +373,10 @@ class ThumbList(QListWidget):
             it.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
             # 아직 렌더되지 않은 항목도 완성된 썸네일과 같은 높이를 가져야
             # 전체 스크롤 범위와 보이는 행 계산이 중간에서 바뀌지 않는다.
-            it.setSizeHint(QSize(THUMB_W + 16, THUMB_ITEM_H))
+            it.setSizeHint(QSize(self._thumb_width + 16,
+                                 self.iconSize().height() + 28))
             it.setData(Qt.UserRole, False)  # 렌더 완료 여부
+            it.setData(Qt.UserRole + 1, 1.0)  # 페이지 가로/세로 비율
             self.addItem(it)
 
     def visible_rows(self):
@@ -361,18 +411,88 @@ class ThumbList(QListWidget):
                 return row
         return -1
 
-    def set_thumb(self, row, img):
+    def set_thumb(self, row, img, rendered_width=None):
         it = self.item(row)
         if it is not None:
             it.setIcon(QIcon(QPixmap.fromImage(img)))
-            it.setData(Qt.UserRole, True)
+            ratio = max(1.0, img.devicePixelRatio())
+            logical_w = img.width() / ratio
+            logical_h = img.height() / ratio
+            it.setData(Qt.UserRole, rendered_width or round(logical_w))
+            it.setData(Qt.UserRole + 1,
+                       logical_w / logical_h if logical_h else 1.0)
 
-    def is_rendered(self, row):
+    def is_rendered(self, row, width=None):
         it = self.item(row)
-        return bool(it and it.data(Qt.UserRole))
+        if not it:
+            return False
+        rendered_width = it.data(Qt.UserRole)
+        return bool(rendered_width) if width is None else rendered_width == width
 
     def invalidate(self, row):
         """페이지 내용이 바뀌었을 때(주석 추가 등) 다시 그리게 표시."""
         it = self.item(row)
         if it is not None:
             it.setData(Qt.UserRole, False)
+
+    def thumbnail_width(self):
+        return self._thumb_width or THUMB_W
+
+    def _apply_responsive_size(self):
+        viewport_width = self.viewport().width()
+        width = max(THUMB_MIN_W, min(THUMB_MAX_W, viewport_width - 20))
+        if width == self._thumb_width:
+            return
+        self._thumb_width = width
+        height = round(width * 1.5)
+        self.setIconSize(QSize(width, height))
+        for row in range(self.count()):
+            self.item(row).setSizeHint(QSize(width + 16, height + 28))
+        self.thumbnail_width_changed.emit(width)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_size()
+
+    def set_viewport_marker(self, page, rect):
+        if page == self._viewport_page and rect == self._viewport_rect:
+            return
+        old = self._viewport_page
+        self._viewport_page = page
+        self._viewport_rect = QRectF(rect) if rect is not None else None
+        if old >= 0 and self.item(old):
+            self.viewport().update(self.visualItemRect(self.item(old)))
+        if page >= 0 and self.item(page):
+            self.viewport().update(self.visualItemRect(self.item(page)))
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._viewport_rect is None or self._viewport_page < 0:
+            return
+        item = self.item(self._viewport_page)
+        if item is None or item.icon().isNull():
+            return
+        item_rect = self.visualItemRect(item)
+        if not item_rect.intersects(self.viewport().rect()):
+            return
+        aspect = float(item.data(Qt.UserRole + 1) or 1.0)
+        box = self.iconSize()
+        if aspect >= box.width() / max(1, box.height()):
+            image_w = box.width()
+            image_h = image_w / aspect
+        else:
+            image_h = box.height()
+            image_w = image_h * aspect
+        image_rect = QRectF(
+            item_rect.center().x() - image_w / 2,
+            item_rect.top(), image_w, image_h)
+        marker = QRectF(
+            image_rect.left() + self._viewport_rect.x() * image_rect.width(),
+            image_rect.top() + self._viewport_rect.y() * image_rect.height(),
+            self._viewport_rect.width() * image_rect.width(),
+            self._viewport_rect.height() * image_rect.height())
+        painter = QPainter(self.viewport())
+        painter.setBrush(QColor(0, 120, 215, 45))
+        painter.setPen(QPen(QColor(0, 100, 210), 2))
+        painter.drawRect(marker)
+        painter.end()
