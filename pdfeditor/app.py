@@ -306,6 +306,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                   TextSelectMixin, ViewerMixin):
 
     title_changed = pyqtSignal()  # 탭 라벨/창 제목 갱신 신호(셸이 받는다)
+    selection_changed = pyqtSignal(object)
 
     def __init__(self, shell):
         super().__init__()

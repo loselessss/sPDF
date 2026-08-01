@@ -7,6 +7,8 @@ get_text를 부르면 큰 페이지에서 버벅인다.
 from PyQt5.QtCore import QRectF
 from PyQt5.QtWidgets import QApplication
 
+from .selection import payload_from_words
+
 
 class TextSelectMixin:
     def _init_textsel_state(self):
@@ -15,6 +17,7 @@ class TextSelectMixin:
         self._search_query = ""
         self._search_hits = []   # (page, QRectF) 목록
         self._search_pos = -1
+        self._selection_document_id = ""
 
     def _reset_textsel(self):
         self._words_cache.clear()
@@ -77,10 +80,33 @@ class TextSelectMixin:
         elif self.doc is not None and not self.doc.has_text(self.page_index):
             self.statusBar().showMessage(
                 "이 페이지에는 텍스트 레이어가 없습니다 (스캔본) — OCR 필요", 3000)
+        self._emit_selection_changed()
 
     def _clear_selection(self):
         self._selected = []
         self.view.canvas.set_selection([])
+        self._emit_selection_changed()
+
+    def set_selection_document_id(self, document_id):
+        """Set the host application's stable document identifier."""
+        self._selection_document_id = str(document_id or "")
+
+    def selection_payload(self):
+        """Return the current selection through the public transfer contract."""
+        if self.doc is None:
+            return None
+        return payload_from_words(
+            self._selected,
+            pdf_page=self.page_index + 1,
+            document_id=self._selection_document_id,
+            document_path=self.doc.path,
+            requires_ocr=not self.doc.has_text(self.page_index),
+        )
+
+    def _emit_selection_changed(self):
+        signal = getattr(self, "selection_changed", None)
+        if signal is not None:
+            signal.emit(self.selection_payload())
 
     def copy_selection(self):
         if not self._selected:
