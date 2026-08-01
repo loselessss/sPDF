@@ -10,6 +10,83 @@ from PyQt5.QtWidgets import QApplication
 from .selection import payload_from_words
 
 
+def _ordered_words(words):
+    return sorted(words, key=lambda word: (word[5], word[6], word[7]))
+
+
+def _word_index_at(words, point, padding=3.0):
+    """point가 닿은 단어 인덱스. 글자 가장자리에는 작은 여유를 둔다."""
+    for index, word in enumerate(words):
+        rect = QRectF(word[0], word[1], word[2] - word[0], word[3] - word[1])
+        if rect.adjusted(-padding, -padding, padding, padding).contains(point):
+            return index
+    return None
+
+
+def _nearest_word_index(words, point):
+    """드래그 끝이 단어 사이 공백이어도 읽기 흐름의 가장 가까운 단어 선택."""
+    best_index, best_distance = None, None
+    for index, word in enumerate(words):
+        x = min(max(point.x(), word[0]), word[2])
+        y = min(max(point.y(), word[1]), word[3])
+        distance = (point.x() - x) ** 2 + (point.y() - y) ** 2
+        if best_distance is None or distance < best_distance:
+            best_index, best_distance = index, distance
+    return best_index
+
+
+def words_in_text_flow(words, start, end):
+    """시작 단어부터 끝 단어까지 읽기 순서로 연속 선택한다."""
+    ordered = _ordered_words(words)
+    start_index = _word_index_at(ordered, start)
+    if start_index is None:
+        return []
+    end_index = _word_index_at(ordered, end)
+    if end_index is None:
+        end_index = _nearest_word_index(ordered, end)
+    if end_index is None:
+        return []
+    lo, hi = sorted((start_index, end_index))
+    return ordered[lo:hi + 1]
+
+
+def words_to_text(words):
+    """시각적 줄바꿈은 잇고 PDF 문단 블록 사이만 줄바꿈한다."""
+    blocks = []
+    current_block = None
+    lines = []
+    current_line = None
+    line_words = []
+
+    def finish_line():
+        if line_words:
+            lines.append(" ".join(line_words))
+
+    def finish_block():
+        finish_line()
+        if lines:
+            text = lines[0]
+            for line in lines[1:]:
+                text += line if text.endswith("-") else " " + line
+            blocks.append(text)
+
+    for word in _ordered_words(words):
+        block, line = word[5], word[6]
+        if current_block is not None and block != current_block:
+            finish_block()
+            lines = []
+            line_words = []
+            current_line = None
+        elif current_line is not None and line != current_line:
+            finish_line()
+            line_words = []
+        current_block = block
+        current_line = line
+        line_words.append(word[4])
+    finish_block()
+    return "\n".join(blocks)
+
+
 class TextSelectMixin:
     def _init_textsel_state(self):
         self._words_cache = {}   # page -> word 목록
@@ -45,14 +122,11 @@ class TextSelectMixin:
         return ws
 
     def on_drag_selected(self, start, end):
-        """드래그 사각형과 교차하는 단어를 선택(설계 §3.2)."""
+        """드래그 시작·끝 단어 사이를 읽기 순서대로 연속 선택."""
         if self.doc is None:
             return
-        rect = QRectF(start, end).normalized()
-        self._selected = [
-            w for w in self._page_words(self.page_index)
-            if rect.intersects(QRectF(w[0], w[1], w[2] - w[0], w[3] - w[1]))
-        ]
+        self._selected = words_in_text_flow(
+            self._page_words(self.page_index), start, end)
         self._show_selection()
 
     def on_word_picked(self, pt):
@@ -111,20 +185,7 @@ class TextSelectMixin:
     def copy_selection(self):
         if not self._selected:
             return
-        # (block, line) 단위로 묶어 원문 줄바꿈을 복원한다. words()가
-        # 읽기 순서로 오므로 정렬은 그 순서를 따른다.
-        ws = sorted(self._selected, key=lambda w: (w[5], w[6], w[7]))
-        lines, cur_key, cur = [], None, []
-        for w in ws:
-            key = (w[5], w[6])
-            if key != cur_key and cur:
-                lines.append(" ".join(cur))
-                cur = []
-            cur_key = key
-            cur.append(w[4])
-        if cur:
-            lines.append(" ".join(cur))
-        text = "\n".join(lines)
+        text = words_to_text(self._selected)
         QApplication.clipboard().setText(text)
         self.statusBar().showMessage("복사됨 (%d자)" % len(text), 3000)
 
