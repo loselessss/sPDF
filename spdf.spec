@@ -12,7 +12,23 @@
 OCR 모델(korean_PP-OCRv5 등)은 번들 안 함 — 첫 OCR 때 사용자 폴더로
 자동 다운로드(설치본을 가볍게).
 """
+from pathlib import Path
+import sys
+
 from PyInstaller.utils.hooks import collect_all
+
+# PyInstaller는 spec 파일 폴더를 자동으로 import 경로에 넣지 않는다.
+spec_root = Path(SPEC).resolve().parent
+sys.path.insert(0, str(spec_root))
+
+from build_version_info import write_version_info_files
+from pdfeditor.meta import APP_VERSION
+
+
+# 작업 관리자가 GUI와 OCR 자식 프로세스를 의미 있는 제품명으로 표시하도록
+# 두 EXE에 같은 제품/버전 정보와 역할별 파일 설명을 넣는다.
+gui_version_info, ocr_version_info = write_version_info_files(
+    spec_root / "build" / "version-info", APP_VERSION)
 
 # --- OCR 워커: onnxruntime/rapidocr/cv2, PyQt5 제외 ---
 ocr_datas, ocr_bins, ocr_hidden = [], [], []
@@ -57,6 +73,8 @@ exe_ocr = EXE(
     exclude_binaries=True,
     name="spdf-ocr",
     console=True,   # 콘솔 워커(창은 CREATE_NO_WINDOW로 숨김)
+    icon="assets/spdf.ico",
+    version=ocr_version_info,
 )
 
 # --- GUI: PyQt5/PyMuPDF, onnxruntime류 제외(워커가 담당) ---
@@ -77,6 +95,7 @@ exe_gui = EXE(
     name="sPDF",
     console=False,
     icon="assets/spdf.ico",
+    version=gui_version_info,
 )
 
 # 각각 별도 dist 폴더로 수집(DLL 격리). 설치 시 sPDF-ocr\* 를 {app}\ocr 로,

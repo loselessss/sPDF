@@ -713,7 +713,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         if w is not None:
             try:
                 w.cancel()
-                w.wait(2000)
+                if not w.wait(2000):
+                    w.kill_process()
+                    w.wait(1000)
             except Exception:
                 pass
         if self.doc is not None:
@@ -1267,6 +1269,10 @@ class AppWindow(QMainWindow):
             if not tab.maybe_save():
                 ev.ignore()
                 return
+        # 창의 X 버튼으로 종료할 때도 탭 닫기와 같은 경로를 거쳐 OCR 자식
+        # 프로세스와 열린 문서를 확실히 정리한다.
+        for i in range(self._tabs.count()):
+            self._tabs.widget(i).close_doc()
         super().closeEvent(ev)
         if ev.isAccepted() and self._update_worker is not None and \
                 self._update_worker.isRunning():

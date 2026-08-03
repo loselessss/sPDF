@@ -5,10 +5,11 @@
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.7.1"
+#define MyAppVersion "1.7.2"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"
+#define MyAppUserModelId "sPDF.Desktop"
 
 [Setup]
 AppId={{7C2F9A4E-3B71-4E0C-9D2A-5F6B1A8C0E11}
@@ -47,8 +48,8 @@ Source: "dist\sPDF-ocr\*"; DestDir: "{app}\ocr"; Flags: ignoreversion recursesub
 Source: "assets\spdf_doc.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelId}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelId}"; Tasks: desktopicon
 
 [Registry]
 ; --- ProgId: sPDF로 PDF를 열었을 때의 아이콘/실행 명령 ---

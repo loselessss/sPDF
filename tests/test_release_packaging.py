@@ -28,6 +28,28 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("gh release create", workflow)
         self.assertIn("contents: write", workflow)
 
+    def test_both_executables_have_windows_version_resources(self):
+        spec = (ROOT / "spdf.spec").read_text(encoding="utf-8")
+        self.assertIn("version=gui_version_info", spec)
+        self.assertIn("version=ocr_version_info", spec)
+        self.assertGreaterEqual(spec.count('icon="assets/spdf.ico"'), 2)
+
+    def test_installer_shortcuts_use_same_app_id_as_runtime(self):
+        installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
+        integration = (
+            ROOT / "pdfeditor" / "windows_integration.py"
+        ).read_text(encoding="utf-8")
+        app_id = re.search(
+            r'^#define MyAppUserModelId "([^"]+)"$',
+            installer, re.MULTILINE).group(1)
+        runtime_app_id = re.search(
+            r'^APP_USER_MODEL_ID = ["\']([^"\']+)["\']$',
+            integration, re.MULTILINE).group(1)
+        self.assertEqual(runtime_app_id, app_id)
+        self.assertEqual(installer.count('AppUserModelID: "{#MyAppUserModelId}"'), 2)
+        worker = (ROOT / "ocr_worker_main.py").read_text(encoding="utf-8")
+        self.assertIn("set_current_process_app_id()", worker)
+
 
 if __name__ == "__main__":
     unittest.main()

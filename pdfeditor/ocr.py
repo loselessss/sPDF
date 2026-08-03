@@ -66,7 +66,19 @@ class OcrWorker(QThread):
     def cancel(self):
         self._cancel = True
         if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+            try:
+                self._proc.terminate()
+            except OSError:
+                pass
+
+    def kill_process(self):
+        """정상 종료를 기다려도 남은 OCR 자식 프로세스를 강제로 정리한다."""
+        self._cancel = True
+        if self._proc and self._proc.poll() is None:
+            try:
+                self._proc.kill()
+            except OSError:
+                pass
 
     def run(self):
         from .paths import is_frozen, ocr_command, resource, user_data_dir
