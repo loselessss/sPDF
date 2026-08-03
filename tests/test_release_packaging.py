@@ -26,6 +26,9 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("Get-FileHash -Algorithm SHA256", workflow)
         self.assertIn("sPDF_Setup_latest.exe", workflow)
         self.assertIn("gh release create", workflow)
+        self.assertIn("python release_notes.py", workflow)
+        self.assertIn("--notes-file release-notes.md", workflow)
+        self.assertNotIn("--generate-notes", workflow)
         self.assertIn("contents: write", workflow)
 
     def test_both_executables_have_windows_version_resources(self):

@@ -72,6 +72,7 @@ jobs:
           $version = $tag.TrimStart("v")
           $installer = "Output\sPDF_Setup_$version.exe"
           $latestInstaller = "Output\sPDF_Setup_latest.exe"
+          python release_notes.py --version $version --output release-notes.md
           gh release create $tag $installer "$installer.sha256" `
             $latestInstaller "$latestInstaller.sha256" `
-            --verify-tag --title "sPDF $version" --generate-notes
+            --verify-tag --title "sPDF $version" --notes-file release-notes.md
