@@ -14,6 +14,7 @@ def main():
         from .ocr_subprocess import main as ocr_main
         sys.exit(ocr_main())
 
+    from PyQt5.QtCore import Qt
     from PyQt5.QtGui import QIcon
     from PyQt5.QtWidgets import QApplication
 
@@ -21,6 +22,9 @@ def main():
     from .meta import APP_NAME, APP_VERSION
     from .paths import app_icon
 
+    # Windows의 모든 Qt 대화상자 제목 표시줄에 자동으로 붙는 `?`
+    # 컨텍스트 도움말 버튼을 앱 전체에서 제거한다.
+    QApplication.setAttribute(Qt.AA_DisableWindowContextHelpButton, True)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)

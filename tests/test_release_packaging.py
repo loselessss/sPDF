@@ -29,6 +29,9 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("python release_notes.py", workflow)
         self.assertIn("--notes-file release-notes.md", workflow)
         self.assertNotIn("--generate-notes", workflow)
+        self.assertIn("gh release edit", workflow)
+        self.assertIn("gh release upload", workflow)
+        self.assertIn("--clobber", workflow)
         self.assertIn("contents: write", workflow)
 
     def test_both_executables_have_windows_version_resources(self):
@@ -52,6 +55,16 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(installer.count('AppUserModelID: "{#MyAppUserModelId}"'), 2)
         worker = (ROOT / "ocr_worker_main.py").read_text(encoding="utf-8")
         self.assertIn("set_current_process_app_id()", worker)
+
+    def test_app_disables_dialog_context_help_before_startup(self):
+        startup = (
+            ROOT / "pdfeditor" / "__main__.py"
+        ).read_text(encoding="utf-8")
+        setting = (
+            "QApplication.setAttribute("
+            "Qt.AA_DisableWindowContextHelpButton, True)")
+        self.assertIn(setting, startup)
+        self.assertLess(startup.index(setting), startup.index("QApplication(sys.argv)"))
 
 
 if __name__ == "__main__":
