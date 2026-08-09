@@ -4,7 +4,7 @@ from pathlib import Path
 
 import fitz
 
-from pdfeditor.core import Document
+from pdfeditor.core import ANTIALIAS_LEVEL, Document, configure_antialiasing
 from pdfeditor.pages import page_order_after_move
 
 
@@ -28,6 +28,18 @@ def _page_texts(path):
 
 
 class PdfPageOperationTests(unittest.TestCase):
+    def test_rendering_uses_highest_mupdf_antialiasing_level(self):
+        class FakeTools:
+            level = None
+
+            def set_aa_level(self, level):
+                self.level = level
+
+        tools = FakeTools()
+        configure_antialiasing(tools)
+        self.assertEqual(ANTIALIAS_LEVEL, 8)
+        self.assertEqual(tools.level, 8)
+
     def test_page_order_moves_single_page_between_pages(self):
         order, selected = page_order_after_move(5, [0], 4)
         self.assertEqual(order, [1, 2, 3, 0, 4])

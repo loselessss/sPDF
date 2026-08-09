@@ -10,6 +10,24 @@ import tempfile
 import fitz
 
 
+ANTIALIAS_LEVEL = 8
+
+
+def configure_antialiasing(tools=None):
+    """MuPDF 텍스트·그래픽 렌더링을 최고 품질 AA로 고정한다.
+
+    PDF 페이지는 RGB 비트맵으로 Qt에 전달되므로 LCD 서브픽셀 순서에
+    의존하는 ClearType 대신 모든 모니터에서 안전한 그레이스케일 AA를 쓴다.
+    """
+    tools = tools or fitz.TOOLS
+    setter = getattr(tools, "set_aa_level", None)
+    if setter is not None:
+        setter(ANTIALIAS_LEVEL)
+
+
+configure_antialiasing()
+
+
 class PasswordRequired(Exception):
     """암호가 걸린 PDF — 호출부가 비밀번호를 받아 다시 시도해야 한다."""
 

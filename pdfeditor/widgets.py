@@ -121,6 +121,9 @@ class PageCanvas(QWidget):
         if self._pix is None:
             return
         p = QPainter(self)
+        # 분수 DPI/배율에서 물리 픽셀과 논리 픽셀의 경계가 어긋나더라도
+        # 최근접 픽셀 확대처럼 계단지지 않도록 부드럽게 보간한다.
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         p.drawPixmap(0, 0, self._pix)
         p.setPen(Qt.NoPen)
         z = self.zoom
