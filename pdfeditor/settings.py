@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 PATH = os.path.expanduser("~/.spdf.json")
 _OLD_PATH = os.path.expanduser("~/.pdfeditor.json")  # 개명 전 설정 파일
@@ -9,6 +10,7 @@ MAX_RECENT = 10
 DEFAULT_THUMBNAIL_WIDTH = 160
 MIN_THUMBNAIL_WIDTH = 96
 MAX_THUMBNAIL_WIDTH = 480
+AUTOMATIC_UPDATE_INTERVAL_SECONDS = 24 * 60 * 60
 
 
 def _load():
@@ -119,4 +121,26 @@ def set_ocr_engine(engine):
         return
     d = _load()
     d["ocr_engine"] = engine
+    _save(d)
+
+
+# --- 자동 업데이트 확인 ------------------------------------------------
+
+def automatic_update_check_due(now=None):
+    """마지막 자동 확인으로부터 24시간이 지났는지 반환한다."""
+    current = time.time() if now is None else float(now)
+    try:
+        last = float(_load().get("last_automatic_update_check", 0))
+    except (TypeError, ValueError):
+        return True
+    # 시스템 시간이 과거로 크게 보정된 경우에도 확인이 영구히 막히지 않게 한다.
+    return last <= 0 or current < last or \
+        current - last >= AUTOMATIC_UPDATE_INTERVAL_SECONDS
+
+
+def mark_automatic_update_check(now=None):
+    """자동 업데이트 확인을 시작한 시각을 기록한다."""
+    current = time.time() if now is None else float(now)
+    d = _load()
+    d["last_automatic_update_check"] = current
     _save(d)

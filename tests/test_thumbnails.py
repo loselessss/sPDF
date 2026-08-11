@@ -91,6 +91,44 @@ class ThumbnailTests(unittest.TestCase):
                          ["1", "2", "3"])
         thumbs.close()
 
+    def test_two_digit_page_number_has_its_own_visible_band(self):
+        from PyQt5.QtCore import QRectF
+        from PyQt5.QtGui import QImage
+        from pdfeditor.widgets import ThumbList
+
+        thumbs = ThumbList()
+        thumbs.resize(180, 700)
+        thumbs.reset_pages(15)
+        thumbs.show()
+        thumbs.set_thumb(9, QImage(120, 180, QImage.Format_RGB888))
+        thumbs.scrollToItem(thumbs.item(9))
+        self.app.processEvents()
+
+        image_rect = thumbs._thumbnail_image_rect(9)
+        label_rect = thumbs._thumbnail_label_rect(9)
+        self.assertEqual(thumbs.item(9).text(), "10")
+        self.assertFalse(label_rect.isEmpty())
+        self.assertGreaterEqual(label_rect.top(), image_rect.bottom())
+        self.assertTrue(label_rect.intersects(QRectF(thumbs.viewport().rect())))
+        thumbs.close()
+
+    def test_thumbnail_pixmaps_outside_nearby_window_are_released(self):
+        from PyQt5.QtGui import QImage
+        from pdfeditor.widgets import ThumbList
+
+        thumbs = ThumbList()
+        thumbs.reset_pages(30)
+        image = QImage(20, 30, QImage.Format_RGB888)
+        for row in (0, 1, 10, 11, 20):
+            thumbs.set_thumb(row, image)
+
+        thumbs.evict_thumbnails_outside(8, 13)
+
+        self.assertEqual(thumbs._rendered_rows, {10, 11})
+        self.assertTrue(thumbs.item(0).icon().isNull())
+        self.assertFalse(thumbs.item(10).icon().isNull())
+        thumbs.close()
+
     def test_viewport_marker_can_be_updated_without_changing_item_geometry(self):
         from PyQt5.QtCore import QRectF
         from pdfeditor.widgets import ThumbList

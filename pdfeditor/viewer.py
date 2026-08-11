@@ -184,7 +184,8 @@ class ViewerMixin:
         if self.doc is None:
             return
         width = self.thumbs.thumbnail_width()
-        for row in self.thumbs.visible_rows():
+        visible = self.thumbs.visible_rows()
+        for row in visible:
             if self.thumbs.is_rendered(row, width):
                 continue
             pw, _ = self.doc.page_size(row)
@@ -198,6 +199,10 @@ class ViewerMixin:
                 ),
                 rendered_width=width,
             )
+        if visible:
+            self.thumbs.evict_thumbnails_outside(
+                max(0, visible[0] - 4),
+                min(self.doc.page_count - 1, visible[-1] + 4))
         self.update_thumbnail_viewport_marker()
 
     def on_thumbnail_width_changed(self, _width):

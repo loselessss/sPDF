@@ -9,7 +9,7 @@ AVAILABLE_ICONS = frozenset({
     "fit_page", "fit_width",
     "hand", "help", "highlight", "info", "license", "merge", "new_tab",
     "new_window", "note", "notes", "ocr", "open", "pages", "power",
-    "recent", "redo", "rotate_ccw", "rotate_cw", "save", "save_as",
+    "print", "recent", "redo", "rotate_ccw", "rotate_cw", "save", "save_as",
     "search", "select_all", "settings", "split", "star", "star_filled",
     "text_select", "undo", "update", "zoom_in", "zoom_out",
 })
@@ -44,6 +44,7 @@ FLUENT_GLYPHS = {
     "open": 0xE8E5,           # OpenFile
     "pages": 0xE89A,          # TwoPage
     "power": 0xE7E8,
+    "print": 0xE749,
     "recent": 0xE823,
     "redo": 0xE7A6,
     "save": 0xE74E,
@@ -268,6 +269,11 @@ def fluent_icon(name, color="#424242", size=20):
     elif name == "power":
         painter.drawArc(QRectF(3.0, 3.0, 14.0, 14.0), 55 * 16, 250 * 16)
         line(10.0, 2.5, 10.0, 10.0)
+    elif name == "print":
+        painter.drawRoundedRect(QRectF(3.0, 7.0, 14.0, 8.0), 1.2, 1.2)
+        painter.drawRect(QRectF(5.0, 2.5, 10.0, 6.5))
+        painter.drawRect(QRectF(5.0, 12.0, 10.0, 5.5))
+        painter.drawEllipse(QRectF(13.8, 9.0, 1.2, 1.2))
     elif name in ("undo", "redo"):
         if name == "undo":
             painter.drawArc(QRectF(4.0, 5.0, 13.0, 11.0), 20 * 16, 235 * 16)

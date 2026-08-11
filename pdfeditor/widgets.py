@@ -1,10 +1,10 @@
 """재사용 위젯 — PageCanvas/PageView(메인 페이지 뷰), ThumbList(썸네일)."""
 
 from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPen, QPixmap
+from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPalette, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QListWidget, QListWidgetItem,
-    QScrollArea, QWidget,
+    QScrollArea, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget,
 )
 
 THUMB_W = 120  # 썸네일 가로 픽셀
@@ -12,12 +12,75 @@ THUMB_H = int(THUMB_W * 1.5)
 THUMB_ITEM_H = THUMB_H + 28
 THUMB_MIN_W = 72
 THUMB_MAX_W = 360
+THUMB_LABEL_H = 22
+THUMB_ITEM_EXTRA_H = 32
 
 # 오버레이 색 — 선택은 파랑, 검색은 노랑, 현재 검색 항목은 주황
 SEL_COLOR = QColor(0, 120, 215, 70)
 SEARCH_COLOR = QColor(255, 200, 0, 80)
 SEARCH_CUR_COLOR = QColor(255, 120, 0, 110)
 EDIT_BOX_COLOR = QColor(0, 160, 90, 160)  # 편집 가능한 span 테두리(초록)
+
+
+def thumbnail_layout_rects(item_rect, icon_size, aspect):
+    """Return non-overlapping image and page-number rectangles."""
+    item_rect = QRectF(item_rect)
+    if item_rect.isEmpty():
+        return QRectF(), QRectF()
+
+    padding = 5.0
+    gap = 3.0
+    content = item_rect.adjusted(padding, padding, -padding, -padding)
+    label_height = min(float(THUMB_LABEL_H), max(0.0, content.height()))
+    label_rect = QRectF(
+        content.left(), content.bottom() - label_height + 1,
+        content.width(), label_height)
+
+    available_height = max(0.0, label_rect.top() - gap - content.top())
+    box_width = min(float(icon_size.width()), content.width())
+    box_height = min(float(icon_size.height()), available_height)
+    if box_width <= 0 or box_height <= 0:
+        return QRectF(), label_rect
+
+    aspect = max(0.0001, float(aspect or 1.0))
+    if aspect >= box_width / box_height:
+        image_width = box_width
+        image_height = image_width / aspect
+    else:
+        image_height = box_height
+        image_width = image_height * aspect
+    image_rect = QRectF(
+        content.center().x() - image_width / 2,
+        content.top() + (available_height - image_height) / 2,
+        image_width,
+        image_height,
+    )
+    return image_rect, label_rect
+
+
+class ThumbnailDelegate(QStyledItemDelegate):
+    """Keep thumbnail images out of the dedicated page-number band."""
+
+    def paint(self, painter, option, index):
+        styled = QStyleOptionViewItem(option)
+        self.initStyleOption(styled, index)
+        icon = QIcon(styled.icon)
+
+        # Preserve the active style's hover, selection, focus and drag state.
+        styled.icon = QIcon()
+        styled.text = ""
+        style = styled.widget.style() if styled.widget else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, styled, painter, styled.widget)
+
+        aspect = float(index.data(Qt.UserRole + 1) or 1.0)
+        view = self.parent()
+        image_rect, _label_rect = thumbnail_layout_rects(
+            option.rect, view.iconSize(), aspect)
+
+        painter.save()
+        if not icon.isNull() and not image_rect.isEmpty():
+            icon.paint(painter, image_rect.toRect(), Qt.AlignCenter)
+        painter.restore()
 
 
 def qimage_from_render(w, h, stride, samples, device_pixel_ratio=1.0):
@@ -357,10 +420,12 @@ class ThumbList(QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._rendered_rows = set()
         self.setObjectName("thumbnailRail")
         self.setMinimumWidth(96)
         self.setSpacing(4)
         self.setUniformItemSizes(True)
+        self.setItemDelegate(ThumbnailDelegate(self))
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setDragDropMode(QListWidget.InternalMove)
         self.currentRowChanged.connect(self._on_row)
@@ -416,13 +481,15 @@ class ThumbList(QListWidget):
     def reset_pages(self, count):
         """페이지 수만큼 빈 항목 생성 — 아이콘은 나중에 채워진다."""
         self.clear()
+        self._rendered_rows.clear()
         for i in range(count):
             it = QListWidgetItem("%d" % (i + 1))
             it.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
             # 아직 렌더되지 않은 항목도 완성된 썸네일과 같은 높이를 가져야
             # 전체 스크롤 범위와 보이는 행 계산이 중간에서 바뀌지 않는다.
-            it.setSizeHint(QSize(self._thumb_width + 16,
-                                 self.iconSize().height() + 28))
+            it.setSizeHint(QSize(
+                self._thumb_width + 16,
+                self.iconSize().height() + THUMB_ITEM_EXTRA_H))
             it.setData(Qt.UserRole, False)  # 렌더 완료 여부
             it.setData(Qt.UserRole + 1, 1.0)  # 페이지 가로/세로 비율
             self.addItem(it)
@@ -469,6 +536,18 @@ class ThumbList(QListWidget):
             it.setData(Qt.UserRole, rendered_width or round(logical_w))
             it.setData(Qt.UserRole + 1,
                        logical_w / logical_h if logical_h else 1.0)
+            self._rendered_rows.add(row)
+
+    def evict_thumbnails_outside(self, first, last):
+        """Release rendered pixmaps outside the nearby thumbnail window."""
+        for row in list(self._rendered_rows):
+            if first <= row <= last:
+                continue
+            item = self.item(row)
+            if item is not None:
+                item.setIcon(QIcon())
+                item.setData(Qt.UserRole, False)
+            self._rendered_rows.discard(row)
 
     def is_rendered(self, row, width=None):
         it = self.item(row)
@@ -482,6 +561,7 @@ class ThumbList(QListWidget):
         it = self.item(row)
         if it is not None:
             it.setData(Qt.UserRole, False)
+            self._rendered_rows.discard(row)
 
     def thumbnail_width(self):
         return self._thumb_width or THUMB_W
@@ -495,7 +575,8 @@ class ThumbList(QListWidget):
         height = round(width * 1.5)
         self.setIconSize(QSize(width, height))
         for row in range(self.count()):
-            self.item(row).setSizeHint(QSize(width + 16, height + 28))
+            self.item(row).setSizeHint(
+                QSize(width + 16, height + THUMB_ITEM_EXTRA_H))
         self.thumbnail_width_changed.emit(width)
 
     def resizeEvent(self, event):
@@ -521,24 +602,19 @@ class ThumbList(QListWidget):
         item_rect = QRectF(self.visualItemRect(item))
         if item_rect.isEmpty():
             return QRectF()
-        aspect = float(item.data(Qt.UserRole + 1) or 1.0)
-        box = self.iconSize()
-        box_width = min(float(box.width()), item_rect.width())
-        box_height = min(float(box.height()), item_rect.height())
-        box_left = item_rect.center().x() - box_width / 2
-        box_top = item_rect.top()
-        if aspect >= box_width / max(1.0, box_height):
-            image_width = box_width
-            image_height = image_width / aspect
-        else:
-            image_height = box_height
-            image_width = image_height * aspect
-        return QRectF(
-            box_left + (box_width - image_width) / 2,
-            box_top + (box_height - image_height) / 2,
-            image_width,
-            image_height,
-        )
+        return thumbnail_layout_rects(
+            item_rect, self.iconSize(), item.data(Qt.UserRole + 1))[0]
+
+    def _thumbnail_label_rect(self, row):
+        """Return the dedicated page-number band used by the delegate."""
+        item = self.item(row)
+        if item is None:
+            return QRectF()
+        item_rect = QRectF(self.visualItemRect(item))
+        if item_rect.isEmpty():
+            return QRectF()
+        return thumbnail_layout_rects(
+            item_rect, self.iconSize(), item.data(Qt.UserRole + 1))[1]
 
     def thumbnail_point_at(self, pos):
         """썸네일 클릭 위치를 (행, 0~1 페이지 좌표)로 변환한다."""
@@ -557,6 +633,17 @@ class ThumbList(QListWidget):
 
     def paintEvent(self, event):
         super().paintEvent(event)
+        painter = QPainter(self.viewport())
+        painter.setPen(self.palette().color(QPalette.Text))
+        for row in self.visible_rows():
+            item = self.item(row)
+            if item is None:
+                continue
+            label_rect = self._thumbnail_label_rect(row)
+            if label_rect.intersects(QRectF(self.viewport().rect())):
+                painter.drawText(label_rect, Qt.AlignCenter, item.text())
+        painter.end()
+
         if self._viewport_rect is None or self._viewport_page < 0:
             return
         item = self.item(self._viewport_page)

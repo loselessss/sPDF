@@ -29,6 +29,7 @@ from .icons import fluent_icon
 from .meta import APP_NAME, APP_VERSION
 from .ocr import OcrMixin
 from .pages import PagesMixin
+from .printing import PrintMixin
 from .startpage import StartPage
 from .textsel import TextSelectMixin
 from .update_dialog import UpdateCheckWorker, UpdateDialog
@@ -309,7 +310,7 @@ class TransferTabBar(QTabBar):
 # MRO 주의: TextSelectMixin이 ViewerMixin보다 앞이어야 show_page 훅
 # (페이지 전환 시 선택 초기화/검색 오버레이 재적용)이 동작한다.
 class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
-                  TextSelectMixin, ViewerMixin):
+                  PrintMixin, TextSelectMixin, ViewerMixin):
 
     title_changed = pyqtSignal()  # 탭 라벨/창 제목 갱신 신호(셸이 받는다)
     selection_changed = pyqtSignal(object)
@@ -462,6 +463,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._save_act = self._act(m, "저장", "Ctrl+S", self.save, "save")
         self._act(m, "다른 이름으로 저장...", "Ctrl+Shift+S",
                   self.save_as_dialog, "save_as")
+        self._print_act = self._act(
+            m, "인쇄...", "Ctrl+P", self.print_document, "print")
         self._act(m, "탐색기에서 현재 위치 열기", None,
                   self.open_current_location, "external")
         m.addSeparator()
@@ -565,6 +568,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.setToolButtonStyle(Qt.ToolButtonIconOnly)
         tool_bar.addAction(self._open_act)
         tool_bar.addAction(self._save_act)
+        tool_bar.addAction(self._print_act)
         tool_bar.addSeparator()
         tool_bar.addAction(self._undo_act)
         tool_bar.addAction(self._redo_act)
@@ -773,6 +777,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
     def close_doc(self):
         """탭이 닫힐 때 자원 정리. OCR 워커가 돌면 취소하고 문서를 닫는다."""
+        self._thumb_timer.stop()
+        self._thumbnail_width_timer.stop()
         self._save_thumbnail_width()
         w = getattr(self, "_ocr_worker", None)
         if w is not None:
@@ -788,6 +794,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             self.doc = None
         self._sync_favorite_action()
         self._cache.clear()
+        self.view.clear()
+        self.thumbs.reset_pages(0)
         self._reset_textsel()
         self._reset_annots()
         self._reset_edit()
@@ -1027,7 +1035,8 @@ class AppWindow(QMainWindow):
         if not any(getattr(window, "_auto_update_started", False)
                    for window in _app_windows):
             self._auto_update_started = True
-            QTimer.singleShot(5000, lambda: self.check_for_updates(False))
+            if settings.automatic_update_check_due():
+                QTimer.singleShot(5000, self._run_automatic_update_check)
 
         self._fluent_backdrop_attempted = False
         self._fluent_backdrop_applied = False
@@ -1076,6 +1085,12 @@ class AppWindow(QMainWindow):
         QMessageBox.about(self, "정보", "%s %s" % (APP_NAME, APP_VERSION))
 
     # --- GitHub Releases 업데이트 ------------------------------------
+
+    def _run_automatic_update_check(self):
+        # 시작 시각을 먼저 기록해 네트워크 오류나 강제 종료가 있어도 다음
+        # 실행 때마다 확인을 반복하지 않는다. 수동 확인은 이 제한과 무관하다.
+        settings.mark_automatic_update_check()
+        self.check_for_updates(False)
 
     def check_for_updates(self, manual=True):
         if self._update_worker is not None and self._update_worker.isRunning():
@@ -1354,6 +1369,9 @@ class AppWindow(QMainWindow):
             if not tab.maybe_save():
                 ev.ignore()
                 return
+        # 저장 여부가 모두 확정됐으면 무거운 이미지/워커 정리보다 창을 먼저
+        # 감춰 사용자가 X 버튼의 반응을 즉시 느끼게 한다.
+        self.hide()
         # 창의 X 버튼으로 종료할 때도 탭 닫기와 같은 경로를 거쳐 OCR 자식
         # 프로세스와 열린 문서를 확실히 정리한다.
         for i in range(self._tabs.count()):

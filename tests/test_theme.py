@@ -44,7 +44,7 @@ class FluentThemeTests(unittest.TestCase):
             "extract", "fit_page", "fit_width", "hand", "help",
             "highlight", "info",
             "license", "merge", "new_tab", "new_window", "note", "notes",
-            "ocr", "open", "pages", "power", "recent", "redo",
+            "ocr", "open", "pages", "power", "print", "recent", "redo",
             "rotate_ccw", "rotate_cw", "save", "save_as", "search",
             "select_all", "settings", "split", "star", "star_filled",
             "text_select", "undo", "update", "zoom_in", "zoom_out",
