@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .meta import APP_NAME, APP_VERSION
+from .icons import fluent_icon
 
 HELP_HTML = """
 <h2>{name} 사용법</h2>
@@ -138,6 +139,7 @@ def show_help(parent):
     lay.addWidget(scroll, 1)
 
     btns = QDialogButtonBox(QDialogButtonBox.Close)
+    btns.button(QDialogButtonBox.Close).setIcon(fluent_icon("close"))
     btns.rejected.connect(dlg.reject)
     btns.accepted.connect(dlg.accept)
     lay.addWidget(btns)

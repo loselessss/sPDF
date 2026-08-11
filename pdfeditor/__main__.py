@@ -21,6 +21,7 @@ def main():
     from .app import new_window
     from .meta import APP_NAME, APP_VERSION
     from .paths import app_icon
+    from .theme import apply_fluent_theme
 
     # Windows의 모든 Qt 대화상자 제목 표시줄에 자동으로 붙는 `?`
     # 컨텍스트 도움말 버튼을 앱 전체에서 제거한다.
@@ -29,6 +30,7 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(APP_NAME)
+    apply_fluent_theme(app)
     import os
     icon = app_icon()
     if os.path.exists(icon):

@@ -7,13 +7,15 @@ Adobe Acrobat 홈처럼 열기 버튼 + 즐겨찾기 + 최근 파일을 보여�
 
 import os
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import QPointF, Qt, pyqtSignal
+from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu, QPushButton,
-    QVBoxLayout, QWidget,
+    QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QListWidget,
+    QListWidgetItem, QMenu, QPushButton, QVBoxLayout, QWidget,
 )
 
 from . import settings
+from .icons import fluent_icon
 from .meta import APP_NAME, APP_VERSION
 
 
@@ -24,6 +26,11 @@ class _FileList(QListWidget):
 
     def __init__(self, empty_text, parent=None):
         super().__init__(parent)
+        self.setObjectName("startFileList")
+        # 긴 경로는 툴팁으로 확인할 수 있으므로 가로 스크롤바 대신 가운데를
+        # 말줄임한다. 가로·세로 바 교차점의 불필요한 코너 표시도 사라진다.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setTextElideMode(Qt.ElideMiddle)
         self._empty_text = empty_text
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.itemClicked.connect(self._on_click)
@@ -59,24 +66,29 @@ class StartPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("startPage")
         root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
+        root.setContentsMargins(48, 34, 48, 38)
         root.setSpacing(12)
 
         title = QLabel(APP_NAME)
+        title.setObjectName("heroTitle")
         f = title.font()
-        f.setPointSize(28)
+        f.setPointSize(22)
         f.setBold(True)
         title.setFont(f)
         ver = QLabel("v%s — PDF 보기 · 주석 · OCR" % APP_VERSION)
-        ver.setStyleSheet("color: gray;")
+        ver.setObjectName("subtitle")
 
         btn = QPushButton("PDF 열기...")
-        btn.setFixedWidth(160)
+        btn.setProperty("accent", True)
+        btn.setIcon(fluent_icon("open", "#ffffff"))
+        btn.setFixedWidth(132)
         btn.clicked.connect(lambda _c=False: self.browse.emit())
 
         # 문서를 열어둔 채 홈에 온 경우에만 보이는 '돌아가기' 버튼
         self._back_btn = QPushButton("")
+        self._back_btn.setIcon(fluent_icon("back"))
         self._back_btn.clicked.connect(lambda _c=False: self.back_to_doc.emit())
         self._back_btn.hide()
 
@@ -91,18 +103,28 @@ class StartPage(QWidget):
         root.addSpacing(8)
 
         cols = QHBoxLayout()
-        cols.setSpacing(16)
+        cols.setSpacing(14)
         self.fav_list = _FileList("(별표한 파일이 없습니다 — 최근 파일에서 우클릭)")
         self.recent_list = _FileList("(최근 연 파일이 없습니다)")
         for label, lst in (("★ 즐겨찾기", self.fav_list), ("최근 파일", self.recent_list)):
-            box = QVBoxLayout()
+            card = QFrame()
+            card.setObjectName("startCard")
+            shadow = QGraphicsDropShadowEffect(card)
+            shadow.setBlurRadius(22)
+            shadow.setColor(QColor(0, 0, 0, 24))
+            shadow.setOffset(QPointF(0, 4))
+            card.setGraphicsEffect(shadow)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(14, 12, 14, 14)
+            box.setSpacing(8)
             head = QLabel(label)
+            head.setProperty("role", "cardTitle")
             hf = head.font()
             hf.setBold(True)
             head.setFont(hf)
             box.addWidget(head)
             box.addWidget(lst)
-            cols.addLayout(box, 1)
+            cols.addWidget(card, 1)
         root.addLayout(cols, 1)
 
         self.fav_list.open_requested.connect(self.open_file)
@@ -130,8 +152,9 @@ class StartPage(QWidget):
         if not p:
             return
         m = QMenu(self)
-        m.addAction("즐겨찾기에서 제거",
-                    lambda _c=False: self._unfav(p))
+        action = m.addAction("즐겨찾기에서 제거",
+                             lambda _c=False: self._unfav(p))
+        action.setIcon(fluent_icon("star_filled", "#0f6cbd"))
         m.exec_(self.fav_list.mapToGlobal(pos))
 
     def _recent_menu(self, pos):
@@ -140,10 +163,16 @@ class StartPage(QWidget):
             return
         m = QMenu(self)
         if settings.is_favorite(p):
-            m.addAction("즐겨찾기에서 제거", lambda _c=False: self._unfav(p))
+            action = m.addAction(
+                "즐겨찾기에서 제거", lambda _c=False: self._unfav(p))
+            action.setIcon(fluent_icon("star_filled", "#0f6cbd"))
         else:
-            m.addAction("★ 즐겨찾기에 추가", lambda _c=False: self._fav(p))
-        m.addAction("최근 목록에서 제거", lambda _c=False: self._unrecent(p))
+            action = m.addAction(
+                "즐겨찾기에 추가", lambda _c=False: self._fav(p))
+            action.setIcon(fluent_icon("star"))
+        remove_action = m.addAction(
+            "최근 목록에서 제거", lambda _c=False: self._unrecent(p))
+        remove_action.setIcon(fluent_icon("delete"))
         m.exec_(self.recent_list.mapToGlobal(pos))
 
     def _fav(self, p):

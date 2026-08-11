@@ -10,6 +10,8 @@ from PyQt5.QtWidgets import (
     QFileDialog, QInputDialog, QListWidgetItem, QMenu, QMessageBox, QToolTip,
 )
 
+from .icons import fluent_icon
+
 
 class AnnotMixin:
     def _init_annot_state(self):
@@ -246,8 +248,10 @@ class AnnotMixin:
             return
         menu = QMenu(self)
         if self._selected:
-            menu.addAction("선택 영역 형광펜",
-                           lambda _c=False: self.highlight_selection())
+            action = menu.addAction(
+                "선택 영역 형광펜",
+                lambda _c=False: self.highlight_selection())
+            action.setIcon(fluent_icon("highlight"))
         a = self._annot_at(pt)
         if a is not None:
             if a["kind"] == "Text":
@@ -255,11 +259,17 @@ class AnnotMixin:
                 first = a["text"].splitlines()[0] if a["text"] else ""
                 if len(first) > 30:
                     first = first[:30] + "…"
-                menu.addAction("메모 편집: %s" % first,
-                               lambda _c=False, a=a: self.edit_annot(a))
-            menu.addAction("주석 삭제", lambda _c=False, a=a: self.delete_annot(a))
+                action = menu.addAction(
+                    "메모 편집: %s" % first,
+                    lambda _c=False, a=a: self.edit_annot(a))
+                action.setIcon(fluent_icon("edit"))
+            action = menu.addAction(
+                "주석 삭제", lambda _c=False, a=a: self.delete_annot(a))
+            action.setIcon(fluent_icon("delete"))
         else:
-            menu.addAction("여기에 메모 추가",
-                           lambda _c=False, p=pt: self._add_note_at(p))
+            action = menu.addAction(
+                "여기에 메모 추가",
+                lambda _c=False, p=pt: self._add_note_at(p))
+            action.setIcon(fluent_icon("note"))
         if menu.actions():
             menu.exec_(global_pos)

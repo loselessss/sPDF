@@ -7,7 +7,7 @@
 
 import json
 from PyQt5.QtCore import (
-    QByteArray, QItemSelectionModel, QMimeData, QSize, Qt, QTimer,
+    QByteArray, QItemSelectionModel, QMimeData, QPoint, QSize, Qt, QTimer,
 )
 from PyQt5.QtGui import QDrag, QIcon, QPixmap
 from PyQt5.QtWidgets import (
@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .widgets import qimage_from_render
+from .icons import fluent_icon
 
 
 PAGE_MIME = "application/x-spdf-page-indices"
@@ -24,6 +25,8 @@ THUMB_WIDTH = 150
 
 
 class PageOrganizerList(QListWidget):
+    FALLBACK_WINDOW = 10
+
     def __init__(self, dialog):
         super().__init__(dialog)
         self.dialog = dialog
@@ -35,6 +38,61 @@ class PageOrganizerList(QListWidget):
         self.setDefaultDropAction(Qt.MoveAction)
         self.setIconSize(QSize(THUMB_WIDTH, int(THUMB_WIDTH * 1.42)))
         self.setSpacing(6)
+        self.setUniformItemSizes(True)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+
+    def reset_pages(self, count):
+        """페이지 수만큼 크기가 고정된 빈 썸네일 항목을 만든다."""
+        self.clear()
+        item_size = QSize(
+            THUMB_WIDTH + 20,
+            self.iconSize().height() + 30,
+        )
+        for index in range(count):
+            item = QListWidgetItem("%d페이지" % (index + 1))
+            item.setTextAlignment(Qt.AlignHCenter)
+            item.setSizeHint(item_size)
+            item.setData(Qt.UserRole, False)
+            self.addItem(item)
+
+    def visible_rows(self):
+        """여백을 제외하고 실제 뷰포트에 걸친 썸네일 행을 반환한다."""
+        if self.count() == 0:
+            return []
+        top = self._row_near_viewport_edge(True)
+        bottom = self._row_near_viewport_edge(False)
+        if top < 0:
+            top = 0
+        if bottom < 0:
+            bottom = min(top + self.FALLBACK_WINDOW - 1, self.count() - 1)
+        return list(range(top, min(bottom + 2, self.count())))
+
+    def _row_near_viewport_edge(self, from_top):
+        """x=0의 좌우 여백을 피해 중앙에서 가장자리의 행을 찾는다."""
+        rect = self.viewport().rect()
+        x = rect.center().x()
+        positions = (
+            range(rect.top(), rect.bottom() + 1)
+            if from_top else
+            range(rect.bottom(), rect.top() - 1, -1)
+        )
+        for y in positions:
+            row = self.indexAt(QPoint(x, y)).row()
+            if row >= 0:
+                return row
+        return -1
+
+    def _request_visible_thumbnails(self):
+        if self.dialog is not None:
+            self.dialog._schedule_thumbnails()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._request_visible_thumbnails()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._request_visible_thumbnails()
 
     def startDrag(self, _actions):
         row = self.currentRow()
@@ -109,6 +167,7 @@ class PageOrganizerDialog(QDialog):
     def __init__(self, host):
         super().__init__(host)
         self.host = host
+        self._thumbnail_render_scheduled = False
         self.setWindowTitle("페이지 구성")
         self.resize(620, 760)
 
@@ -137,8 +196,12 @@ class PageOrganizerDialog(QDialog):
 
         buttons = QHBoxLayout()
         add_button = QPushButton("PDF 추가...")
+        add_button.setIcon(fluent_icon("add_file"))
         delete_button = QPushButton("선택 페이지 삭제")
+        delete_button.setProperty("danger", True)
+        delete_button.setIcon(fluent_icon("delete", "#c42b1c"))
         close_button = QPushButton("닫기")
+        close_button.setIcon(fluent_icon("close"))
         add_button.clicked.connect(self.choose_pdfs)
         delete_button.clicked.connect(self.delete_selected)
         close_button.clicked.connect(self.accept)
@@ -151,13 +214,8 @@ class PageOrganizerDialog(QDialog):
         self.refresh(host.page_index)
 
     def refresh(self, current=0, selected=None):
-        self.pages.clear()
         count = self.host.doc.page_count
-        for index in range(count):
-            item = QListWidgetItem("%d페이지" % (index + 1))
-            item.setTextAlignment(Qt.AlignHCenter)
-            item.setData(Qt.UserRole, False)
-            self.pages.addItem(item)
+        self.pages.reset_pages(count)
         current = max(0, min(current, count - 1))
         self.pages.setCurrentRow(current)
         if selected:
@@ -172,16 +230,16 @@ class PageOrganizerDialog(QDialog):
         self._schedule_thumbnails()
 
     def _schedule_thumbnails(self):
+        if self._thumbnail_render_scheduled:
+            return
+        self._thumbnail_render_scheduled = True
         QTimer.singleShot(0, self._render_visible_thumbnails)
 
     def _render_visible_thumbnails(self):
+        self._thumbnail_render_scheduled = False
         if not self.host.doc or self.pages.count() == 0:
             return
-        top = self.pages.indexAt(self.pages.viewport().rect().topLeft()).row()
-        bottom = self.pages.indexAt(self.pages.viewport().rect().bottomLeft()).row()
-        top = max(0, top)
-        bottom = min(self.pages.count() - 1, bottom if bottom >= 0 else top + 8)
-        for row in range(top, bottom + 2):
+        for row in self.pages.visible_rows():
             item = self.pages.item(row)
             if item is None or item.data(Qt.UserRole):
                 continue

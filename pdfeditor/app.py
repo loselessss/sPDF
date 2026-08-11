@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import uuid
 
-from PyQt5.QtCore import QMimeData, Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import QMimeData, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QDrag
 from PyQt5.QtWidgets import (
     QAction, QActionGroup, QApplication, QCheckBox, QDialog, QDialogButtonBox,
@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
 from . import settings
 from .annots import AnnotMixin
 from .editing import EditMixin
+from .icons import fluent_icon
 from .meta import APP_NAME, APP_VERSION
 from .ocr import OcrMixin
 from .pages import PagesMixin
@@ -36,10 +37,12 @@ from .viewer import ViewerMixin
 from .widgets import PageView, ThumbList
 
 
-def _make_action(parent, text, shortcut, slot):
+def _make_action(parent, text, shortcut, slot, icon_name=None):
     """QAction 생성 — triggered의 checked 인자가 슬롯 첫 인자에 잘못 꽂히지
     않게 항상 람다로 감싼다."""
     a = QAction(text, parent)
+    if icon_name:
+        a.setIcon(fluent_icon(icon_name))
     if shortcut:
         a.setShortcut(shortcut)
     a.triggered.connect(lambda _checked=False, s=slot: s())
@@ -70,6 +73,7 @@ def _show_default_app_settings(parent):
         layout.addWidget(warning)
 
     defaults = QPushButton("Windows 기본 앱 설정 열기")
+    defaults.setIcon(fluent_icon("settings"))
     layout.addWidget(defaults)
     layout.addSpacing(8)
 
@@ -99,7 +103,9 @@ def _show_default_app_settings(parent):
 
     buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Close)
     buttons.button(QDialogButtonBox.Save).setText("적용")
+    buttons.button(QDialogButtonBox.Save).setIcon(fluent_icon("save"))
     buttons.button(QDialogButtonBox.Close).setText("닫기")
+    buttons.button(QDialogButtonBox.Close).setIcon(fluent_icon("close"))
     layout.addWidget(buttons)
 
     def _open_defaults():
@@ -394,18 +400,24 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
     def _build_search_bar(self):
         bar = QWidget()
+        bar.setObjectName("searchBar")
         h = QHBoxLayout(bar)
         h.setContentsMargins(6, 4, 6, 4)
         self._search_edit = QLineEdit()
+        self._search_edit.addAction(
+            fluent_icon("search", size=16), QLineEdit.LeadingPosition)
         self._search_edit.setPlaceholderText("검색어 입력 후 Enter (F3 다음 / Shift+F3 이전)")
         self._search_edit.returnPressed.connect(
             lambda: self.search_start(self._search_edit.text()))
         self._search_count = QLabel("")
-        prev_btn = QToolButton(); prev_btn.setText("▲")
-        next_btn = QToolButton(); next_btn.setText("▼")
+        prev_btn = QToolButton(); prev_btn.setIcon(fluent_icon("chevron_up", size=16))
+        next_btn = QToolButton(); next_btn.setIcon(fluent_icon("chevron_down", size=16))
+        prev_btn.setToolTip("이전 검색 결과 (Shift+F3)")
+        next_btn.setToolTip("다음 검색 결과 (F3)")
         prev_btn.clicked.connect(lambda _c=False: self.search_prev())
         next_btn.clicked.connect(lambda _c=False: self.search_next())
         close_btn = QPushButton("닫기")
+        close_btn.setIcon(fluent_icon("close", size=16))
         close_btn.clicked.connect(lambda _c=False: self.hide_search())
         for w in (self._search_edit, self._search_count, prev_btn, next_btn, close_btn):
             h.addWidget(w)
@@ -423,120 +435,152 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._search_bar.hide()
         self.search_clear()
 
-    def _act(self, menu, text, shortcut, slot):
-        a = _make_action(self, text, shortcut, slot)
+    def _act(self, menu, text, shortcut, slot, icon_name=None):
+        a = _make_action(self, text, shortcut, slot, icon_name)
         menu.addAction(a)
         return a
 
     def _build_menus(self):
         m = self.menuBar().addMenu("파일(&F)")
-        self._act(m, "열기...", "Ctrl+O", lambda: self._shell.open_dialog())
-        self._act(m, "새 탭", "Ctrl+T", lambda: self._shell.open_dialog())
+        self._open_act = self._act(
+            m, "열기...", "Ctrl+O", lambda: self._shell.open_dialog(), "open")
+        self._act(m, "새 탭", "Ctrl+T", lambda: self._shell.open_dialog(),
+                  "new_tab")
         self._act(m, "새 창", "Ctrl+Shift+N",
-                  lambda: new_window(force_new=True))
+                  lambda: new_window(force_new=True), "new_window")
         self._recent_menu = m.addMenu("최근 파일")
+        self._recent_menu.setIcon(fluent_icon("recent"))
         self._recent_menu.setToolTipsVisible(True)
         self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
         self._fav_menu = m.addMenu("즐겨찾기")
+        self._fav_menu.setIcon(fluent_icon("star"))
         self._fav_menu.setToolTipsVisible(True)
         self._fav_menu.aboutToShow.connect(self._rebuild_fav_menu)
         m.addSeparator()
-        self._act(m, "저장", "Ctrl+S", self.save)
-        self._act(m, "다른 이름으로 저장...", "Ctrl+Shift+S", self.save_as_dialog)
+        self._save_act = self._act(m, "저장", "Ctrl+S", self.save, "save")
+        self._act(m, "다른 이름으로 저장...", "Ctrl+Shift+S",
+                  self.save_as_dialog, "save_as")
         self._act(m, "탐색기에서 현재 위치 열기", None,
-                  self.open_current_location)
+                  self.open_current_location, "external")
         m.addSeparator()
-        self._act(m, "탭 닫기", "Ctrl+W", lambda: self._shell.close_tab(self))
-        self._act(m, "종료", "Ctrl+Q", lambda: self._shell.close())
+        self._act(m, "탭 닫기", "Ctrl+W",
+                  lambda: self._shell.close_tab(self), "close")
+        self._act(m, "종료", "Ctrl+Q", lambda: self._shell.close(), "power")
 
         e = self.menuBar().addMenu("편집(&E)")
-        self._undo_act = self._act(e, "실행 취소", "Ctrl+Z", self.undo)
-        self._redo_act = self._act(e, "다시 실행", "Ctrl+Y", self.redo)
+        self._undo_act = self._act(
+            e, "실행 취소", "Ctrl+Z", self.undo, "undo")
+        self._redo_act = self._act(
+            e, "다시 실행", "Ctrl+Y", self.redo, "redo")
         self._undo_act.setEnabled(False)
         self._redo_act.setEnabled(False)
         e.addSeparator()
-        self._act(e, "복사", "Ctrl+C", self.copy_selection)
-        self._act(e, "현재 페이지 모두 선택", "Ctrl+A", self.select_all)
+        self._act(e, "복사", "Ctrl+C", self.copy_selection, "copy")
+        self._act(e, "현재 페이지 모두 선택", "Ctrl+A", self.select_all,
+                  "select_all")
         e.addSeparator()
         self._edit_act = self._act(e, "텍스트 편집 모드", "Ctrl+E",
-                                   self.toggle_edit_mode)
+                                   self.toggle_edit_mode, "edit")
         self._edit_act.setCheckable(True)
         e.addSeparator()
-        self._act(e, "찾기...", "Ctrl+F", self.show_search)
-        self._act(e, "다음 찾기", "F3", self.search_next)
-        self._act(e, "이전 찾기", "Shift+F3", self.search_prev)
+        self._search_act = self._act(
+            e, "찾기...", "Ctrl+F", self.show_search, "search")
+        self._act(e, "다음 찾기", "F3", self.search_next, "chevron_down")
+        self._act(e, "이전 찾기", "Shift+F3", self.search_prev, "chevron_up")
 
         p = self.menuBar().addMenu("페이지(&P)")
-        self._act(p, "페이지 구성...", "Ctrl+Shift+P",
-                  self.show_page_organizer)
+        self._pages_act = self._act(
+            p, "페이지 구성...", "Ctrl+Shift+P",
+            self.show_page_organizer, "pages")
         p.addSeparator()
-        self._act(p, "오른쪽으로 회전", "Ctrl+]", self.rotate_page_cw)
-        self._act(p, "왼쪽으로 회전", "Ctrl+[", self.rotate_page_ccw)
-        self._act(p, "현재 페이지 삭제", "Ctrl+Delete", self.delete_current_page)
+        self._act(p, "오른쪽으로 회전", "Ctrl+]", self.rotate_page_cw,
+                  "rotate_cw")
+        self._act(p, "왼쪽으로 회전", "Ctrl+[", self.rotate_page_ccw,
+                  "rotate_ccw")
+        self._act(p, "현재 페이지 삭제", "Ctrl+Delete",
+                  self.delete_current_page, "delete")
         p.addSeparator()
-        self._act(p, "PDF 병합...", None, self.merge_pdf)
-        self._act(p, "PDF 분리...", None, self.split_pdf)
-        self._act(p, "현재 페이지 추출...", None, self.extract_current_page)
+        self._act(p, "PDF 병합...", None, self.merge_pdf, "merge")
+        self._act(p, "PDF 분리...", None, self.split_pdf, "split")
+        self._act(p, "현재 페이지 추출...", None,
+                  self.extract_current_page, "extract")
 
         a = self.menuBar().addMenu("주석(&A)")
-        self._act(a, "선택 영역 형광펜", "Ctrl+H", self.highlight_selection)
-        self._act(a, "메모 추가 (위치 클릭)", "Ctrl+M", self.start_note_mode)
+        self._act(a, "선택 영역 형광펜", "Ctrl+H",
+                  self.highlight_selection, "highlight")
+        self._act(a, "메모 추가 (위치 클릭)", "Ctrl+M",
+                  self.start_note_mode, "note")
         a.addSeparator()
-        self._act(a, "메모 모아보기", "Ctrl+Shift+M", self.toggle_notes_panel)
+        self._act(a, "메모 모아보기", "Ctrl+Shift+M",
+                  self.toggle_notes_panel, "notes")
 
         o = self.menuBar().addMenu("OCR(&O)")
-        self._act(o, "현재 페이지 OCR", "Ctrl+R", self.ocr_current_page)
+        self._act(o, "현재 페이지 OCR", "Ctrl+R", self.ocr_current_page,
+                  "ocr")
         self._act(o, "전체 문서 OCR (텍스트 없는 페이지만)", "Ctrl+Shift+R",
-                  self.ocr_document)
+                  self.ocr_document, "ocr")
         o.addSeparator()
-        self._act(o, "AI 고품질 OCR 설정...", None, self.show_ocr_engine_dialog)
+        self._act(o, "AI 고품질 OCR 설정...", None,
+                  self.show_ocr_engine_dialog, "ai")
 
         v = self.menuBar().addMenu("보기(&V)")
-        self._act(v, "확대", "Ctrl++", self.zoom_in)
-        self._act(v, "축소", "Ctrl+-", self.zoom_out)
-        self._act(v, "1% 확대", "Alt++", self.zoom_in_fine)
-        self._act(v, "1% 축소", "Alt+-", self.zoom_out_fine)
-        self._act(v, "창 너비에 맞춤", "Ctrl+0", self.zoom_fit)
+        self._act(v, "확대", "Ctrl++", self.zoom_in, "zoom_in")
+        self._act(v, "축소", "Ctrl+-", self.zoom_out, "zoom_out")
+        self._act(v, "1% 확대", "Alt++", self.zoom_in_fine, "zoom_in")
+        self._act(v, "1% 축소", "Alt+-", self.zoom_out_fine, "zoom_out")
+        self._act(v, "창 너비에 맞춤", "Ctrl+0", self.zoom_fit, "fit")
         v.addSeparator()
-        self._act(v, "다음 페이지", "PgDown", self.next_page)
-        self._act(v, "이전 페이지", "PgUp", self.prev_page)
+        self._act(v, "다음 페이지", "PgDown", self.next_page,
+                  "chevron_down")
+        self._act(v, "이전 페이지", "PgUp", self.prev_page, "chevron_up")
         v.addSeparator()
         self._interaction_group = QActionGroup(self)
         self._interaction_group.setExclusive(True)
         self._select_tool_act = self._act(
             v, "텍스트 선택 도구", None,
-            lambda: self.set_interaction_mode("select"))
+            lambda: self.set_interaction_mode("select"), "text_select")
         self._hand_tool_act = self._act(
             v, "손 도구", None,
-            lambda: self.set_interaction_mode("hand"))
+            lambda: self.set_interaction_mode("hand"), "hand")
         for action in (self._select_tool_act, self._hand_tool_act):
             action.setCheckable(True)
             self._interaction_group.addAction(action)
         self._select_tool_act.setChecked(True)
         self._favorite_act = _make_action(
-            self, "★ 즐겨찾기 추가", None, self._toggle_favorite)
+            self, "즐겨찾기 추가", None, self._toggle_favorite, "star")
         self._favorite_act.setEnabled(False)
 
-        tool_bar = QToolBar("상호작용 도구", self)
-        tool_bar.setObjectName("interaction_tools")
+        tool_bar = QToolBar("명령 모음", self)
+        tool_bar.setObjectName("command_bar")
         tool_bar.setMovable(False)
         tool_bar.setFloatable(False)
-        tool_bar.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        tool_bar.setIconSize(QSize(20, 20))
+        tool_bar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        tool_bar.addAction(self._open_act)
+        tool_bar.addAction(self._save_act)
+        tool_bar.addSeparator()
+        tool_bar.addAction(self._undo_act)
+        tool_bar.addAction(self._redo_act)
+        tool_bar.addSeparator()
         tool_bar.addAction(self._hand_tool_act)
         tool_bar.addAction(self._select_tool_act)
+        tool_bar.addSeparator()
+        tool_bar.addAction(self._pages_act)
+        tool_bar.addAction(self._search_act)
         tool_bar.addSeparator()
         tool_bar.addAction(self._favorite_act)
         self.addToolBar(Qt.TopToolBarArea, tool_bar)
         self._interaction_toolbar = tool_bar
 
         h = self.menuBar().addMenu("도움말(&H)")
-        self._act(h, "사용법", "F1", self.show_help)
+        self._act(h, "사용법", "F1", self.show_help, "help")
         self._act(h, "업데이트 확인...", None,
-                  lambda: self._shell.check_for_updates(True))
+                  lambda: self._shell.check_for_updates(True), "update")
         self._act(h, "PDF 기본 프로그램 / 브라우저 설정...", None,
-                  self.check_default_app)
-        self._act(h, "오픈소스 라이선스", None, self.show_licenses)
-        self._act(h, "정보", None, self.show_about)
+                  self.check_default_app, "settings")
+        self._act(h, "오픈소스 라이선스", None, self.show_licenses,
+                  "license")
+        self._act(h, "정보", None, self.show_about, "info")
 
     # --- 페이지 넘김/클릭 ---------------------------------------------
 
@@ -592,24 +636,28 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             if len(label) > 100:
                 label = label[:60] + "…" + label[-39:]
             act = self._recent_menu.addAction(label)
+            act.setIcon(fluent_icon("open"))
             act.setToolTip(p)
             act.triggered.connect(lambda _c=False, p=p: self._shell.open_recent(p))
         self._recent_menu.addSeparator()
-        self._recent_menu.addAction(
+        clear_action = self._recent_menu.addAction(
             "목록 지우기", lambda _c=False: settings.clear_recent())
+        clear_action.setIcon(fluent_icon("delete"))
 
     def _rebuild_fav_menu(self):
         self._fav_menu.clear()
         self._sync_favorite_action()
         if self.doc is not None:
             if settings.is_favorite(self.doc.path):
-                self._fav_menu.addAction(
+                action = self._fav_menu.addAction(
                     "현재 파일을 즐겨찾기에서 제거",
                     lambda _c=False: self._toggle_favorite())
+                action.setIcon(fluent_icon("star_filled", "#0f6cbd"))
             else:
-                self._fav_menu.addAction(
+                action = self._fav_menu.addAction(
                     "★ 현재 파일을 즐겨찾기에 추가",
                     lambda _c=False: self._toggle_favorite())
+                action.setIcon(fluent_icon("star"))
             self._fav_menu.addSeparator()
         favs = list(reversed(settings.favorites()))
         if not favs:
@@ -621,20 +669,25 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             if len(label) > 100:
                 label = label[:60] + "…" + label[-39:]
             act = self._fav_menu.addAction(label)
+            act.setIcon(fluent_icon("open"))
             act.setToolTip(p)
             act.triggered.connect(lambda _c=False, p=p: self._shell.open_recent(p))
 
     def _sync_favorite_action(self):
         """현재 문서의 즐겨찾기 여부를 도구 모음에 반영한다."""
         if self.doc is None or not self.doc.path:
-            self._favorite_act.setText("★ 즐겨찾기 추가")
+            self._favorite_act.setText("즐겨찾기 추가")
+            self._favorite_act.setIcon(fluent_icon("star"))
             self._favorite_act.setToolTip("PDF를 연 뒤 즐겨찾기에 추가할 수 있습니다")
             self._favorite_act.setEnabled(False)
             return
         favorite = settings.is_favorite(self.doc.path)
         self._favorite_act.setEnabled(True)
         self._favorite_act.setText(
-            "★ 즐겨찾기 해제" if favorite else "★ 즐겨찾기 추가")
+            "즐겨찾기 해제" if favorite else "즐겨찾기 추가")
+        self._favorite_act.setIcon(fluent_icon(
+            "star_filled" if favorite else "star",
+            "#0f6cbd" if favorite else "#424242"))
         self._favorite_act.setToolTip(
             "현재 PDF를 즐겨찾기에서 제거합니다" if favorite else
             "현재 PDF를 즐겨찾기에 추가합니다")
@@ -801,8 +854,11 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             % (desc, vl.install_hint(),
                "AI 고품질(VL)" if cur == "vl" else "RapidOCR"))
         b_basic = box.addButton("RapidOCR로", QMessageBox.AcceptRole)
+        b_basic.setIcon(fluent_icon("ocr"))
         b_vl = box.addButton("AI 고품질로", QMessageBox.AcceptRole)
-        box.addButton("취소", QMessageBox.RejectRole)
+        b_vl.setIcon(fluent_icon("ai"))
+        b_cancel = box.addButton("취소", QMessageBox.RejectRole)
+        b_cancel.setIcon(fluent_icon("close"))
         box.exec_()
         clicked = box.clickedButton()
         if clicked is b_basic:
@@ -961,26 +1017,43 @@ class AppWindow(QMainWindow):
             self._auto_update_started = True
             QTimer.singleShot(5000, lambda: self.check_for_updates(False))
 
+        self._fluent_backdrop_attempted = False
+        self._fluent_backdrop_applied = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._fluent_backdrop_attempted:
+            from .windows_integration import apply_fluent_window_backdrop
+
+            self._fluent_backdrop_attempted = True
+            self._fluent_backdrop_applied = apply_fluent_window_backdrop(self)
+
     def _build_shell_menu(self):
         mb = QMenuBar(self)
         m = mb.addMenu("파일(&F)")
-        m.addAction(_make_action(self, "열기...", "Ctrl+O", self.open_dialog))
-        m.addAction(_make_action(self, "새 탭", "Ctrl+T", self.open_dialog))
         m.addAction(_make_action(
-            self, "새 창", "Ctrl+Shift+N", lambda: new_window(force_new=True)))
+            self, "열기...", "Ctrl+O", self.open_dialog, "open"))
+        m.addAction(_make_action(
+            self, "새 탭", "Ctrl+T", self.open_dialog, "new_tab"))
+        m.addAction(_make_action(
+            self, "새 창", "Ctrl+Shift+N", lambda: new_window(force_new=True),
+            "new_window"))
         m.addSeparator()
-        m.addAction(_make_action(self, "종료", "Ctrl+Q", self.close))
+        m.addAction(_make_action(
+            self, "종료", "Ctrl+Q", self.close, "power"))
         h = mb.addMenu("도움말(&H)")
-        h.addAction(_make_action(self, "사용법", "F1", self._shell_help))
+        h.addAction(_make_action(
+            self, "사용법", "F1", self._shell_help, "help"))
         h.addAction(_make_action(
             self, "업데이트 확인...", None,
-            lambda: self.check_for_updates(True)))
+            lambda: self.check_for_updates(True), "update"))
         h.addAction(_make_action(
             self, "PDF 기본 프로그램 / 브라우저 설정...", None,
-            lambda: _show_default_app_settings(self)))
+            lambda: _show_default_app_settings(self), "settings"))
         h.addAction(_make_action(self, "오픈소스 라이선스", None,
-                                 lambda: show_licenses(self)))
-        h.addAction(_make_action(self, "정보", None, self._shell_about))
+                                 lambda: show_licenses(self), "license"))
+        h.addAction(_make_action(
+            self, "정보", None, self._shell_about, "info"))
         return mb
 
     def _shell_help(self):

@@ -212,6 +212,8 @@ class PageView(QScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("documentViewport")
+        self.viewport().setObjectName("documentViewportSurface")
         self.canvas = PageCanvas()
         self.setWidget(self.canvas)
         self.setWidgetResizable(False)
@@ -339,6 +341,7 @@ class ThumbList(QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("thumbnailRail")
         self.setMinimumWidth(96)
         self.setSpacing(4)
         self.setUniformItemSizes(True)

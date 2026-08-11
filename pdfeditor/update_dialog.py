@@ -10,6 +10,8 @@ from PyQt5.QtWidgets import (
     QProgressBar, QPushButton, QTextBrowser, QVBoxLayout,
 )
 
+from .icons import fluent_icon
+
 def _size_text(size):
     return "%.1f MB" % (size / (1024 * 1024)) if size > 0 else "크기 정보 없음"
 
@@ -86,12 +88,16 @@ class UpdateDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.button(QDialogButtonBox.Close).setText("나중에")
+        buttons.button(QDialogButtonBox.Close).setIcon(fluent_icon("close"))
         buttons.rejected.connect(self.reject)
         self.release_button = QPushButton("릴리스 페이지")
+        self.release_button.setIcon(fluent_icon("external"))
         self.release_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(update.release_url)))
         buttons.addButton(self.release_button, QDialogButtonBox.ActionRole)
         self.install_button = QPushButton("다운로드 후 설치")
+        self.install_button.setProperty("accent", True)
+        self.install_button.setIcon(fluent_icon("download", "#ffffff"))
         self.install_button.clicked.connect(self._start_download)
         buttons.addButton(self.install_button, QDialogButtonBox.AcceptRole)
         layout.addWidget(buttons)

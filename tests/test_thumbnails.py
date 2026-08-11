@@ -32,6 +32,24 @@ class ThumbnailTests(unittest.TestCase):
         self.assertGreater(rows[0], 21)
         thumbs.close()
 
+    def test_page_organizer_renders_rows_after_ten_when_scrolled(self):
+        from pdfeditor.page_organizer import PageOrganizerList
+
+        pages = PageOrganizerList(None)
+        pages.resize(600, 700)
+        pages.reset_pages(50)
+        pages.show()
+        self.app.processEvents()
+
+        pages.verticalScrollBar().setValue(
+            pages.verticalScrollBar().maximum())
+        self.app.processEvents()
+
+        rows = pages.visible_rows()
+        self.assertIn(49, rows)
+        self.assertGreater(rows[0], 10)
+        pages.close()
+
     def test_thumbnail_panel_width_is_adjustable_in_splitter(self):
         from PyQt5.QtCore import Qt
         from PyQt5.QtWidgets import QSplitter, QWidget
