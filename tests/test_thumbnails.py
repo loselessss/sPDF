@@ -106,6 +106,29 @@ class ThumbnailTests(unittest.TestCase):
         self.assertEqual(thumbs._viewport_rect, QRectF(0.2, 0.3, 0.4, 0.5))
         thumbs.close()
 
+    def test_thumbnail_click_uses_centered_page_image_rect(self):
+        from PyQt5.QtCore import QPoint
+        from PyQt5.QtGui import QImage
+        from pdfeditor.widgets import ThumbList
+
+        thumbs = ThumbList()
+        thumbs.resize(180, 500)
+        thumbs.reset_pages(1)
+        thumbs.show()
+        thumbs.set_thumb(0, QImage(120, 60, QImage.Format_RGB888))
+        self.app.processEvents()
+
+        item_rect = thumbs.visualItemRect(thumbs.item(0))
+        image_rect = thumbs._thumbnail_image_rect(0)
+        self.assertGreater(image_rect.top(), item_rect.top())
+        target = thumbs.thumbnail_point_at(
+            QPoint(round(image_rect.center().x()), round(image_rect.center().y())))
+        self.assertIsNotNone(target)
+        self.assertEqual(target[0], 0)
+        self.assertAlmostEqual(target[1].x(), 0.5, places=1)
+        self.assertAlmostEqual(target[1].y(), 0.5, places=1)
+        thumbs.close()
+
 
 if __name__ == "__main__":
     unittest.main()

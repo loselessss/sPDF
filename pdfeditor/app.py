@@ -357,6 +357,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.setCentralWidget(viewer)
 
         self.thumbs.page_selected.connect(self.show_page)
+        self.thumbs.page_position_requested.connect(
+            self.navigate_from_thumbnail)
         self.thumbs.page_moved.connect(self.on_thumb_moved)
         self.thumbs.verticalScrollBar().valueChanged.connect(
             lambda _v: self._schedule_thumbs())
@@ -524,11 +526,16 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                   self.show_ocr_engine_dialog, "ai")
 
         v = self.menuBar().addMenu("보기(&V)")
-        self._act(v, "확대", "Ctrl++", self.zoom_in, "zoom_in")
-        self._act(v, "축소", "Ctrl+-", self.zoom_out, "zoom_out")
+        self._zoom_in_act = self._act(
+            v, "확대", "Ctrl++", self.zoom_in, "zoom_in")
+        self._zoom_out_act = self._act(
+            v, "축소", "Ctrl+-", self.zoom_out, "zoom_out")
         self._act(v, "1% 확대", "Alt++", self.zoom_in_fine, "zoom_in")
         self._act(v, "1% 축소", "Alt+-", self.zoom_out_fine, "zoom_out")
-        self._act(v, "창 너비에 맞춤", "Ctrl+0", self.zoom_fit, "fit")
+        self._fit_width_act = self._act(
+            v, "폭 맞춤", "Ctrl+0", self.zoom_fit, "fit_width")
+        self._fit_page_act = self._act(
+            v, "쪽 맞춤", None, self.zoom_page_fit, "fit_page")
         v.addSeparator()
         self._act(v, "다음 페이지", "PgDown", self.next_page,
                   "chevron_down")
@@ -569,6 +576,11 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.addAction(self._search_act)
         tool_bar.addSeparator()
         tool_bar.addAction(self._favorite_act)
+        tool_bar.addSeparator()
+        tool_bar.addAction(self._zoom_in_act)
+        tool_bar.addAction(self._zoom_out_act)
+        tool_bar.addAction(self._fit_width_act)
+        tool_bar.addAction(self._fit_page_act)
         self.addToolBar(Qt.TopToolBarArea, tool_bar)
         self._interaction_toolbar = tool_bar
 

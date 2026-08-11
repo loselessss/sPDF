@@ -126,6 +126,27 @@ class ViewerMixin:
         self._set_fit_zoom(self.page_index)
         self.on_zoom_changed(self.view.zoom)
 
+    def zoom_page_fit(self):
+        """현재 페이지 전체가 문서 화면 안에 들어오도록 맞춘다."""
+        if self.doc is None:
+            return
+        page_width, page_height = self.doc.page_size(self.page_index)
+        available_width = self.view.viewport().width() - 24
+        available_height = self.view.viewport().height() - 24
+        if page_width <= 0 or page_height <= 0:
+            return
+        if available_width <= 0 or available_height <= 0:
+            return
+        self.view.zoom = max(
+            self.view.ZOOM_MIN,
+            min(
+                self.view.ZOOM_MAX,
+                available_width / page_width,
+                available_height / page_height,
+            ),
+        )
+        self.on_zoom_changed(self.view.zoom)
+
     def finish_initial_layout(self, document):
         """창 배치가 끝난 실제 폭으로 맞춤 배율과 HiDPI 이미지를 확정한다."""
         if self.doc is not document or self.doc is None:
@@ -189,6 +210,14 @@ class ViewerMixin:
             return
         self.thumbs.set_viewport_marker(
             self.page_index, self.view.visible_page_rect())
+
+    def navigate_from_thumbnail(self, page, point):
+        """썸네일에서 찍은 페이지 위치를 메인 화면 중앙에 표시한다."""
+        if self.doc is None:
+            return
+        if page != self.page_index:
+            self.show_page(page)
+        self.view.center_on_page_fraction(point)
 
     def on_thumbnail_splitter_moved(self, _pos, index):
         """사용자가 놓은 썸네일 패널 너비를 잦은 디스크 쓰기 없이 기억한다."""

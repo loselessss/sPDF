@@ -5,7 +5,8 @@ import math
 
 AVAILABLE_ICONS = frozenset({
     "add_file", "ai", "back", "chevron_down", "chevron_up", "close",
-    "copy", "delete", "download", "edit", "external", "extract", "fit",
+    "copy", "delete", "download", "edit", "external", "extract",
+    "fit_page", "fit_width",
     "hand", "help", "highlight", "info", "license", "merge", "new_tab",
     "new_window", "note", "notes", "ocr", "open", "pages", "power",
     "recent", "redo", "rotate_ccw", "rotate_cw", "save", "save_as",
@@ -29,7 +30,6 @@ FLUENT_GLYPHS = {
     "edit": 0xE70F,
     "external": 0xE8A7,      # OpenInNewWindow
     "extract": 0xE8AD,       # Go
-    "fit": 0xE740,            # FullScreen
     "hand": 0xE927,           # Swipe
     "help": 0xE897,
     "highlight": 0xE7E6,
@@ -345,11 +345,19 @@ def fluent_icon(name, color="#424242", size=20):
         line(6.0, 8.25, 10.5, 8.25)
         if name == "zoom_in":
             line(8.25, 6.0, 8.25, 10.5)
-    elif name == "fit":
-        line(3.0, 7.0, 3.0, 3.0); line(3.0, 3.0, 7.0, 3.0)
-        line(13.0, 3.0, 17.0, 3.0); line(17.0, 3.0, 17.0, 7.0)
-        line(3.0, 13.0, 3.0, 17.0); line(3.0, 17.0, 7.0, 17.0)
-        line(13.0, 17.0, 17.0, 17.0); line(17.0, 17.0, 17.0, 13.0)
+    elif name in ("fit_page", "fit_width"):
+        painter.drawRoundedRect(QRectF(4.5, 2.5, 11.0, 15.0), 1.0, 1.0)
+        if name == "fit_width":
+            line(2.5, 10.0, 17.5, 10.0)
+            line(2.5, 10.0, 5.2, 7.3)
+            line(2.5, 10.0, 5.2, 12.7)
+            line(17.5, 10.0, 14.8, 7.3)
+            line(17.5, 10.0, 14.8, 12.7)
+        else:
+            line(2.5, 6.0, 2.5, 2.5); line(2.5, 2.5, 6.0, 2.5)
+            line(14.0, 2.5, 17.5, 2.5); line(17.5, 2.5, 17.5, 6.0)
+            line(2.5, 14.0, 2.5, 17.5); line(2.5, 17.5, 6.0, 17.5)
+            line(14.0, 17.5, 17.5, 17.5); line(17.5, 17.5, 17.5, 14.0)
     elif name == "help":
         painter.drawEllipse(QRectF(2.5, 2.5, 15.0, 15.0))
         painter.drawArc(QRectF(7.0, 5.0, 6.0, 5.5), 0, 180 * 16)

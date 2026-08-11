@@ -41,7 +41,8 @@ class FluentThemeTests(unittest.TestCase):
         expected = {
             "add_file", "ai", "back", "chevron_down", "chevron_up",
             "close", "copy", "delete", "download", "edit", "external",
-            "extract", "fit", "hand", "help", "highlight", "info",
+            "extract", "fit_page", "fit_width", "hand", "help",
+            "highlight", "info",
             "license", "merge", "new_tab", "new_window", "note", "notes",
             "ocr", "open", "pages", "power", "recent", "redo",
             "rotate_ccw", "rotate_cw", "save", "save_as", "search",

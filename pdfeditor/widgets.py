@@ -3,7 +3,8 @@
 from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QListWidget, QListWidgetItem, QScrollArea, QWidget,
+    QAbstractItemView, QApplication, QListWidget, QListWidgetItem,
+    QScrollArea, QWidget,
 )
 
 THUMB_W = 120  # 썸네일 가로 픽셀
@@ -276,6 +277,20 @@ class PageView(QScrollArea):
         cy = int((rect.y() + rect.height() / 2) * z)
         self.ensureVisible(cx, cy, 120, 120)
 
+    def center_on_page_fraction(self, point):
+        """0~1 페이지 좌표의 지점이 뷰포트 중앙에 오도록 이동한다."""
+        canvas = self.canvas.size()
+        viewport = self.viewport().size()
+        if canvas.width() <= 0 or canvas.height() <= 0:
+            return
+        x = max(0.0, min(1.0, float(point.x())))
+        y = max(0.0, min(1.0, float(point.y())))
+        self.horizontalScrollBar().setValue(
+            round(x * canvas.width() - viewport.width() / 2))
+        self.verticalScrollBar().setValue(
+            round(y * canvas.height() - viewport.height() / 2))
+        self.viewport_changed.emit()
+
     def wheelEvent(self, ev):
         # Ctrl+휠은 큰 단계, Alt+휠은 1% 미세 단계 줌.
         if ev.modifiers() & Qt.ControlModifier:
@@ -332,6 +347,7 @@ class ThumbList(QListWidget):
     PagesMixin이 한다."""
 
     page_selected = pyqtSignal(int)
+    page_position_requested = pyqtSignal(int, QPointF)
     page_moved = pyqtSignal(int, int)  # (원래 행, 옮긴 행)
     thumbnail_width_changed = pyqtSignal(int)
 
@@ -349,6 +365,7 @@ class ThumbList(QListWidget):
         self.setDragDropMode(QListWidget.InternalMove)
         self.currentRowChanged.connect(self._on_row)
         self._drag_src = None
+        self._navigation_press = None
         self._viewport_page = -1
         self._viewport_rect = None
         self._thumb_width = 0
@@ -357,6 +374,31 @@ class ThumbList(QListWidget):
     def _on_row(self, row):
         if row >= 0:
             self.page_selected.emit(row)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._navigation_press = QPoint(event.pos())
+        else:
+            self._navigation_press = None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._navigation_press is not None and (
+                event.pos() - self._navigation_press
+        ).manhattanLength() >= QApplication.startDragDistance():
+            self._navigation_press = None
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        navigation_press = self._navigation_press
+        self._navigation_press = None
+        super().mouseReleaseEvent(event)
+        if event.button() != Qt.LeftButton or navigation_press is None:
+            return
+        target = self.thumbnail_point_at(event.pos())
+        if target is not None:
+            row, point = target
+            self.page_position_requested.emit(row, point)
 
     def dropEvent(self, ev):
         # 드롭 전 현재 행을 기억했다가, Qt가 항목을 옮긴 뒤 새 위치를 읽어
@@ -471,6 +513,48 @@ class ThumbList(QListWidget):
         if page >= 0 and self.item(page):
             self.viewport().update(self.visualItemRect(self.item(page)))
 
+    def _thumbnail_image_rect(self, row):
+        """항목 안에서 실제 페이지 그림이 표시되는 정확한 사각형."""
+        item = self.item(row)
+        if item is None or item.icon().isNull():
+            return QRectF()
+        item_rect = QRectF(self.visualItemRect(item))
+        if item_rect.isEmpty():
+            return QRectF()
+        aspect = float(item.data(Qt.UserRole + 1) or 1.0)
+        box = self.iconSize()
+        box_width = min(float(box.width()), item_rect.width())
+        box_height = min(float(box.height()), item_rect.height())
+        box_left = item_rect.center().x() - box_width / 2
+        box_top = item_rect.top()
+        if aspect >= box_width / max(1.0, box_height):
+            image_width = box_width
+            image_height = image_width / aspect
+        else:
+            image_height = box_height
+            image_width = image_height * aspect
+        return QRectF(
+            box_left + (box_width - image_width) / 2,
+            box_top + (box_height - image_height) / 2,
+            image_width,
+            image_height,
+        )
+
+    def thumbnail_point_at(self, pos):
+        """썸네일 클릭 위치를 (행, 0~1 페이지 좌표)로 변환한다."""
+        item = self.itemAt(pos)
+        if item is None:
+            return None
+        row = self.row(item)
+        image_rect = self._thumbnail_image_rect(row)
+        point = QPointF(pos)
+        if image_rect.isEmpty() or not image_rect.contains(point):
+            return None
+        return row, QPointF(
+            (point.x() - image_rect.left()) / image_rect.width(),
+            (point.y() - image_rect.top()) / image_rect.height(),
+        )
+
     def paintEvent(self, event):
         super().paintEvent(event)
         if self._viewport_rect is None or self._viewport_page < 0:
@@ -481,17 +565,9 @@ class ThumbList(QListWidget):
         item_rect = self.visualItemRect(item)
         if not item_rect.intersects(self.viewport().rect()):
             return
-        aspect = float(item.data(Qt.UserRole + 1) or 1.0)
-        box = self.iconSize()
-        if aspect >= box.width() / max(1, box.height()):
-            image_w = box.width()
-            image_h = image_w / aspect
-        else:
-            image_h = box.height()
-            image_w = image_h * aspect
-        image_rect = QRectF(
-            item_rect.center().x() - image_w / 2,
-            item_rect.top(), image_w, image_h)
+        image_rect = self._thumbnail_image_rect(self._viewport_page)
+        if image_rect.isEmpty():
+            return
         marker = QRectF(
             image_rect.left() + self._viewport_rect.x() * image_rect.width(),
             image_rect.top() + self._viewport_rect.y() * image_rect.height(),

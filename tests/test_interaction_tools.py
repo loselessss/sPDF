@@ -92,6 +92,24 @@ class InteractionToolTests(unittest.TestCase):
         self.assertLess(rect.height(), 0.3)
         view.close()
 
+    def test_thumbnail_point_can_center_document_view(self):
+        from PyQt5.QtCore import QPointF
+        from pdfeditor.widgets import PageView
+
+        view = PageView()
+        view.resize(240, 240)
+        view.canvas.resize(1000, 800)
+        view.show()
+        self.app.processEvents()
+
+        view.center_on_page_fraction(QPointF(0.6, 0.7))
+        rect = view.visible_page_rect()
+
+        self.assertIsNotNone(rect)
+        self.assertAlmostEqual(rect.center().x(), 0.6, places=2)
+        self.assertAlmostEqual(rect.center().y(), 0.7, places=2)
+        view.close()
+
 
 if __name__ == "__main__":
     unittest.main()
