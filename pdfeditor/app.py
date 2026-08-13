@@ -590,8 +590,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
         h = self.menuBar().addMenu("도움말(&H)")
         self._act(h, "사용법", "F1", self.show_help, "help")
-        self._act(h, "업데이트 확인...", None,
-                  lambda: self._shell.check_for_updates(True), "update")
+        if self._shell.updates_enabled:
+            self._act(h, "업데이트 확인...", None,
+                      lambda: self._shell.check_for_updates(True), "update")
         self._act(h, "PDF 기본 프로그램 / 브라우저 설정...", None,
                   self.check_default_app, "settings")
         self._act(h, "오픈소스 라이선스", None, self.show_licenses,
@@ -999,12 +1000,14 @@ def show_licenses(parent):
 # ======================================================================
 
 class AppWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, updates_enabled=False):
         super().__init__()
+        self.updates_enabled = bool(updates_enabled)
         self.setWindowTitle(APP_NAME)
         self.resize(1100, 800)
         self.setAcceptDrops(True)
-        self._update_service = GitHubUpdateService(APP_VERSION)
+        self._update_service = (
+            GitHubUpdateService(APP_VERSION) if self.updates_enabled else None)
         self._update_worker = None
         self._available_update = None
 
@@ -1032,8 +1035,9 @@ class AppWindow(QMainWindow):
         self._shell_menubar = self._build_shell_menu()
         self.setMenuBar(self._shell_menubar)
         self._show_start()
-        if not any(getattr(window, "_auto_update_started", False)
-                   for window in _app_windows):
+        if self.updates_enabled and not any(
+                getattr(window, "_auto_update_started", False)
+                for window in _app_windows):
             self._auto_update_started = True
             if settings.automatic_update_check_due():
                 QTimer.singleShot(5000, self._run_automatic_update_check)
@@ -1065,9 +1069,10 @@ class AppWindow(QMainWindow):
         h = mb.addMenu("도움말(&H)")
         h.addAction(_make_action(
             self, "사용법", "F1", self._shell_help, "help"))
-        h.addAction(_make_action(
-            self, "업데이트 확인...", None,
-            lambda: self.check_for_updates(True), "update"))
+        if self.updates_enabled:
+            h.addAction(_make_action(
+                self, "업데이트 확인...", None,
+                lambda: self.check_for_updates(True), "update"))
         h.addAction(_make_action(
             self, "PDF 기본 프로그램 / 브라우저 설정...", None,
             lambda: _show_default_app_settings(self), "settings"))
@@ -1093,6 +1098,8 @@ class AppWindow(QMainWindow):
         self.check_for_updates(False)
 
     def check_for_updates(self, manual=True):
+        if not self.updates_enabled:
+            return False
         if self._update_worker is not None and self._update_worker.isRunning():
             if manual:
                 self.statusBar().showMessage(
@@ -1109,6 +1116,7 @@ class AppWindow(QMainWindow):
         worker.finished.connect(self._update_check_finished)
         self._update_worker = worker
         worker.start()
+        return True
 
     def _update_check_completed(self, update, manual):
         self.statusBar().clearMessage()
@@ -1415,10 +1423,17 @@ class AppWindow(QMainWindow):
 _app_windows = []
 
 
-def new_window(path=None, force_new=False):
-    """기본 창을 재사용하되, 요청하면 탭을 받을 새 창을 만든다."""
+def new_window(path=None, force_new=False, updates_enabled=None):
+    """창을 만든다. 내부 모듈 호출은 기본적으로 자체 업데이트를 끈다.
+
+    공식 진입점은 ``updates_enabled=True``를 명시한다. 이미 열린 창에서 새
+    창을 만드는 경우에는 첫 창의 모드를 이어받는다.
+    """
     if force_new or not _app_windows:
-        window = AppWindow()
+        if updates_enabled is None:
+            updates_enabled = (
+                _app_windows[0].updates_enabled if _app_windows else False)
+        window = AppWindow(updates_enabled=updates_enabled)
         if _app_windows:
             previous = _app_windows[-1]
             window.move(previous.x() + 30, previous.y() + 30)
