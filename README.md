@@ -3,6 +3,12 @@
 가벼운 데스크톱 PDF 편집기 (PyQt5 + PyMuPDF). 설계 전반은 [PLAN.md](PLAN.md),
 오픈소스 고지는 [LICENSES.md](LICENSES.md) 참고.
 
+## 주요기능
+PDF 읽기
+페이지 수정
+단어 수정
+OCR (Not AI)
+
 ## 설치
 
 ```bash
