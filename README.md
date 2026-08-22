@@ -65,29 +65,6 @@ python register_filetype.py              # 등록
 python register_filetype.py --unregister # 해제
 ```
 
-## 별도 도구: Paper Organizer
-
-논문 자동 정리는 sPDF 본체와 분리된 `paper_organizer.py`에서 실행한다. sPDF는
-가벼운 PDF 보기·편집·OCR 앱으로 유지되며, Paper Organizer를 실행하지 않아도
-기존 기능과 시작 성능에 영향이 없다.
-
-Paper Organizer 설정에서 `input`과 `organized` 폴더를 각각 지정할 수 있다.
-자동 처리를 켜면 `input`의 영어 논문 PDF를 로컬 Ollama로 분석해 카테고리
-폴더로 이동하고, PDF 옆에 `*.pdf.spdf.json` 메타데이터를 저장한다. 화면에서는
-카테고리, 제목, 저자, 키워드, 한국어 요약, 기여점과 한계를 구조화해 보여준다.
-
-```bash
-ollama pull qwen3:8b
-python paper_organizer.py
-```
-
-- Ollama는 `http://127.0.0.1:11434`에서 실행되어야 한다.
-- `input`과 `organized`는 서로 다른 폴더여야 하며 OneDrive 폴더도 지정할 수 있다.
-- 분석에 실패한 PDF는 이동하거나 삭제하지 않고 `input`에 그대로 둔다.
-- 텍스트가 거의 없는 스캔 PDF는 먼저 OCR이 필요하다.
-- 목록에서 논문을 더블클릭하면 Windows 기본 PDF 앱으로 연다. sPDF를 기본
-  PDF 앱으로 지정했다면 sPDF에서 열린다.
-
 ## 진행 상황
 
 - [x] **v0.1 뷰어** — 열기(암호 PDF 포함)/썸네일(레이지 렌더)/줌/페이지 이동/드래그&드롭
