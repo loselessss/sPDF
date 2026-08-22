@@ -4,10 +4,7 @@
 오픈소스 고지는 [LICENSES.md](LICENSES.md) 참고.
 
 ## 주요기능
-PDF 읽기, 
-페이지 수정, 
-단어 수정, 
-OCR (Not AI)
+PDF 읽기, 주석 관리, 페이지 관리, 단어 수정, OCR (Not AI)
 
 ## 설치
 
