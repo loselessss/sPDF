@@ -18,6 +18,10 @@ class InternationalEditionTests(unittest.TestCase):
             "PDF/Illustrator Files (*.pdf *.ai)",
             tr("PDF/Illustrator 파일 (*.pdf *.ai);;PDF 파일 (*.pdf);;"
                "Illustrator 파일 (*.ai)"))
+        self.assertEqual(tr("PDF 용량 줄이기..."), "Reduce PDF Size...")
+        self.assertEqual(tr("페이지 미리보기"), "Page Thumbnails")
+        self.assertEqual(tr("책갈피"), "Bookmarks")
+        self.assertEqual(tr("지원하지 않는 링크"), "Unsupported Link")
 
     def test_dynamic_ui_messages_are_translated(self):
         self.assertEqual(tr("12쪽"), "Page 12")

@@ -327,6 +327,7 @@ class PagesMixin:
         self.thumbs.blockSignals(True)
         self.thumbs.reset_pages(count)
         self.thumbs.blockSignals(False)
+        self.bookmarks.set_bookmarks(self.doc.bookmarks())
         self.show_page(max(0, min(keep_page, count - 1)))
         self._schedule_thumbs()
         if hasattr(self, "_notes_dock") and self._notes_dock.isVisible():

@@ -44,6 +44,15 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
         self.assertFalse(settings.set_ui_language("fr"))
         self.assertEqual(settings.ui_language(), "en")
 
+    def test_sidebar_mode_defaults_to_thumbnails_and_can_be_saved(self):
+        self.assertEqual(
+            settings.SIDEBAR_MODES,
+            ("none", "thumbnails", "bookmarks"))
+        self.assertEqual(settings.sidebar_mode(), "thumbnails")
+        self.assertTrue(settings.set_sidebar_mode("bookmarks"))
+        self.assertEqual(settings.sidebar_mode(), "bookmarks")
+        self.assertFalse(settings.set_sidebar_mode("invalid"))
+
 
 if __name__ == "__main__":
     unittest.main()

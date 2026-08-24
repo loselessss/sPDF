@@ -32,6 +32,30 @@ class ThumbnailTests(unittest.TestCase):
         self.assertGreater(rows[0], 21)
         thumbs.close()
 
+    def test_bookmark_tree_preserves_hierarchy_and_emits_page(self):
+        from PyQt5.QtTest import QSignalSpy
+        from pdfeditor.widgets import BOOKMARK_PAGE_ROLE, BookmarkTree
+
+        tree = BookmarkTree()
+        tree.set_bookmarks([
+            (1, "Chapter 1", 1),
+            (2, "Section 1.1", 3),
+            (1, "Chapter 2", 7),
+        ])
+        first = tree.topLevelItem(0)
+        self.assertEqual(tree.topLevelItemCount(), 2)
+        self.assertEqual(first.childCount(), 1)
+        self.assertEqual(first.child(0).data(0, BOOKMARK_PAGE_ROLE), 2)
+
+        spy = QSignalSpy(tree.page_selected)
+        tree._activate(first.child(0))
+        self.assertEqual(list(spy[0]), [2])
+        tree.select_page(5)
+        self.assertEqual(tree.currentItem(), first.child(0))
+        tree.select_page(6)
+        self.assertEqual(tree.currentItem(), tree.topLevelItem(1))
+        tree.close()
+
     def test_page_organizer_renders_rows_after_ten_when_scrolled(self):
         from pdfeditor.page_organizer import PageOrganizerList
 

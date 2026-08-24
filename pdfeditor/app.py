@@ -38,7 +38,7 @@ from .textsel import TextSelectMixin
 from .update_dialog import UpdateCheckWorker, UpdateDialog
 from .update_service import GitHubUpdateService, UpdateError
 from .viewer import ViewerMixin
-from .widgets import PageView, ThumbList
+from .widgets import BookmarkTree, PageView, ThumbList
 
 
 def _make_action(parent, text, shortcut, slot, icon_name=None):
@@ -344,6 +344,10 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         lay.setSpacing(0)
 
         self.thumbs = ThumbList()
+        self.bookmarks = BookmarkTree()
+        self._sidebar_stack = QStackedWidget()
+        self._sidebar_stack.addWidget(self.thumbs)
+        self._sidebar_stack.addWidget(self.bookmarks)
         self.view = PageView()
 
         right = QWidget()
@@ -354,9 +358,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         rlay.addWidget(self.view, 1)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self.thumbs)
+        splitter.addWidget(self._sidebar_stack)
         splitter.addWidget(right)
-        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(0, True)
         splitter.setCollapsible(1, False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -370,6 +374,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.thumbs.page_position_requested.connect(
             self.navigate_from_thumbnail)
         self.thumbs.page_moved.connect(self.on_thumb_moved)
+        self.bookmarks.page_selected.connect(self.show_page)
         self.thumbs.verticalScrollBar().valueChanged.connect(
             lambda _v: self._schedule_thumbs())
         self.thumbs.thumbnail_width_changed.connect(
@@ -382,6 +387,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.view.canvas.selection_cleared.connect(self._clear_selection)
         self.view.canvas.word_picked.connect(self.on_word_picked)
         self.view.canvas.clicked.connect(self._dispatch_click)
+        self.view.canvas.ctrl_clicked.connect(self.activate_link_at)
         self.view.canvas.context_requested.connect(self.on_context_menu)
         self.view.canvas.hovered.connect(self.on_canvas_hover)
         self.view.canvas.page_activated.connect(self.show_page)
@@ -410,6 +416,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.statusBar().addPermanentWidget(self._zoom_input)
 
         self._build_menus()
+        self.set_sidebar_mode(settings.sidebar_mode(), persist=False)
 
     def _build_search_bar(self):
         bar = QWidget()
@@ -473,6 +480,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._save_act = self._act(m, "저장", "Ctrl+S", self.save, "save")
         self._act(m, "다른 이름으로 저장...", "Ctrl+Shift+S",
                   self.save_as_dialog, "save_as")
+        self._act(m, "PDF 용량 줄이기...", None,
+                  self.compress_pdf, "download")
         self._print_act = self._act(
             m, "인쇄...", "Ctrl+P", self.print_document, "print")
         self._act(m, "탐색기에서 현재 위치 열기", None,
@@ -556,6 +565,27 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             "two_page")
         self._two_page_act.setCheckable(True)
         v.addSeparator()
+        sidebar_menu = v.addMenu("왼쪽 패널")
+        sidebar_menu.setIcon(fluent_icon("pages"))
+        self._sidebar_group = QActionGroup(self)
+        self._sidebar_group.setExclusive(True)
+        self._sidebar_actions = {}
+        for mode, label, icon_name in (
+                ("none", "없음", "close"),
+                ("thumbnails", "페이지 미리보기", "pages"),
+                ("bookmarks", "책갈피", "notes")):
+            action = self._act(
+                sidebar_menu, label, None,
+                lambda _checked=False, selected=mode:
+                self.set_sidebar_mode(selected), icon_name)
+            action.setCheckable(True)
+            self._sidebar_group.addAction(action)
+            self._sidebar_actions[mode] = action
+        self._sidebar_cycle_act = _make_action(
+            self, "왼쪽 패널 전환", "Ctrl+Shift+B",
+            self.cycle_sidebar_mode, "pages")
+        v.addAction(self._sidebar_cycle_act)
+        v.addSeparator()
         self._presentation_act = self._act(
             v, "프레젠테이션 모드", "F5", self.toggle_presentation_mode,
             "presentation")
@@ -608,6 +638,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.addSeparator()
         tool_bar.addAction(self._favorite_act)
         tool_bar.addSeparator()
+        tool_bar.addAction(self._sidebar_cycle_act)
         tool_bar.addAction(self._zoom_in_act)
         tool_bar.addAction(self._zoom_out_act)
         tool_bar.addAction(self._fit_width_act)
@@ -632,6 +663,16 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._act(h, "정보", None, self.show_about, "info")
 
     # --- 페이지 넘김/클릭 ---------------------------------------------
+
+    def compress_pdf(self):
+        if self.doc is None:
+            return
+        from .compression import compress_document
+        result = compress_document(self, self.doc)
+        if result:
+            self.statusBar().showMessage(localize(
+                "Compressed PDF saved: %s" % result,
+                "압축한 PDF 저장됨: %s" % result), 5000)
 
     def set_interaction_mode(self, mode, announce=True):
         if mode == "hand":
@@ -662,13 +703,13 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             if hasattr(self, "_presentation_ui_state"):
                 return
             self._presentation_ui_state = {
-                "thumbs": not self.thumbs.isHidden(),
+                "sidebar": not self._sidebar_stack.isHidden(),
                 "toolbar": not self._interaction_toolbar.isHidden(),
                 "status": not self.statusBar().isHidden(),
                 "search": not self._search_bar.isHidden(),
                 "notes": not self._notes_dock.isHidden(),
             }
-            self.thumbs.hide()
+            self._sidebar_stack.hide()
             self._interaction_toolbar.hide()
             self.statusBar().hide()
             self._search_bar.hide()
@@ -679,7 +720,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             state = getattr(self, "_presentation_ui_state", None)
             if state is None:
                 return
-            self.thumbs.setVisible(state["thumbs"])
+            self._sidebar_stack.setVisible(state["sidebar"])
             self._interaction_toolbar.setVisible(state["toolbar"])
             self.statusBar().setVisible(state["status"])
             self._search_bar.setVisible(state["search"])
@@ -842,6 +883,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.page_index = 0
         self._sync_favorite_action()
         self.thumbs.reset_pages(doc.page_count)
+        self.bookmarks.set_bookmarks(doc.bookmarks())
         self._update_title()
         settings.push_recent(path)
         self._set_fit_zoom(0)
@@ -890,6 +932,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._cache.clear()
         self.view.clear()
         self.thumbs.reset_pages(0)
+        self.bookmarks.set_bookmarks([])
         self._reset_textsel()
         self._reset_annots()
         self._reset_edit()

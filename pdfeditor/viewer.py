@@ -4,10 +4,13 @@
 전 페이지를 들고 있으면 RAM이 터지기 때문.
 """
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QPointF, Qt, QTimer, QUrl
+from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtWidgets import QApplication, QMessageBox
 
 from . import settings
+from .icons import fluent_icon
+from .i18n import localize, tr
 from .widgets import qimage_from_render
 
 CACHE_RADIUS = 2  # 현재 페이지 기준 앞뒤로 유지할 페이지 수
@@ -58,6 +61,7 @@ class ViewerMixin:
             self.thumbs.setCurrentRow(index)
             self.thumbs.blockSignals(False)
         self.thumbs.set_spread_pages(self.visible_document_pages())
+        self.bookmarks.select_page(index)
         self._update_page_label()
 
     def _render_current(self):
@@ -228,6 +232,86 @@ class ViewerMixin:
     def toggle_two_page_mode(self):
         self.set_two_page_mode(not self._two_page_mode)
 
+    # --- 왼쪽 탐색 패널 --------------------------------------------
+
+    def set_sidebar_mode(self, mode, persist=True):
+        if mode not in settings.SIDEBAR_MODES:
+            mode = settings.DEFAULT_SIDEBAR_MODE
+        self._sidebar_mode = mode
+        if mode == "none":
+            self._sidebar_stack.hide()
+        else:
+            self._sidebar_stack.setCurrentWidget(
+                self.thumbs if mode == "thumbnails" else self.bookmarks)
+            self._sidebar_stack.show()
+            width = settings.thumbnail_width()
+            self._viewer_splitter.setSizes(
+                [width, max(1, self._viewer_splitter.width() - width)])
+            if mode == "thumbnails":
+                self._schedule_thumbs()
+        for key, action in getattr(self, "_sidebar_actions", {}).items():
+            action.setChecked(key == mode)
+        labels = {
+            "none": tr("없음"), "thumbnails": tr("페이지 미리보기"),
+            "bookmarks": tr("책갈피"),
+        }
+        if hasattr(self, "_sidebar_cycle_act"):
+            self._sidebar_cycle_act.setToolTip(
+                localize(
+                    "Left panel: %s (click to cycle)",
+                    "왼쪽 패널: %s (클릭하여 전환)") % labels[mode])
+            self._sidebar_cycle_act.setIcon(fluent_icon({
+                "none": "close", "thumbnails": "pages",
+                "bookmarks": "notes",
+            }[mode]))
+        if persist:
+            settings.set_sidebar_mode(mode)
+
+    def cycle_sidebar_mode(self):
+        modes = settings.SIDEBAR_MODES
+        current = getattr(self, "_sidebar_mode", settings.sidebar_mode())
+        self.set_sidebar_mode(modes[(modes.index(current) + 1) % len(modes)])
+
+    # --- PDF 링크 ---------------------------------------------------
+
+    def activate_link_at(self, point):
+        """Open an internal or web link only after an explicit Ctrl+click."""
+        if self.doc is None:
+            return
+        link = self.doc.link_at(self.page_index, point.x(), point.y())
+        if link is None:
+            self.statusBar().showMessage(tr("이 위치에는 링크가 없습니다"), 2500)
+            return
+        if link["kind"] == "goto" and link["page"] >= 0:
+            target_page = min(link["page"], self.doc.page_count - 1)
+            self.show_page(target_page)
+            if link["to"] is not None:
+                width, height = self.doc.page_size(target_page)
+                x, y = link["to"]
+                if width > 0 and height > 0:
+                    QTimer.singleShot(
+                        0, lambda: self.view.center_on_page_fraction(
+                            QPointF(x / width, y / height)))
+            return
+        if link["kind"] == "uri" and link["uri"]:
+            url = QUrl(link["uri"])
+            if url.scheme().lower() not in ("http", "https", "mailto"):
+                QMessageBox.warning(
+                    self, tr("지원하지 않는 링크"), localize(
+                        "This link type is blocked for safety.\n\n%s"
+                        % link["uri"],
+                        "안전을 위해 이 링크 형식은 열지 않습니다.\n\n%s"
+                        % link["uri"]))
+                return
+            QDesktopServices.openUrl(url)
+            return
+        QMessageBox.information(
+            self, tr("지원하지 않는 링크"), localize(
+                "PDF links that launch another file or program are blocked "
+                "for safety.",
+                "다른 파일이나 프로그램을 실행하는 PDF 링크는 안전을 위해 "
+                "열지 않습니다."))
+
     # --- 썸네일 ------------------------------------------------------
 
     def _schedule_thumbs(self):
@@ -282,7 +366,9 @@ class ViewerMixin:
         """사용자가 놓은 썸네일 패널 너비를 잦은 디스크 쓰기 없이 기억한다."""
         if index != 1:
             return
-        self._pending_thumbnail_width = self.thumbs.width()
+        if self._sidebar_stack.isHidden():
+            return
+        self._pending_thumbnail_width = self._sidebar_stack.width()
         self._thumbnail_width_timer.start()
 
     def _save_thumbnail_width(self):

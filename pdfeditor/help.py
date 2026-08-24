@@ -22,6 +22,7 @@ HELP_HTML = """
 <tr><td>도움말 메뉴</td><td><b>PDF 기본 프로그램 / 브라우저 설정</b> — Edge·Chrome·Firefox의 PDF 링크를 sPDF로 열기</td></tr>
 <tr><td><b>Ctrl+S</b></td><td>저장 (원본은 <code>.bak</code>으로 자동 백업). Illustrator 원본은 덮어쓰지 않고 PDF로 저장</td></tr>
 <tr><td><b>Ctrl+Shift+S</b></td><td>다른 이름으로 저장</td></tr>
+<tr><td>파일 → <b>PDF 용량 줄이기</b></td><td>무손실·균형·강한 압축 중에서 선택해 별도 PDF로 저장</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>탭 닫기</td></tr>
 </table>
 <p>여러 PDF를 <b>탭</b>으로 엽니다. 각 탭은 페이지·편집·검색 상태를 따로
@@ -44,6 +45,8 @@ HELP_HTML = """
 <tr><td><b>Ctrl+0</b></td><td>창 너비에 맞춤</td></tr>
 <tr><td><b>PgUp / PgDown</b></td><td>이전 / 다음 페이지</td></tr>
 <tr><td>왼쪽 <b>썸네일</b> 클릭</td><td>해당 페이지로 이동</td></tr>
+<tr><td><b>Ctrl+Shift+B</b></td><td>왼쪽 패널을 없음 → 페이지 미리보기 → 책갈피로 전환</td></tr>
+<tr><td><b>Ctrl+클릭</b></td><td>PDF 내부 링크로 이동하거나 웹·메일 링크를 기본 앱으로 열기</td></tr>
 <tr><td><b>마우스 휠</b></td><td>스크롤 — 페이지 끝에 닿으면 다음/이전 장으로</td></tr>
 <tr><td><b>썸네일 오른쪽 경계 드래그</b></td><td>왼쪽 미리보기 패널 너비 조절</td></tr>
 <tr><td><b>손 도구</b></td><td>PDF를 클릭한 채 드래그해 상하좌우 이동</td></tr>
@@ -134,6 +137,7 @@ HELP_HTML_EN = """
 <tr><td><b>Ctrl+Shift+N</b></td><td>Open a new sPDF window</td></tr>
 <tr><td><b>Ctrl+S</b></td><td>Save and create a <code>.bak</code> backup. Illustrator sources are exported to PDF instead of being overwritten</td></tr>
 <tr><td><b>Ctrl+Shift+S</b></td><td>Save as</td></tr>
+<tr><td>File → <b>Reduce PDF Size</b></td><td>Save a separate PDF using lossless, balanced, or strong compression</td></tr>
 <tr><td><b>Ctrl+P</b></td><td>Print</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>Close the current tab</td></tr>
 </table>
@@ -148,6 +152,8 @@ PDF or PDF-compatible Illustrator files onto the window.</p>
 <tr><td><b>Alt + mouse wheel</b></td><td>Zoom in 1% steps</td></tr>
 <tr><td><b>Ctrl+0</b></td><td>Fit width</td></tr>
 <tr><td><b>PgUp / PgDown</b></td><td>Previous / next page</td></tr>
+<tr><td><b>Ctrl+Shift+B</b></td><td>Cycle the left panel through hidden, page thumbnails, and bookmarks</td></tr>
+<tr><td><b>Ctrl+click</b></td><td>Follow an internal link or open a web or email link in the default app</td></tr>
 <tr><td><b>Hand tool</b></td><td>Click and drag to pan</td></tr>
 <tr><td><b>Text selection tool</b></td><td>Drag across text to select it</td></tr>
 <tr><td><b>Ctrl+Shift+2</b></td><td>Toggle two-page view</td></tr>

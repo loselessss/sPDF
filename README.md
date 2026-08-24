@@ -13,6 +13,9 @@ open-source notices.
   Illustrator source when saving edits.
 - Select, search, copy, annotate, edit, rotate, remove, merge, split, extract,
   organize, and print pages.
+- Reduce PDF size with lossless, balanced, or strong image compression.
+- Cycle the left panel between hidden, page thumbnails, and PDF bookmarks;
+  follow document links with Ctrl+click.
 - Run offline Korean and English OCR with RapidOCR, with optional
   PaddleOCR-VL high-quality OCR.
 - Work with multiple documents in tabs, move unsaved tabs between windows,
@@ -95,6 +98,9 @@ The version in `pdfeditor/meta.py` and `installer.iss` must always match.
 - [x] **v1.13.0 Illustrator support** — open, drag, organize, and merge
   PDF-compatible `.ai` files; register sPDF in the Windows **Open with** list;
   export edits to PDF so the Illustrator source remains untouched.
+- [x] **v1.14.0 PDF optimization and navigation** — lossless/balanced/strong
+  size reduction, hidden/thumbnail/bookmark sidebar modes, and safe Ctrl+click
+  navigation for document and web links.
 - [ ] **Planned: AI OCR option** — Claude API for difficult content such as
   handwriting.
 

@@ -83,6 +83,29 @@ class InteractionToolTests(unittest.TestCase):
         self.assertAlmostEqual(second[1].y(), 40.0)
         canvas.close()
 
+    def test_ctrl_click_emits_link_point_in_select_and_hand_modes(self):
+        from PyQt5.QtCore import QPoint, Qt
+        from PyQt5.QtGui import QImage
+        from PyQt5.QtTest import QSignalSpy, QTest
+        from pdfeditor.widgets import PageCanvas
+
+        image = QImage(100, 160, QImage.Format_RGB888)
+        canvas = PageCanvas()
+        canvas.set_image(image, 1.0)
+        canvas.show()
+        self.app.processEvents()
+        spy = QSignalSpy(canvas.ctrl_clicked)
+
+        for mode in ("select", "hand"):
+            canvas.set_interaction_mode(mode)
+            QTest.mouseClick(
+                canvas, Qt.LeftButton, Qt.ControlModifier, QPoint(25, 40))
+
+        self.assertEqual(len(spy), 2)
+        self.assertAlmostEqual(spy[0][0].x(), 25.0)
+        self.assertAlmostEqual(spy[0][0].y(), 40.0)
+        canvas.close()
+
     def test_two_page_navigation_moves_by_spread(self):
         from pdfeditor.viewer import ViewerMixin
 

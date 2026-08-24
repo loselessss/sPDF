@@ -11,7 +11,8 @@ class FluentThemeTests(unittest.TestCase):
     def test_theme_covers_primary_shell_controls(self):
         for selector in (
                 "QMenuBar", "QToolBar", "QTabBar::tab", "QListWidget",
-                "QLineEdit", "QStatusBar", "QScrollBar:vertical"):
+                "QTreeWidget", "QLineEdit", "QStatusBar",
+                "QScrollBar:vertical"):
             self.assertIn(selector, FLUENT_STYLESHEET)
 
     def test_theme_has_fluent_accent_and_cards(self):

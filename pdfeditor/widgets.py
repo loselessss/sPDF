@@ -4,8 +4,11 @@ from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPalette, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QListWidget, QListWidgetItem,
-    QScrollArea, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget,
+    QScrollArea, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
+    QTreeWidget, QTreeWidgetItem, QWidget,
 )
+
+from .i18n import tr
 
 THUMB_W = 120  # 썸네일 가로 픽셀
 THUMB_H = int(THUMB_W * 1.5)
@@ -21,6 +24,63 @@ SEL_COLOR = QColor(0, 120, 215, 70)
 SEARCH_COLOR = QColor(255, 200, 0, 80)
 SEARCH_CUR_COLOR = QColor(255, 120, 0, 110)
 EDIT_BOX_COLOR = QColor(0, 160, 90, 160)  # 편집 가능한 span 테두리(초록)
+BOOKMARK_PAGE_ROLE = Qt.UserRole + 10
+
+
+class BookmarkTree(QTreeWidget):
+    """Hierarchical PDF outline that emits zero-based destination pages."""
+
+    page_selected = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("bookmarkTree")
+        self.setHeaderHidden(True)
+        self.setUniformRowHeights(True)
+        self.itemActivated.connect(self._activate)
+        self.itemClicked.connect(self._activate)
+
+    def set_bookmarks(self, entries):
+        self.clear()
+        parents = []
+        for level, title, page in entries:
+            level = max(1, int(level))
+            item = QTreeWidgetItem([str(title or tr("(제목 없음)"))])
+            page_index = int(page) - 1
+            item.setData(0, BOOKMARK_PAGE_ROLE, page_index)
+            if page_index >= 0:
+                item.setToolTip(0, "%d쪽" % (page_index + 1))
+            if level == 1 or not parents:
+                self.addTopLevelItem(item)
+                parents = [item]
+            else:
+                parent_index = min(level - 2, len(parents) - 1)
+                parents[parent_index].addChild(item)
+                parents = parents[:parent_index + 1] + [item]
+        if not entries:
+            empty = QTreeWidgetItem([tr("책갈피 없음")])
+            empty.setFlags(empty.flags() & ~Qt.ItemIsEnabled)
+            self.addTopLevelItem(empty)
+        self.expandToDepth(0)
+
+    def _activate(self, item, _column=0):
+        page = item.data(0, BOOKMARK_PAGE_ROLE)
+        if page is not None and int(page) >= 0:
+            self.page_selected.emit(int(page))
+
+    def select_page(self, page):
+        root = self.invisibleRootItem()
+        stack = [root.child(i) for i in range(root.childCount())]
+        best = None
+        best_page = -1
+        while stack:
+            item = stack.pop(0)
+            item_page = item.data(0, BOOKMARK_PAGE_ROLE)
+            if (item_page is not None and best_page <= int(item_page) <= page):
+                best = item
+                best_page = int(item_page)
+            stack[0:0] = [item.child(i) for i in range(item.childCount())]
+        self.setCurrentItem(best)
 
 
 def thumbnail_layout_rects(item_rect, icon_size, aspect):
@@ -115,6 +175,7 @@ class PageCanvas(QWidget):
     selection_cleared = pyqtSignal()
     word_picked = pyqtSignal(QPointF)   # 더블클릭 지점 (PDF 좌표)
     clicked = pyqtSignal(QPointF)       # 드래그 없는 단순 클릭 (메모 배치/열기)
+    ctrl_clicked = pyqtSignal(QPointF)  # 링크 열기용 Ctrl+단순 클릭
     context_requested = pyqtSignal(QPointF, object)  # (PDF 좌표, 전역 좌표)
     hovered = pyqtSignal(QPointF, object)  # 마우스 이동 (메모 툴팁용)
     pan_requested = pyqtSignal(QPoint)  # 손 도구 드래그의 화면 좌표 이동량
@@ -276,7 +337,8 @@ class PageCanvas(QWidget):
             point = self._activate_at(ev.pos())
             if point is None:
                 return
-            if self._interaction_mode == "hand":
+            if (self._interaction_mode == "hand" and
+                    not (ev.modifiers() & Qt.ControlModifier)):
                 self._pan_last_global = ev.globalPos()
                 self.setCursor(Qt.ClosedHandCursor)
                 ev.accept()
@@ -311,7 +373,10 @@ class PageCanvas(QWidget):
             if self._drag_start is not None and not self._dragged:
                 target = self._page_point(ev.pos())
                 if target is not None and target[0] == self._active_page:
-                    self.clicked.emit(target[1])
+                    if ev.modifiers() & Qt.ControlModifier:
+                        self.ctrl_clicked.emit(target[1])
+                    else:
+                        self.clicked.emit(target[1])
             self._drag_start = None
 
     def mouseDoubleClickEvent(self, ev):

@@ -76,6 +76,21 @@ class Document:
     def page_count(self):
         return self._doc.page_count
 
+    @property
+    def password_protected(self):
+        """Whether this document required a password when it was opened."""
+        if self._password:
+            return True
+        try:
+            probe = fitz.open(self.path, filetype="pdf") \
+                if is_illustrator_document(self.path) else fitz.open(self.path)
+            try:
+                return bool(probe.needs_pass)
+            finally:
+                probe.close()
+        except Exception:
+            return False
+
     # --- 렌더 -------------------------------------------------------
 
     def render(self, index, zoom=1.0):
@@ -91,6 +106,39 @@ class Document:
     def page_size(self, index):
         r = self._doc[index].rect
         return r.width, r.height
+
+    def bookmarks(self):
+        """Return PDF outline entries as ``(level, title, one-based page)``."""
+        try:
+            return [tuple(entry[:3])
+                    for entry in self._doc.get_toc(simple=True)]
+        except Exception:
+            # A damaged outline must not prevent an otherwise valid PDF from
+            # opening and being edited.
+            return []
+
+    def link_at(self, index, x, y):
+        """Return a normalized link dictionary at a PDF page coordinate."""
+        point = fitz.Point(float(x), float(y))
+        kinds = {
+            fitz.LINK_GOTO: "goto",
+            fitz.LINK_URI: "uri",
+            fitz.LINK_GOTOR: "gotor",
+            fitz.LINK_LAUNCH: "launch",
+        }
+        for link in self._doc[index].get_links():
+            if point not in fitz.Rect(link.get("from")):
+                continue
+            target = link.get("to")
+            return {
+                "kind": kinds.get(link.get("kind"), "unsupported"),
+                "page": int(link.get("page", -1)),
+                "to": (float(target.x), float(target.y))
+                if hasattr(target, "x") else None,
+                "uri": str(link.get("uri") or ""),
+                "file": str(link.get("file") or ""),
+            }
+        return None
 
     # --- 텍스트 -----------------------------------------------------
 

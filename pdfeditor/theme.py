@@ -222,7 +222,7 @@ QTabBar::tab:selected {
     color: #1f1f1f;
 }
 
-QListWidget {
+QListWidget, QTreeWidget {
     background: #fbfbfb;
     border: 1px solid #e5e5e5;
     border-radius: 7px;
@@ -230,16 +230,16 @@ QListWidget {
     padding: 3px;
 }
 
-QListWidget::item {
+QListWidget::item, QTreeWidget::item {
     border-radius: 6px;
     padding: 5px;
 }
 
-QListWidget::item:hover {
+QListWidget::item:hover, QTreeWidget::item:hover {
     background: #f0f0f0;
 }
 
-QListWidget::item:selected {
+QListWidget::item:selected, QTreeWidget::item:selected {
     background: #e3f0fa;
     color: #1f1f1f;
 }
@@ -260,6 +260,18 @@ QListWidget#thumbnailRail {
     border: 0;
     border-radius: 0;
     border-right: 1px solid #e5e5e5;
+}
+
+QTreeWidget#bookmarkTree {
+    background: #f7f7f7;
+    border: 0;
+    border-radius: 0;
+    border-right: 1px solid #e5e5e5;
+    padding: 5px;
+}
+
+QTreeWidget#bookmarkTree::item {
+    min-height: 26px;
 }
 
 QScrollArea#documentViewport {

@@ -5,6 +5,7 @@ from pathlib import Path
 import fitz
 
 from pdfeditor.core import ANTIALIAS_LEVEL, Document, configure_antialiasing
+from pdfeditor.compression_core import compress_pdf_bytes
 from pdfeditor.pages import page_order_after_move
 
 
@@ -53,6 +54,58 @@ class PdfPageOperationTests(unittest.TestCase):
                     "Illustrator PDF data", document._doc[0].get_text())
             finally:
                 document.close()
+
+    def test_bookmarks_and_web_links_are_exposed_for_navigation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "links.pdf"
+            raw = fitz.open()
+            try:
+                raw.new_page()
+                raw.new_page()
+                page = raw[0]
+                page.insert_text((72, 72), "OpenAI")
+                page.insert_link({
+                    "kind": fitz.LINK_URI,
+                    "from": fitz.Rect(60, 50, 150, 85),
+                    "uri": "https://openai.com/",
+                })
+                page.insert_link({
+                    "kind": fitz.LINK_GOTO,
+                    "from": fitz.Rect(60, 90, 150, 120),
+                    "page": 1,
+                    "to": fitz.Point(20, 30),
+                })
+                raw.set_toc([[1, "Introduction", 1]])
+                raw.save(source)
+            finally:
+                raw.close()
+            document = Document(str(source))
+            try:
+                self.assertEqual(
+                    document.bookmarks(), [(1, "Introduction", 1)])
+                link = document.link_at(0, 80, 65)
+                self.assertEqual(link["kind"], "uri")
+                self.assertEqual(link["uri"], "https://openai.com/")
+                internal = document.link_at(0, 80, 100)
+                self.assertEqual(internal["kind"], "goto")
+                self.assertEqual(internal["page"], 1)
+                self.assertIsNone(document.link_at(0, 300, 300))
+            finally:
+                document.close()
+
+    def test_lossless_compression_writes_a_valid_pdf_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source.pdf"
+            output = Path(temp) / "compressed.pdf"
+            _make_pdf(source, ["compression test"])
+            result_size = compress_pdf_bytes(
+                source.read_bytes(), str(output), "lossless")
+            self.assertEqual(result_size, output.stat().st_size)
+            self.assertEqual(_page_texts(output), ["compression test"])
+
+    def test_unknown_compression_preset_is_rejected(self):
+        with self.assertRaises(ValueError):
+            compress_pdf_bytes(b"%PDF-1.7", "ignored.pdf", "unknown")
 
     def test_page_order_moves_single_page_between_pages(self):
         order, selected = page_order_after_move(5, [0], 4)

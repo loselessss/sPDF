@@ -13,6 +13,8 @@ MAX_THUMBNAIL_WIDTH = 480
 AUTOMATIC_UPDATE_INTERVAL_SECONDS = 24 * 60 * 60
 UI_LANGUAGES = ("en", "ko")
 DEFAULT_UI_LANGUAGE = "en"
+SIDEBAR_MODES = ("none", "thumbnails", "bookmarks")
+DEFAULT_SIDEBAR_MODE = "thumbnails"
 
 
 def _load():
@@ -94,6 +96,21 @@ def set_thumbnail_width(width):
     d = _load()
     d["thumbnail_width"] = width
     _save(d)
+
+
+def sidebar_mode():
+    mode = str(_load().get("sidebar_mode", DEFAULT_SIDEBAR_MODE)).lower()
+    return mode if mode in SIDEBAR_MODES else DEFAULT_SIDEBAR_MODE
+
+
+def set_sidebar_mode(mode):
+    normalized = str(mode).lower()
+    if normalized not in SIDEBAR_MODES:
+        return False
+    d = _load()
+    d["sidebar_mode"] = normalized
+    _save(d)
+    return True
 
 
 # --- 즐겨찾기 ----------------------------------------------------------
