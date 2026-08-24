@@ -14,6 +14,7 @@ THUMB_MIN_W = 72
 THUMB_MAX_W = 360
 THUMB_LABEL_H = 22
 THUMB_ITEM_EXTRA_H = 32
+THUMB_SPREAD_ROLE = Qt.UserRole + 2
 
 # 오버레이 색 — 선택은 파랑, 검색은 노랑, 현재 검색 항목은 주황
 SEL_COLOR = QColor(0, 120, 215, 70)
@@ -66,6 +67,14 @@ class ThumbnailDelegate(QStyledItemDelegate):
         self.initStyleOption(styled, index)
         icon = QIcon(styled.icon)
 
+        if index.data(THUMB_SPREAD_ROLE):
+            painter.save()
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(237, 246, 252))
+            painter.drawRoundedRect(QRectF(option.rect).adjusted(
+                1, 1, -1, -1), 6, 6)
+            painter.restore()
+
         # Preserve the active style's hover, selection, focus and drag state.
         styled.icon = QIcon()
         styled.text = ""
@@ -109,10 +118,13 @@ class PageCanvas(QWidget):
     context_requested = pyqtSignal(QPointF, object)  # (PDF 좌표, 전역 좌표)
     hovered = pyqtSignal(QPointF, object)  # 마우스 이동 (메모 툴팁용)
     pan_requested = pyqtSignal(QPoint)  # 손 도구 드래그의 화면 좌표 이동량
+    page_activated = pyqtSignal(int)    # 두 장 보기에서 조작 대상 페이지 변경
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pix = None
+        self._pages = []  # (page index, QPixmap, logical QRectF)
+        self._active_page = 0
         self.zoom = 1.0
         self._sel_rects = []
         self._search_rects = []
@@ -128,19 +140,33 @@ class PageCanvas(QWidget):
     # --- 표시 내용 ----------------------------------------------------
 
     def set_image(self, img, zoom):
-        self._pix = QPixmap.fromImage(img)
+        self.set_images([(0, img)], zoom, 0)
+
+    def set_images(self, images, zoom, active_page):
+        """Display one or two page images with independent page coordinates."""
         self.zoom = zoom
-        ratio = max(1.0, self._pix.devicePixelRatio())
-        self.resize(
-            QSize(
-                round(self._pix.width() / ratio),
-                round(self._pix.height() / ratio),
-            )
-        )
+        self._active_page = active_page
+        self._pages = []
+        left = 0.0
+        max_height = 0.0
+        gap = 16.0
+        for page, image in images:
+            pixmap = QPixmap.fromImage(image)
+            ratio = max(1.0, pixmap.devicePixelRatio())
+            width = pixmap.width() / ratio
+            height = pixmap.height() / ratio
+            rect = QRectF(left, 0.0, width, height)
+            self._pages.append((page, pixmap, rect))
+            left += width + gap
+            max_height = max(max_height, height)
+        self._pix = self._pages[0][1] if self._pages else None
+        total_width = max(0.0, left - gap) if self._pages else 0.0
+        self.resize(QSize(round(total_width), round(max_height)))
         self.update()
 
     def clear(self):
         self._pix = None
+        self._pages = []
         self._sel_rects = []
         self._search_rects = []
         self._search_cur = None
@@ -188,39 +214,74 @@ class PageCanvas(QWidget):
         # 분수 DPI/배율에서 물리 픽셀과 논리 픽셀의 경계가 어긋나더라도
         # 최근접 픽셀 확대처럼 계단지지 않도록 부드럽게 보간한다.
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        p.drawPixmap(0, 0, self._pix)
+        for _page, pixmap, rect in self._pages:
+            p.drawPixmap(round(rect.left()), round(rect.top()), pixmap)
         p.setPen(Qt.NoPen)
         z = self.zoom
+        origin = self.active_page_rect().topLeft()
         for rects, color in ((self._search_rects, SEARCH_COLOR),
                              (self._sel_rects, SEL_COLOR)):
             p.setBrush(color)
             for r in rects:
-                p.drawRect(QRectF(r.x() * z, r.y() * z, r.width() * z, r.height() * z))
+                p.drawRect(QRectF(origin.x() + r.x() * z,
+                                  origin.y() + r.y() * z,
+                                  r.width() * z, r.height() * z))
         if self._search_cur is not None:
             r = self._search_cur
             p.setBrush(SEARCH_CUR_COLOR)
-            p.drawRect(QRectF(r.x() * z, r.y() * z, r.width() * z, r.height() * z))
+            p.drawRect(QRectF(origin.x() + r.x() * z,
+                              origin.y() + r.y() * z,
+                              r.width() * z, r.height() * z))
         # 편집 가능한 span은 채우지 않고 테두리만 그린다(글자를 가리지 않게)
         if self._edit_boxes:
             p.setBrush(Qt.NoBrush)
             p.setPen(EDIT_BOX_COLOR)
             for r in self._edit_boxes:
-                p.drawRect(QRectF(r.x() * z, r.y() * z, r.width() * z, r.height() * z))
+                p.drawRect(QRectF(origin.x() + r.x() * z,
+                                  origin.y() + r.y() * z,
+                                  r.width() * z, r.height() * z))
         p.end()
 
     # --- 마우스 → PDF 좌표 --------------------------------------------
 
-    def _to_page(self, pos):
-        return QPointF(pos.x() / self.zoom, pos.y() / self.zoom)
+    def active_page_rect(self):
+        for page, _pixmap, rect in self._pages:
+            if page == self._active_page:
+                return QRectF(rect)
+        if self.width() > 0 and self.height() > 0:
+            return QRectF(0, 0, self.width(), self.height())
+        return QRectF()
+
+    def _page_point(self, pos):
+        point = QPointF(pos)
+        for page, _pixmap, rect in self._pages:
+            if rect.contains(point):
+                return page, QPointF(
+                    (point.x() - rect.left()) / self.zoom,
+                    (point.y() - rect.top()) / self.zoom)
+        return None
+
+    def _activate_at(self, pos):
+        target = self._page_point(pos)
+        if target is None:
+            return None
+        page, point = target
+        if page != self._active_page:
+            self._active_page = page
+            self.page_activated.emit(page)
+        return point
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton and self._pix is not None:
+            point = self._activate_at(ev.pos())
+            if point is None:
+                return
             if self._interaction_mode == "hand":
                 self._pan_last_global = ev.globalPos()
                 self.setCursor(Qt.ClosedHandCursor)
                 ev.accept()
                 return
-            self._drag_start = self._to_page(ev.pos())
+            self._drag_start = point
             self._dragged = False
             self.selection_cleared.emit()
 
@@ -230,10 +291,14 @@ class PageCanvas(QWidget):
             self.pan_requested.emit(current - self._pan_last_global)
             self._pan_last_global = current
         elif self._drag_start is not None:
-            self._dragged = True
-            self.drag_selected.emit(self._drag_start, self._to_page(ev.pos()))
+            target = self._page_point(ev.pos())
+            if target is not None and target[0] == self._active_page:
+                self._dragged = True
+                self.drag_selected.emit(self._drag_start, target[1])
         elif self._pix is not None:
-            self.hovered.emit(self._to_page(ev.pos()), ev.globalPos())
+            target = self._page_point(ev.pos())
+            if target is not None and target[0] == self._active_page:
+                self.hovered.emit(target[1], ev.globalPos())
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.LeftButton:
@@ -244,17 +309,23 @@ class PageCanvas(QWidget):
                 return
             # 드래그 없이 눌렀다 뗀 것만 '클릭' — 선택 드래그와 구분한다.
             if self._drag_start is not None and not self._dragged:
-                self.clicked.emit(self._to_page(ev.pos()))
+                target = self._page_point(ev.pos())
+                if target is not None and target[0] == self._active_page:
+                    self.clicked.emit(target[1])
             self._drag_start = None
 
     def mouseDoubleClickEvent(self, ev):
         if ev.button() == Qt.LeftButton and self._pix is not None and \
                 self._interaction_mode == "select":
-            self.word_picked.emit(self._to_page(ev.pos()))
+            point = self._activate_at(ev.pos())
+            if point is not None:
+                self.word_picked.emit(point)
 
     def contextMenuEvent(self, ev):
         if self._pix is not None:
-            self.context_requested.emit(self._to_page(ev.pos()), ev.globalPos())
+            point = self._activate_at(ev.pos())
+            if point is not None:
+                self.context_requested.emit(point, ev.globalPos())
 
 
 class PageView(QScrollArea):
@@ -304,26 +375,32 @@ class PageView(QScrollArea):
         self.canvas.set_image(img, self.zoom)
         self.viewport_changed.emit()
 
+    def set_images(self, images, active_page):
+        self.canvas.set_images(images, self.zoom, active_page)
+        self.viewport_changed.emit()
+
     def clear(self):
         self.canvas.clear()
         self.viewport_changed.emit()
 
     def visible_page_rect(self):
         """현재 뷰포트가 차지하는 페이지 비율(0~1 좌표)을 반환한다."""
+        page = self.canvas.active_page_rect()
         canvas = self.canvas.size()
         viewport = self.viewport().size()
-        if canvas.width() <= 0 or canvas.height() <= 0:
+        if page.isEmpty() or canvas.width() <= 0 or canvas.height() <= 0:
             return None
-        if canvas.width() <= viewport.width():
-            x, width = 0.0, 1.0
-        else:
-            x = self.horizontalScrollBar().value() / canvas.width()
-            width = viewport.width() / canvas.width()
-        if canvas.height() <= viewport.height():
-            y, height = 0.0, 1.0
-        else:
-            y = self.verticalScrollBar().value() / canvas.height()
-            height = viewport.height() / canvas.height()
+        visible = QRectF(
+            self.horizontalScrollBar().value(),
+            self.verticalScrollBar().value(),
+            viewport.width(), viewport.height())
+        intersection = page.intersected(visible)
+        if intersection.isEmpty():
+            return None
+        x = max(0.0, (intersection.left() - page.left()) / page.width())
+        y = max(0.0, (intersection.top() - page.top()) / page.height())
+        width = min(1.0, intersection.width() / page.width())
+        height = min(1.0, intersection.height() / page.height())
         rect = QRectF(x, y, min(1.0, width), min(1.0, height))
         if rect.width() >= 0.999 and rect.height() >= 0.999:
             return None
@@ -336,22 +413,23 @@ class PageView(QScrollArea):
     def ensure_rect_visible(self, rect):
         """PDF 좌표 rect가 보이도록 스크롤."""
         z = self.zoom
-        cx = int((rect.x() + rect.width() / 2) * z)
-        cy = int((rect.y() + rect.height() / 2) * z)
+        origin = self.canvas.active_page_rect().topLeft()
+        cx = int(origin.x() + (rect.x() + rect.width() / 2) * z)
+        cy = int(origin.y() + (rect.y() + rect.height() / 2) * z)
         self.ensureVisible(cx, cy, 120, 120)
 
     def center_on_page_fraction(self, point):
         """0~1 페이지 좌표의 지점이 뷰포트 중앙에 오도록 이동한다."""
-        canvas = self.canvas.size()
+        page = self.canvas.active_page_rect()
         viewport = self.viewport().size()
-        if canvas.width() <= 0 or canvas.height() <= 0:
+        if page.isEmpty():
             return
         x = max(0.0, min(1.0, float(point.x())))
         y = max(0.0, min(1.0, float(point.y())))
         self.horizontalScrollBar().setValue(
-            round(x * canvas.width() - viewport.width() / 2))
+            round(page.left() + x * page.width() - viewport.width() / 2))
         self.verticalScrollBar().setValue(
-            round(y * canvas.height() - viewport.height() / 2))
+            round(page.top() + y * page.height() - viewport.height() / 2))
         self.viewport_changed.emit()
 
     def wheelEvent(self, ev):
@@ -433,6 +511,7 @@ class ThumbList(QListWidget):
         self._navigation_press = None
         self._viewport_page = -1
         self._viewport_rect = None
+        self._spread_rows = set()
         self._thumb_width = 0
         self._apply_responsive_size()
 
@@ -482,6 +561,7 @@ class ThumbList(QListWidget):
         """페이지 수만큼 빈 항목 생성 — 아이콘은 나중에 채워진다."""
         self.clear()
         self._rendered_rows.clear()
+        self._spread_rows.clear()
         for i in range(count):
             it = QListWidgetItem("%d" % (i + 1))
             it.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
@@ -492,7 +572,21 @@ class ThumbList(QListWidget):
                 self.iconSize().height() + THUMB_ITEM_EXTRA_H))
             it.setData(Qt.UserRole, False)  # 렌더 완료 여부
             it.setData(Qt.UserRole + 1, 1.0)  # 페이지 가로/세로 비율
+            it.setData(THUMB_SPREAD_ROLE, False)
             self.addItem(it)
+
+    def set_spread_pages(self, pages):
+        """Highlight every thumbnail currently visible in the page spread."""
+        rows = {int(page) for page in pages if 0 <= int(page) < self.count()}
+        if rows == self._spread_rows:
+            return
+        changed = self._spread_rows | rows
+        self._spread_rows = rows
+        for row in changed:
+            item = self.item(row)
+            if item is not None:
+                item.setData(THUMB_SPREAD_ROLE, row in rows)
+                self.viewport().update(self.visualItemRect(item))
 
     def visible_rows(self):
         """현재 화면에 보이는 항목 행 번호 — 이 범위만 렌더하면 된다."""

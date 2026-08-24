@@ -6,12 +6,12 @@ import math
 AVAILABLE_ICONS = frozenset({
     "add_file", "ai", "back", "chevron_down", "chevron_up", "close",
     "copy", "delete", "download", "edit", "external", "extract",
-    "fit_page", "fit_width",
+    "fit_page", "fit_width", "fullscreen",
     "hand", "help", "highlight", "info", "license", "merge", "new_tab",
     "new_window", "note", "notes", "ocr", "open", "pages", "power",
-    "print", "recent", "redo", "rotate_ccw", "rotate_cw", "save", "save_as",
+    "presentation", "print", "recent", "redo", "rotate_ccw", "rotate_cw", "save", "save_as",
     "search", "select_all", "settings", "split", "star", "star_filled",
-    "text_select", "undo", "update", "zoom_in", "zoom_out",
+    "text_select", "two_page", "undo", "update", "zoom_in", "zoom_out",
 })
 
 
@@ -303,6 +303,25 @@ def fluent_icon(name, color="#424242", size=20):
         painter.drawRoundedRect(QRectF(2.8, 5.0, 10.5, 12.5), 1.2, 1.2)
         line(6.0, 9.0, 10.5, 9.0)
         line(6.0, 12.0, 10.5, 12.0)
+    elif name == "two_page":
+        painter.drawRoundedRect(QRectF(2.0, 3.0, 7.0, 14.0), 1.0, 1.0)
+        painter.drawRoundedRect(QRectF(11.0, 3.0, 7.0, 14.0), 1.0, 1.0)
+        line(4.2, 6.0, 6.8, 6.0)
+        line(13.2, 6.0, 15.8, 6.0)
+    elif name == "fullscreen":
+        line(3.0, 7.0, 3.0, 3.0); line(3.0, 3.0, 7.0, 3.0)
+        line(13.0, 3.0, 17.0, 3.0); line(17.0, 3.0, 17.0, 7.0)
+        line(3.0, 13.0, 3.0, 17.0); line(3.0, 17.0, 7.0, 17.0)
+        line(13.0, 17.0, 17.0, 17.0); line(17.0, 17.0, 17.0, 13.0)
+    elif name == "presentation":
+        painter.drawRoundedRect(QRectF(2.5, 3.0, 15.0, 10.5), 1.0, 1.0)
+        line(10.0, 13.5, 10.0, 17.5)
+        line(6.5, 17.5, 13.5, 17.5)
+        path = QPainterPath(QPointF(8.0, 6.0))
+        path.lineTo(13.0, 8.25)
+        path.lineTo(8.0, 10.5)
+        path.closeSubpath()
+        painter.drawPath(path)
     elif name in ("rotate_cw", "rotate_ccw"):
         if name == "rotate_cw":
             painter.drawArc(QRectF(3.0, 3.0, 14.0, 14.0), 25 * 16, 280 * 16)

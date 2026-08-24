@@ -30,6 +30,7 @@ class ViewerMixin:
     def _init_viewer_state(self):
         self.doc = None
         self.page_index = 0
+        self._two_page_mode = False
         self._cache = {}  # (page, zoom) -> QImage
         # 썸네일 스크롤 중 매번 렌더하면 버벅이므로 멈춘 뒤 한 번만 그린다.
         self._thumb_timer = QTimer(self)
@@ -56,23 +57,36 @@ class ViewerMixin:
             self.thumbs.blockSignals(True)
             self.thumbs.setCurrentRow(index)
             self.thumbs.blockSignals(False)
+        self.thumbs.set_spread_pages(self.visible_document_pages())
         self._update_page_label()
 
     def _render_current(self):
         pixel_ratio = render_pixel_ratio(self.view)
-        key = (
-            self.page_index,
-            round(self.view.zoom, 3),
-            round(pixel_ratio, 2),
-        )
-        img = self._cache.get(key)
-        if img is None:
-            img = qimage_from_render(
-                *self.doc.render(self.page_index, self.view.zoom * pixel_ratio),
-                device_pixel_ratio=pixel_ratio,
+        pages = self.visible_document_pages()
+        images = []
+        for page in pages:
+            key = (
+                page,
+                round(self.view.zoom, 3),
+                round(pixel_ratio, 2),
             )
-            self._cache[key] = img
-        self.view.set_image(img)
+            img = self._cache.get(key)
+            if img is None:
+                img = qimage_from_render(
+                    *self.doc.render(page, self.view.zoom * pixel_ratio),
+                    device_pixel_ratio=pixel_ratio,
+                )
+                self._cache[key] = img
+            images.append((page, img))
+        self.view.set_images(images, self.page_index)
+
+    def visible_document_pages(self):
+        if self.doc is None:
+            return []
+        if not self._two_page_mode:
+            return [self.page_index]
+        first = self.page_index - self.page_index % 2
+        return list(range(first, min(first + 2, self.doc.page_count)))
 
     def _trim_cache(self):
         """현재 페이지에서 멀어진 렌더는 버린다 — 메모리 상한 유지."""
@@ -113,8 +127,15 @@ class ViewerMixin:
         """렌더 없이 줌 값만 창 너비에 맞춘다 — 문서를 열 때 이걸로 먼저
         배율을 정한 뒤 show_page를 부르면 첫 페이지를 한 번만 렌더한다
         (예전엔 zoom 1.0으로 그리고 fit으로 또 그려서 두 배로 느렸다)."""
-        pw, _ = self.doc.page_size(index)
+        pages = ([index] if not self._two_page_mode else
+                 list(range(index - index % 2,
+                            min(index - index % 2 + 2,
+                                self.doc.page_count))))
+        widths = [self.doc.page_size(page)[0] for page in pages]
         avail = self.view.viewport().width() - 24  # 여백/스크롤바 몫
+        if len(widths) > 1:
+            avail -= 16.0
+        pw = sum(widths)
         if pw > 0 and avail > 0:
             self.view.zoom = max(self.view.ZOOM_MIN,
                                  min(self.view.ZOOM_MAX, avail / pw))
@@ -130,8 +151,13 @@ class ViewerMixin:
         """현재 페이지 전체가 문서 화면 안에 들어오도록 맞춘다."""
         if self.doc is None:
             return
-        page_width, page_height = self.doc.page_size(self.page_index)
+        pages = self.visible_document_pages()
+        sizes = [self.doc.page_size(page) for page in pages]
+        page_width = sum(width for width, _height in sizes)
+        page_height = max(height for _width, height in sizes)
         available_width = self.view.viewport().width() - 24
+        if len(sizes) > 1:
+            available_width -= 16.0
         available_height = self.view.viewport().height() - 24
         if page_width <= 0 or page_height <= 0:
             return
@@ -169,10 +195,38 @@ class ViewerMixin:
         self._schedule_thumbs()
 
     def next_page(self):
-        self.show_page(self.page_index + 1)
+        if self._two_page_mode:
+            self.show_page(self.page_index - self.page_index % 2 + 2)
+        else:
+            self.show_page(self.page_index + 1)
 
     def prev_page(self):
-        self.show_page(self.page_index - 1)
+        if self._two_page_mode:
+            self.show_page(max(0, self.page_index - self.page_index % 2 - 2))
+        else:
+            self.show_page(self.page_index - 1)
+
+    def set_two_page_mode(self, enabled):
+        enabled = bool(enabled)
+        if enabled == self._two_page_mode:
+            return
+        self._two_page_mode = enabled
+        if hasattr(self, "_two_page_act"):
+            self._two_page_act.setChecked(enabled)
+        if self.doc is not None:
+            self._set_fit_zoom(self.page_index)
+            self._cache.clear()
+            self._render_current()
+            self.thumbs.set_spread_pages(self.visible_document_pages())
+            self._clear_selection()
+            self._apply_search_overlay()
+            if self._edit_mode:
+                self._show_edit_boxes()
+            self.update_thumbnail_viewport_marker()
+            self._update_page_label()
+
+    def toggle_two_page_mode(self):
+        self.set_two_page_mode(not self._two_page_mode)
 
     # --- 썸네일 ------------------------------------------------------
 

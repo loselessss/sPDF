@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import unittest
+from unittest.mock import Mock
 
 
 HAS_PYQT5 = importlib.util.find_spec("PyQt5") is not None
@@ -64,6 +65,37 @@ class InteractionToolTests(unittest.TestCase):
         self.assertEqual(canvas.width(), 2)
         self.assertEqual(canvas.height(), 2)
         canvas.close()
+
+    def test_two_page_canvas_keeps_page_coordinates_independent(self):
+        from PyQt5.QtCore import QPoint
+        from PyQt5.QtGui import QImage
+        from pdfeditor.widgets import PageCanvas
+
+        image = QImage(100, 160, QImage.Format_RGB888)
+        canvas = PageCanvas()
+        canvas.set_images([(4, image), (5, image)], 1.0, 4)
+
+        self.assertEqual(canvas.width(), 216)
+        self.assertEqual(canvas._page_point(QPoint(25, 40))[0], 4)
+        second = canvas._page_point(QPoint(141, 40))
+        self.assertEqual(second[0], 5)
+        self.assertAlmostEqual(second[1].x(), 25.0)
+        self.assertAlmostEqual(second[1].y(), 40.0)
+        canvas.close()
+
+    def test_two_page_navigation_moves_by_spread(self):
+        from pdfeditor.viewer import ViewerMixin
+
+        host = Mock()
+        host._two_page_mode = True
+        host.page_index = 1
+        ViewerMixin.next_page(host)
+        host.show_page.assert_called_once_with(2)
+
+        host.show_page.reset_mock()
+        host.page_index = 3
+        ViewerMixin.prev_page(host)
+        host.show_page.assert_called_once_with(0)
 
     def test_render_pixel_ratio_always_supersamples_at_least_twice(self):
         from PyQt5.QtWidgets import QWidget

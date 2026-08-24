@@ -106,6 +106,10 @@ HELP_HTML = """
 <h3>📑 페이지 조작</h3>
 <table cellpadding="4">
 <tr><td><b>Ctrl+] / Ctrl+[</b></td><td>오른쪽 / 왼쪽으로 회전</td></tr>
+<tr><td><b>Ctrl+Shift+2</b></td><td>한 장 보기 / 두 장 보기 전환</td></tr>
+<tr><td><b>F11</b></td><td>메뉴와 명령 모음을 유지한 전체화면 전환</td></tr>
+<tr><td><b>F5</b></td><td>문서만 표시하는 프레젠테이션 모드 시작</td></tr>
+<tr><td><b>Esc</b></td><td>프레젠테이션 모드 종료</td></tr>
 <tr><td><b>Ctrl+Delete</b></td><td>현재 페이지 삭제</td></tr>
 <tr><td>썸네일 <b>드래그</b></td><td>페이지 순서 변경</td></tr>
 <tr><td>페이지 → <b>PDF 병합</b></td><td>여러 PDF를 선택해 현재 페이지 뒤에 순서대로 삽입</td></tr>

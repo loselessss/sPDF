@@ -129,6 +129,22 @@ class ThumbnailTests(unittest.TestCase):
         self.assertFalse(thumbs.item(10).icon().isNull())
         thumbs.close()
 
+    def test_two_page_spread_marks_both_thumbnail_rows(self):
+        from pdfeditor.widgets import THUMB_SPREAD_ROLE, ThumbList
+
+        thumbs = ThumbList()
+        thumbs.reset_pages(5)
+        thumbs.set_spread_pages([2, 3])
+
+        self.assertFalse(thumbs.item(1).data(THUMB_SPREAD_ROLE))
+        self.assertTrue(thumbs.item(2).data(THUMB_SPREAD_ROLE))
+        self.assertTrue(thumbs.item(3).data(THUMB_SPREAD_ROLE))
+        thumbs.set_spread_pages([4])
+        self.assertFalse(thumbs.item(2).data(THUMB_SPREAD_ROLE))
+        self.assertFalse(thumbs.item(3).data(THUMB_SPREAD_ROLE))
+        self.assertTrue(thumbs.item(4).data(THUMB_SPREAD_ROLE))
+        thumbs.close()
+
     def test_viewport_marker_can_be_updated_without_changing_item_geometry(self):
         from PyQt5.QtCore import QRectF
         from pdfeditor.widgets import ThumbList

@@ -10,6 +10,13 @@
 - Paper organization is a separate companion program launched through `paper_organizer.py`; do not import its UI, timers, or Ollama workflow into the sPDF application entry point.
 - Paper Organizer uses the separate `paperorganizer/` package. Its settings must remain separate from `~/.spdf.json` and its modules must not be imported by the sPDF application entry point.
 
+## Embedded-module integration
+
+- When another program imports sPDF as an internal module, create its window with `pdfeditor.app.new_window(path)` or `AppWindow()` and leave `updates_enabled` at its default. Embedded mode must not create the GitHub update service, schedule automatic update checks, or expose the update menu.
+- Only the standalone sPDF entry point (`pdfeditor.__main__`, including the installed executable, `run.py`, and `run.pyw`) may pass `updates_enabled=True`.
+- New windows created from an existing window must inherit that window's update mode. Do not re-enable sPDF self-updates from a host application's embedded window.
+- Keep the embedded-mode behavior covered by `tests/test_embedded_mode.py` whenever startup, menus, window creation, or update handling changes.
+
 ## Design constraints
 
 - PDF text editing replaces content within the original line or box; it is not a full reflow editor. Preserve this limitation and avoid promising layout-perfect font reproduction.

@@ -41,13 +41,13 @@ class FluentThemeTests(unittest.TestCase):
         expected = {
             "add_file", "ai", "back", "chevron_down", "chevron_up",
             "close", "copy", "delete", "download", "edit", "external",
-            "extract", "fit_page", "fit_width", "hand", "help",
+            "extract", "fit_page", "fit_width", "fullscreen", "hand", "help",
             "highlight", "info",
             "license", "merge", "new_tab", "new_window", "note", "notes",
-            "ocr", "open", "pages", "power", "print", "recent", "redo",
+            "ocr", "open", "pages", "power", "presentation", "print", "recent", "redo",
             "rotate_ccw", "rotate_cw", "save", "save_as", "search",
             "select_all", "settings", "split", "star", "star_filled",
-            "text_select", "undo", "update", "zoom_in", "zoom_out",
+            "text_select", "two_page", "undo", "update", "zoom_in", "zoom_out",
         }
         self.assertEqual(AVAILABLE_ICONS, expected)
 
@@ -63,6 +63,26 @@ class FluentThemeTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("Qt.ToolButtonIconOnly", source)
         self.assertNotIn("Qt.ToolButtonTextBesideIcon", source)
+
+    def test_command_bar_exposes_both_page_rotation_actions(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("tool_bar.addAction(self._rotate_ccw_act)", source)
+        self.assertIn("tool_bar.addAction(self._rotate_cw_act)", source)
+
+    def test_command_bar_exposes_two_page_view(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("tool_bar.addAction(self._two_page_act)", source)
+
+    def test_command_bar_exposes_presentation_and_full_screen(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("tool_bar.addAction(self._presentation_act)", source)
+        self.assertIn("tool_bar.addAction(self._full_screen_act)", source)
 
     def test_windows_11_backdrop_has_safe_fallback(self):
         source = (

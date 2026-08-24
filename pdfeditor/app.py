@@ -375,6 +375,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.view.canvas.clicked.connect(self._dispatch_click)
         self.view.canvas.context_requested.connect(self.on_context_menu)
         self.view.canvas.hovered.connect(self.on_canvas_hover)
+        self.view.canvas.page_activated.connect(self.show_page)
 
         # 메모 모아보기 독 (기본 숨김) — 탭마다 독립
         self._notes_list = QListWidget()
@@ -498,10 +499,12 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             p, "페이지 구성...", "Ctrl+Shift+P",
             self.show_page_organizer, "pages")
         p.addSeparator()
-        self._act(p, "오른쪽으로 회전", "Ctrl+]", self.rotate_page_cw,
-                  "rotate_cw")
-        self._act(p, "왼쪽으로 회전", "Ctrl+[", self.rotate_page_ccw,
-                  "rotate_ccw")
+        self._rotate_cw_act = self._act(
+            p, "오른쪽으로 회전", "Ctrl+]", self.rotate_page_cw,
+            "rotate_cw")
+        self._rotate_ccw_act = self._act(
+            p, "왼쪽으로 회전", "Ctrl+[", self.rotate_page_ccw,
+            "rotate_ccw")
         self._act(p, "현재 페이지 삭제", "Ctrl+Delete",
                   self.delete_current_page, "delete")
         p.addSeparator()
@@ -539,6 +542,19 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             v, "폭 맞춤", "Ctrl+0", self.zoom_fit, "fit_width")
         self._fit_page_act = self._act(
             v, "쪽 맞춤", None, self.zoom_page_fit, "fit_page")
+        self._two_page_act = self._act(
+            v, "두 장 보기", "Ctrl+Shift+2", self.toggle_two_page_mode,
+            "two_page")
+        self._two_page_act.setCheckable(True)
+        v.addSeparator()
+        self._presentation_act = self._act(
+            v, "프레젠테이션 모드", "F5", self.toggle_presentation_mode,
+            "presentation")
+        self._presentation_act.setCheckable(True)
+        self._full_screen_act = self._act(
+            v, "전체화면", "F11", self.toggle_full_screen,
+            "fullscreen")
+        self._full_screen_act.setCheckable(True)
         v.addSeparator()
         self._act(v, "다음 페이지", "PgDown", self.next_page,
                   "chevron_down")
@@ -577,6 +593,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.addAction(self._select_tool_act)
         tool_bar.addSeparator()
         tool_bar.addAction(self._pages_act)
+        tool_bar.addAction(self._rotate_ccw_act)
+        tool_bar.addAction(self._rotate_cw_act)
         tool_bar.addAction(self._search_act)
         tool_bar.addSeparator()
         tool_bar.addAction(self._favorite_act)
@@ -585,6 +603,10 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.addAction(self._zoom_out_act)
         tool_bar.addAction(self._fit_width_act)
         tool_bar.addAction(self._fit_page_act)
+        tool_bar.addAction(self._two_page_act)
+        tool_bar.addSeparator()
+        tool_bar.addAction(self._presentation_act)
+        tool_bar.addAction(self._full_screen_act)
         self.addToolBar(Qt.TopToolBarArea, tool_bar)
         self._interaction_toolbar = tool_bar
 
@@ -618,16 +640,54 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             )
             self.statusBar().showMessage(message, 3000)
 
+    def toggle_full_screen(self):
+        self._shell.toggle_full_screen()
+
+    def toggle_presentation_mode(self):
+        self._shell.toggle_presentation(self)
+
+    def set_presentation_chrome_hidden(self, hidden):
+        """Hide document chrome while preserving its previous visibility."""
+        if hidden:
+            if hasattr(self, "_presentation_ui_state"):
+                return
+            self._presentation_ui_state = {
+                "thumbs": not self.thumbs.isHidden(),
+                "toolbar": not self._interaction_toolbar.isHidden(),
+                "status": not self.statusBar().isHidden(),
+                "search": not self._search_bar.isHidden(),
+                "notes": not self._notes_dock.isHidden(),
+            }
+            self.thumbs.hide()
+            self._interaction_toolbar.hide()
+            self.statusBar().hide()
+            self._search_bar.hide()
+            self._notes_dock.hide()
+            if self.doc is not None:
+                QTimer.singleShot(0, self.zoom_page_fit)
+        else:
+            state = getattr(self, "_presentation_ui_state", None)
+            if state is None:
+                return
+            self.thumbs.setVisible(state["thumbs"])
+            self._interaction_toolbar.setVisible(state["toolbar"])
+            self.statusBar().setVisible(state["status"])
+            self._search_bar.setVisible(state["search"])
+            self._notes_dock.setVisible(state["notes"])
+            del self._presentation_ui_state
+            if self.doc is not None:
+                QTimer.singleShot(0, self.zoom_fit)
+
     def on_wheel_flip(self, direction):
         """휠로 페이지 끝에 닿았을 때 다음/이전 장으로."""
         if self.doc is None:
             return
         if direction > 0 and self.page_index < self.doc.page_count - 1:
-            self.show_page(self.page_index + 1)
+            self.next_page()
             self.view.verticalScrollBar().setValue(
                 self.view.verticalScrollBar().minimum())
         elif direction < 0 and self.page_index > 0:
-            self.show_page(self.page_index - 1)
+            self.prev_page()
             self.view.verticalScrollBar().setValue(
                 self.view.verticalScrollBar().maximum())
         self.view.reset_flip()
@@ -817,8 +877,13 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         if self.doc is None:
             self._page_label.setText("")
         else:
-            self._page_label.setText("%d / %d" % (
-                self.page_index + 1, self.doc.page_count))
+            visible = self.visible_document_pages()
+            if len(visible) > 1:
+                self._page_label.setText("%d–%d / %d" % (
+                    visible[0] + 1, visible[-1] + 1, self.doc.page_count))
+            else:
+                self._page_label.setText("%d / %d" % (
+                    self.page_index + 1, self.doc.page_count))
             if hasattr(self, "_zoom_input"):
                 self._zoom_input.blockSignals(True)
                 self._zoom_input.setValue(round(self.view.zoom * 100))
@@ -968,7 +1033,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         dlg.exec_()
 
     def keyPressEvent(self, ev):
-        if ev.key() == Qt.Key_Escape and self._note_mode:
+        if ev.key() == Qt.Key_Escape and self._shell.presentation_active:
+            self._shell.toggle_presentation(self)
+        elif ev.key() == Qt.Key_Escape and self._note_mode:
             self.cancel_note_mode()
         elif ev.key() == Qt.Key_Escape and self._search_bar.isVisible():
             self.hide_search()
@@ -1010,6 +1077,8 @@ class AppWindow(QMainWindow):
             GitHubUpdateService(APP_VERSION) if self.updates_enabled else None)
         self._update_worker = None
         self._available_update = None
+        self._presentation_tab = None
+        self._presentation_window_state = None
 
         self._start_page = StartPage()
         self._start_page.open_file.connect(self.open_in_tab)
@@ -1052,6 +1121,64 @@ class AppWindow(QMainWindow):
 
             self._fluent_backdrop_attempted = True
             self._fluent_backdrop_applied = apply_fluent_window_backdrop(self)
+
+    @property
+    def presentation_active(self):
+        return self._presentation_tab is not None
+
+    def _sync_view_mode_actions(self):
+        for index in range(self._tabs.count()):
+            tab = self._tabs.widget(index)
+            tab._presentation_act.setChecked(tab is self._presentation_tab)
+            tab._full_screen_act.setChecked(
+                self.isFullScreen() and not self.presentation_active)
+
+    def toggle_full_screen(self):
+        if self.presentation_active:
+            self.toggle_presentation(self._presentation_tab)
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+        self._sync_view_mode_actions()
+
+    def toggle_presentation(self, tab=None):
+        if self.presentation_active:
+            active = self._presentation_tab
+            state = self._presentation_window_state or {}
+            active.set_presentation_chrome_hidden(False)
+            self.menuBar().setVisible(state.get("menubar", True))
+            self._tabs.tabBar().setVisible(state.get("tabbar", True))
+            self._presentation_tab = None
+            self._presentation_window_state = None
+            if state.get("fullscreen", False):
+                self.showFullScreen()
+            else:
+                self.showNormal()
+            self._sync_view_mode_actions()
+            return
+
+        tab = tab or self._tabs.currentWidget()
+        if tab is None or tab.doc is None:
+            return
+        self._presentation_window_state = {
+            "fullscreen": self.isFullScreen(),
+            "menubar": not self.menuBar().isHidden(),
+            "tabbar": not self._tabs.tabBar().isHidden(),
+        }
+        self._presentation_tab = tab
+        tab.set_presentation_chrome_hidden(True)
+        self.menuBar().hide()
+        self._tabs.tabBar().hide()
+        self.showFullScreen()
+        self._sync_view_mode_actions()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape and self.presentation_active:
+            self.toggle_presentation(self._presentation_tab)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _build_shell_menu(self):
         mb = QMenuBar(self)
@@ -1356,6 +1483,8 @@ class AppWindow(QMainWindow):
         self._remove_tab(tab)
 
     def _remove_tab(self, tab):
+        if tab is self._presentation_tab:
+            self.toggle_presentation(tab)
         i = self._tabs.indexOf(tab)
         if i >= 0:
             self._tabs.removeTab(i)
