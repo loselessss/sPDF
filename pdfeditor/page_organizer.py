@@ -16,6 +16,8 @@ from PyQt5.QtWidgets import (
     QRadioButton, QVBoxLayout,
 )
 
+from .i18n import tr
+
 from .widgets import qimage_from_render
 from .icons import fluent_icon
 
@@ -49,7 +51,7 @@ class PageOrganizerList(QListWidget):
             self.iconSize().height() + 30,
         )
         for index in range(count):
-            item = QListWidgetItem("%d페이지" % (index + 1))
+            item = QListWidgetItem(tr("%d페이지" % (index + 1)))
             item.setTextAlignment(Qt.AlignHCenter)
             item.setSizeHint(item_size)
             item.setData(Qt.UserRole, False)

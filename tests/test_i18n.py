@@ -1,0 +1,33 @@
+import unittest
+
+from pdfeditor.i18n import SUPPORTED_LANGUAGES, set_language, tr
+
+
+class InternationalEditionTests(unittest.TestCase):
+    def setUp(self):
+        set_language("en")
+
+    def test_first_international_language_is_english(self):
+        self.assertEqual(SUPPORTED_LANGUAGES, ("en",))
+        self.assertEqual(tr("파일(&F)"), "&File")
+        self.assertEqual(tr("페이지 구성..."), "Organize Pages...")
+
+    def test_dynamic_ui_messages_are_translated(self):
+        self.assertEqual(tr("12쪽"), "Page 12")
+        self.assertEqual(
+            tr("3개 단어 선택 — Ctrl+C로 복사"),
+            "3 words selected — press Ctrl+C to copy")
+        self.assertEqual(tr("저장됨: C:\\paper.pdf"),
+                         "Saved: C:\\paper.pdf")
+
+    def test_document_content_is_not_changed(self):
+        text = "이 문장은 PDF 본문입니다."
+        self.assertEqual(tr(text), text)
+
+    def test_unknown_language_falls_back_to_english(self):
+        self.assertEqual(set_language("fr-FR"), "en")
+        self.assertEqual(tr("저장"), "Save")
+
+
+if __name__ == "__main__":
+    unittest.main()

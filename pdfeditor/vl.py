@@ -18,6 +18,7 @@ import importlib.util
 import os
 
 from . import paths
+from .i18n import tr
 
 # PaddleOCR-VL 0.9B — Apache 2.0, Hugging Face 공개. transformers로 로드.
 _HF_REPO = "PaddlePaddle/PaddleOCR-VL-1.5"
@@ -68,7 +69,7 @@ def install_hint():
         missing.append("실행 런타임(torch, torchvision, transformers)")
     if not model_present():
         missing.append("모델(약 2GB, 첫 실행 시 다운로드)")
-    return " · ".join(missing) if missing else "설치됨"
+    return " · ".join(tr(item) for item in missing) if missing else tr("설치됨")
 
 
 # --- 런타임(가속기) 감지 ----------------------------------------------
@@ -81,7 +82,7 @@ def detect_runtime():
     torch가 없으면 즉시 "none"으로 답한다.
     """
     if not _have("torch"):
-        return "none", "PyTorch 미설치 — VL 실행 불가 (torch/transformers 필요)"
+        return "none", tr("PyTorch 미설치 — VL 실행 불가 (torch/transformers 필요)")
     try:
         import torch
         if torch.cuda.is_available():
@@ -94,7 +95,7 @@ def detect_runtime():
         pass
     if _have("torch_directml"):
         return "directml", "GPU (DirectML)"
-    return "cpu", "CPU — VL은 CPU에서 매우 느림 (GPU 권장)"
+    return "cpu", tr("CPU — VL은 CPU에서 매우 느림 (GPU 권장)")
 
 
 def runtime_summary():
@@ -169,16 +170,16 @@ def vl_suitability():
     ram = s["ram_gb"] or 0
     vram = s["vram_gb"] or 0
     if s["gpu"] and vram >= 6 and ram >= 16:
-        return "good", s, (
+        return "good", s, tr(
             "NVIDIA GPU(%s, %.0fGB) + RAM %.0fGB — VL에 적합합니다."
             % (s["gpu"], vram, ram))
     if s["gpu"] and vram >= 4:
-        return "marginal", s, (
+        return "marginal", s, tr(
             "GPU(%s, %.0fGB)가 있으나 여유가 크지 않습니다 — 동작은 하지만 "
             "느리거나 메모리 부족이 날 수 있습니다." % (s["gpu"], vram))
     where = "NVIDIA GPU 없음(내장/AMD 또는 CPU)" if not s["gpu"] \
         else "GPU %s" % s["gpu"]
-    return "poor", s, (
+    return "poor", s, tr(
         "%s, RAM %.0fGB — GPU 가속을 못 써 VL이 매우 느립니다(페이지당 "
         "수십 초~분). 켜놓고 기다리는 배경 작업이면 쓸 수 있지만, 평소엔 "
         "RapidOCR을 권합니다." % (where, ram))
@@ -203,10 +204,10 @@ def download_models(progress=None):
     자리만 둔다(TODO: 파일 단위 진행 표시).
     """
     if not can_download():
-        raise RuntimeError(
+        raise RuntimeError(tr(
             "VL 런타임이 설치되어 있지 않습니다.\n"
             "먼저 다음을 설치하세요:\n"
             "  pip install torch torchvision transformers huggingface_hub\n"
-            "(GPU 사용 시 CUDA 지원 torch 빌드 필요)")
+            "(GPU 사용 시 CUDA 지원 torch 빌드 필요)"))
     from huggingface_hub import snapshot_download
     snapshot_download(repo_id=_HF_REPO, local_dir=models_dir())

@@ -123,14 +123,82 @@ HELP_HTML = """
 목록을 볼 수 있습니다.</p>
 """
 
+HELP_HTML_EN = """
+<h2>{name} User Guide</h2>
+<p style="color:gray;">v{ver} · PDF viewing · annotations · OCR · editing</p>
+
+<h3>📂 Files and tabs</h3>
+<table cellpadding="4">
+<tr><td><b>Ctrl+O / Ctrl+T</b></td><td>Open a PDF in a new tab</td></tr>
+<tr><td><b>Ctrl+Shift+N</b></td><td>Open a new sPDF window</td></tr>
+<tr><td><b>Ctrl+S</b></td><td>Save and create a <code>.bak</code> backup</td></tr>
+<tr><td><b>Ctrl+Shift+S</b></td><td>Save as</td></tr>
+<tr><td><b>Ctrl+P</b></td><td>Print</td></tr>
+<tr><td><b>Ctrl+W</b></td><td>Close the current tab</td></tr>
+</table>
+<p>Drag tabs to reorder them or move them to another sPDF window. Unsaved
+changes move with the tab, and an empty source window closes automatically.
+The home page provides favorites and recent files. You can also drag and drop
+PDF files onto the window.</p>
+
+<h3>🔍 View and navigation</h3>
+<table cellpadding="4">
+<tr><td><b>Ctrl + mouse wheel</b></td><td>Zoom in larger steps</td></tr>
+<tr><td><b>Alt + mouse wheel</b></td><td>Zoom in 1% steps</td></tr>
+<tr><td><b>Ctrl+0</b></td><td>Fit width</td></tr>
+<tr><td><b>PgUp / PgDown</b></td><td>Previous / next page</td></tr>
+<tr><td><b>Hand tool</b></td><td>Click and drag to pan</td></tr>
+<tr><td><b>Text selection tool</b></td><td>Drag across text to select it</td></tr>
+<tr><td><b>Ctrl+Shift+2</b></td><td>Toggle two-page view</td></tr>
+<tr><td><b>F11</b></td><td>Toggle full screen</td></tr>
+<tr><td><b>F5 / Esc</b></td><td>Start / leave presentation mode</td></tr>
+</table>
+
+<h3>✂️ Selection and search</h3>
+<table cellpadding="4">
+<tr><td><b>Drag / double-click</b></td><td>Select text / a word</td></tr>
+<tr><td><b>Ctrl+A / Ctrl+C</b></td><td>Select the page / copy selection</td></tr>
+<tr><td><b>Ctrl+F</b></td><td>Find text</td></tr>
+<tr><td><b>F3 / Shift+F3</b></td><td>Next / previous result</td></tr>
+</table>
+
+<h3>🖍️ Annotations</h3>
+<table cellpadding="4">
+<tr><td><b>Ctrl+H</b></td><td>Highlight selected text</td></tr>
+<tr><td><b>Ctrl+M</b></td><td>Add a note at a clicked location</td></tr>
+<tr><td><b>Ctrl+Shift+M</b></td><td>Toggle the notes panel</td></tr>
+</table>
+
+<h3>🔤 OCR</h3>
+<table cellpadding="4">
+<tr><td><b>Ctrl+R</b></td><td>OCR the current page</td></tr>
+<tr><td><b>Ctrl+Shift+R</b></td><td>OCR pages without a text layer</td></tr>
+</table>
+<p>RapidOCR works offline. High-quality AI OCR is optional and requires a
+separate model. OCR language is independent of the interface language.</p>
+
+<h3>✏️ Editing and pages</h3>
+<table cellpadding="4">
+<tr><td><b>Ctrl+E</b></td><td>Toggle text editing</td></tr>
+<tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>Undo / redo</td></tr>
+<tr><td><b>Ctrl+] / Ctrl+[</b></td><td>Rotate right / left</td></tr>
+<tr><td><b>Ctrl+Delete</b></td><td>Delete the current page</td></tr>
+</table>
+<p>PDF text is edited within its original line or box; it is not a full
+reflow editor. Replacement fonts may look different. Page rotation, deletion,
+reordering, and merging participate in undo/redo.</p>
+
+<p style="color:gray;">See Help → Open-source Licenses for third-party notices.</p>
+"""
+
 
 def show_help(parent):
     dlg = QDialog(parent)
-    dlg.setWindowTitle("%s 사용법" % APP_NAME)
+    dlg.setWindowTitle("%s User Guide" % APP_NAME)
     dlg.resize(560, 640)
     lay = QVBoxLayout(dlg)
 
-    body = QLabel(HELP_HTML.format(name=APP_NAME, ver=APP_VERSION))
+    body = QLabel(HELP_HTML_EN.format(name=APP_NAME, ver=APP_VERSION))
     body.setWordWrap(True)
     body.setTextFormat(1)  # Qt.RichText
     inner = QWidget()

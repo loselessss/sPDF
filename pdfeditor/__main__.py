@@ -26,10 +26,15 @@ def main():
     # Windows의 모든 Qt 대화상자 제목 표시줄에 자동으로 붙는 `?`
     # 컨텍스트 도움말 버튼을 앱 전체에서 제거한다.
     QApplication.setAttribute(Qt.AA_DisableWindowContextHelpButton, True)
+    # 국제판은 Qt 자체 대화상자도 영어 번역 계층을 통과해야 하므로 운영체제의
+    # 한국어 네이티브 파일 대화상자 대신 Qt 대화상자를 사용한다.
+    QApplication.setAttribute(Qt.AA_DontUseNativeDialogs, True)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(APP_NAME)
+    from .i18n import install as install_i18n
+    install_i18n(app)
     apply_fluent_theme(app)
     import os
     icon = app_icon()

@@ -11,9 +11,10 @@ from PyQt5.QtWidgets import (
 )
 
 from .icons import fluent_icon
+from .i18n import tr
 
 def _size_text(size):
-    return "%.1f MB" % (size / (1024 * 1024)) if size > 0 else "크기 정보 없음"
+    return "%.1f MB" % (size / (1024 * 1024)) if size > 0 else tr("크기 정보 없음")
 
 
 class UpdateCheckWorker(QThread):
@@ -62,22 +63,22 @@ class UpdateDialog(QDialog):
         self._service = service
         self._update = update
         self._worker = None
-        self.setWindowTitle("sPDF 업데이트")
+        self.setWindowTitle(tr("sPDF 업데이트"))
         self.setMinimumSize(600, 450)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "<h3>sPDF %s 업데이트가 있습니다.</h3>" % update.version))
+            "<h3>sPDF %s is available.</h3>" % update.version))
         form = QFormLayout()
-        form.addRow("현재 버전", QLabel(service.current_version))
-        form.addRow("새 버전", QLabel(update.version))
-        form.addRow("설치 파일", QLabel(
+        form.addRow(tr("현재 버전"), QLabel(service.current_version))
+        form.addRow(tr("새 버전"), QLabel(update.version))
+        form.addRow(tr("설치 파일"), QLabel(
             "%s (%s)" % (update.asset.name, _size_text(update.asset.size))
-            if update.asset else "등록 대기 중"))
+            if update.asset else tr("등록 대기 중")))
         layout.addLayout(form)
-        layout.addWidget(QLabel("변경 내용"))
+        layout.addWidget(QLabel(tr("변경 내용")))
         self.notes = QTextBrowser()
-        self.notes.setPlainText(update.release_notes or "변경 기록이 없습니다.")
+        self.notes.setPlainText(update.release_notes or tr("변경 기록이 없습니다."))
         layout.addWidget(self.notes, 1)
         self.progress = QProgressBar()
         self.progress.hide()
@@ -87,15 +88,15 @@ class UpdateDialog(QDialog):
         layout.addWidget(self.status)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
-        buttons.button(QDialogButtonBox.Close).setText("나중에")
+        buttons.button(QDialogButtonBox.Close).setText(tr("나중에"))
         buttons.button(QDialogButtonBox.Close).setIcon(fluent_icon("close"))
         buttons.rejected.connect(self.reject)
-        self.release_button = QPushButton("릴리스 페이지")
+        self.release_button = QPushButton(tr("릴리스 페이지"))
         self.release_button.setIcon(fluent_icon("external"))
         self.release_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(update.release_url)))
         buttons.addButton(self.release_button, QDialogButtonBox.ActionRole)
-        self.install_button = QPushButton("다운로드 후 설치")
+        self.install_button = QPushButton(tr("다운로드 후 설치"))
         self.install_button.setProperty("accent", True)
         self.install_button.setIcon(fluent_icon("download", "#ffffff"))
         self.install_button.clicked.connect(self._start_download)
@@ -104,11 +105,11 @@ class UpdateDialog(QDialog):
 
         if update.asset is None:
             self.install_button.setEnabled(False)
-            self.status.setText("이 릴리스에는 아직 Windows 설치 파일이 없습니다.")
+            self.status.setText(tr("이 릴리스에는 아직 Windows 설치 파일이 없습니다."))
         elif not update.asset.sha256:
             self.install_button.setEnabled(False)
-            self.status.setText(
-                "설치 파일 무결성 정보가 없어 앱 안에서는 자동 설치하지 않습니다.")
+            self.status.setText(tr(
+                "설치 파일 무결성 정보가 없어 앱 안에서는 자동 설치하지 않습니다."))
 
     def _start_download(self):
         if self._worker is not None:
@@ -116,7 +117,7 @@ class UpdateDialog(QDialog):
         self.install_button.setEnabled(False)
         self.release_button.setEnabled(False)
         self.progress.show()
-        self.status.setText("업데이트 설치 파일을 다운로드하는 중입니다…")
+        self.status.setText(tr("업데이트 설치 파일을 다운로드하는 중입니다…"))
         worker = UpdateDownloadWorker(self._service, self._update, self)
         worker.progress.connect(self._on_progress)
         worker.completed.connect(self._on_completed)
@@ -141,7 +142,7 @@ class UpdateDialog(QDialog):
     def _on_completed(self, path):
         self.progress.setRange(0, 100)
         self.progress.setValue(100)
-        self.status.setText("다운로드와 SHA-256 검증을 마쳤습니다.")
+        self.status.setText(tr("다운로드와 SHA-256 검증을 마쳤습니다."))
         self.install_requested.emit(Path(path))
         self.accept()
 
@@ -162,6 +163,6 @@ class UpdateDialog(QDialog):
     def reject(self):
         if self._worker is not None and self._worker.isRunning():
             self._worker.request_cancel()
-            self.status.setText("다운로드를 취소하는 중입니다…")
+            self.status.setText(tr("다운로드를 취소하는 중입니다…"))
             return
         super().reject()

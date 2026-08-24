@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QAction, QActionGroup, QApplication, QCheckBox, QDialog, QDialogButtonBox,
     QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMenuBar, QMessageBox, QProgressDialog, QPushButton,
-    QSpinBox, QSplitter, QStackedWidget, QTabBar, QTabWidget, QToolBar,
+    QSpinBox, QSplitter, QStackedWidget, QStatusBar, QTabBar, QTabWidget, QToolBar,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -26,6 +26,7 @@ from . import settings
 from .annots import AnnotMixin
 from .editing import EditMixin
 from .icons import fluent_icon
+from .i18n import install as install_i18n, tr, translate_tree
 from .meta import APP_NAME, APP_VERSION
 from .ocr import OcrMixin
 from .pages import PagesMixin
@@ -41,13 +42,18 @@ from .widgets import PageView, ThumbList
 def _make_action(parent, text, shortcut, slot, icon_name=None):
     """QAction 생성 — triggered의 checked 인자가 슬롯 첫 인자에 잘못 꽂히지
     않게 항상 람다로 감싼다."""
-    a = QAction(text, parent)
+    a = QAction(tr(text), parent)
     if icon_name:
         a.setIcon(fluent_icon(icon_name))
     if shortcut:
         a.setShortcut(shortcut)
     a.triggered.connect(lambda _checked=False, s=slot: s())
     return a
+
+
+class _TranslatedStatusBar(QStatusBar):
+    def showMessage(self, message, timeout=0):
+        super().showMessage(tr(message), timeout)
 
 
 def _show_default_app_settings(parent):
@@ -317,6 +323,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
     def __init__(self, shell):
         super().__init__()
+        self.setStatusBar(_TranslatedStatusBar(self))
         self._shell = shell
         self._init_viewer_state()
         self._init_textsel_state()
@@ -753,21 +760,21 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
     def _sync_favorite_action(self):
         """현재 문서의 즐겨찾기 여부를 도구 모음에 반영한다."""
         if self.doc is None or not self.doc.path:
-            self._favorite_act.setText("즐겨찾기 추가")
+            self._favorite_act.setText(tr("즐겨찾기 추가"))
             self._favorite_act.setIcon(fluent_icon("star"))
-            self._favorite_act.setToolTip("PDF를 연 뒤 즐겨찾기에 추가할 수 있습니다")
+            self._favorite_act.setToolTip(tr("PDF를 연 뒤 즐겨찾기에 추가할 수 있습니다"))
             self._favorite_act.setEnabled(False)
             return
         favorite = settings.is_favorite(self.doc.path)
         self._favorite_act.setEnabled(True)
-        self._favorite_act.setText(
-            "즐겨찾기 해제" if favorite else "즐겨찾기 추가")
+        self._favorite_act.setText(tr(
+            "즐겨찾기 해제" if favorite else "즐겨찾기 추가"))
         self._favorite_act.setIcon(fluent_icon(
             "star_filled" if favorite else "star",
             "#0f6cbd" if favorite else "#424242"))
-        self._favorite_act.setToolTip(
+        self._favorite_act.setToolTip(tr(
             "현재 PDF를 즐겨찾기에서 제거합니다" if favorite else
-            "현재 PDF를 즐겨찾기에 추가합니다")
+            "현재 PDF를 즐겨찾기에 추가합니다"))
 
     def _toggle_favorite(self):
         if self.doc is None:
@@ -836,8 +843,11 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             self.statusBar().showMessage(
                 "텍스트 레이어가 없는 문서입니다 (스캔본) — 복사/검색은 OCR 후 가능", 6000)
 
-    def close_doc(self):
-        """탭이 닫힐 때 자원 정리. OCR 워커가 돌면 취소하고 문서를 닫는다."""
+    def prepare_close_doc(self):
+        """화면에서 탭을 떼기 전에 타이머와 OCR을 즉시 중단한다."""
+        if getattr(self, "_closing_doc", False):
+            return
+        self._closing_doc = True
         self._thumb_timer.stop()
         self._thumbnail_width_timer.stop()
         self._save_thumbnail_width()
@@ -845,6 +855,18 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         if w is not None:
             try:
                 w.cancel()
+            except Exception:
+                pass
+        dlg = getattr(self, "_ocr_dlg", None)
+        if dlg is not None:
+            dlg.close()
+
+    def close_doc(self):
+        """탭 자원을 정리한다. UI 분리 후 호출해 느린 해제를 눈에 띄지 않게 한다."""
+        self.prepare_close_doc()
+        w = getattr(self, "_ocr_worker", None)
+        if w is not None:
+            try:
                 if not w.wait(2000):
                     w.kill_process()
                     w.wait(1000)
@@ -930,15 +952,15 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         box.setWindowTitle("AI 고품질 OCR 설정")
         box.setIcon(QMessageBox.Question)
         box.setText(
-            "OCR 엔진을 선택하세요.\n\n"
-            "• RapidOCR: 가볍고 빠름, 한글+영문. CPU에서 잘 동작.\n"
-            "• AI 고품질(VL): 저품질 스캔·복잡한 레이아웃에 강함.\n"
-            "  실행에 torch+transformers(수 GB) + 모델(약 2GB) 필요, GPU 권장.\n\n"
-            "현재 가속기: %s\n"
-            "VL 상태: %s\n"
-            "현재 선택: %s"
+            "Choose an OCR engine.\n\n"
+            "• RapidOCR: lightweight and fast; recognizes Korean and English on a CPU.\n"
+            "• High-quality AI (VL): better for low-quality scans and complex layouts.\n"
+            "  Requires torch + transformers (several GB), a model (about 2 GB), and preferably a GPU.\n\n"
+            "Current accelerator: %s\n"
+            "VL status: %s\n"
+            "Current selection: %s"
             % (desc, vl.install_hint(),
-               "AI 고품질(VL)" if cur == "vl" else "RapidOCR"))
+               "High-quality AI (VL)" if cur == "vl" else "RapidOCR"))
         b_basic = box.addButton("RapidOCR로", QMessageBox.AcceptRole)
         b_basic.setIcon(fluent_icon("ocr"))
         b_vl = box.addButton("AI 고품질로", QMessageBox.AcceptRole)
@@ -955,7 +977,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             if level in ("poor", "marginal"):
                 ret = QMessageBox.question(
                     self, "VL 사양 확인",
-                    "%s\n\n그래도 AI 고품질(VL)로 설정할까요?" % reason,
+                    "%s\n\nUse High-quality AI (VL) anyway?" % reason,
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 if ret != QMessageBox.Yes:
                     self.statusBar().showMessage("RapidOCR 유지", 4000)
@@ -966,25 +988,24 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             elif vl.runtime_present() and vl.can_download():
                 ret = QMessageBox.question(
                     self, "VL 모델 다운로드",
-                    "AI 고품질(VL)을 선택했습니다.\n"
-                    "모델(약 2GB)을 지금 다운로드할까요?\n\n"
-                    "다운로드 전까지 OCR은 RapidOCR로 동작합니다.",
+                    "High-quality AI (VL) is selected.\n"
+                    "Download the model (about 2 GB) now?\n\n"
+                    "RapidOCR will be used until the download completes.",
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
                 if ret == QMessageBox.Yes:
                     self._download_vl_models()
             else:
                 QMessageBox.information(
                     self, "VL 준비 필요",
-                    "AI 고품질(VL)을 선택했습니다(사양 확인됨).\n"
-                    "빠진 것: %s\n\n"
-                    "구성요소가 설치될 때까지 OCR은 RapidOCR로 "
-                    "동작합니다.\n\n설치 방법:\n"
-                    "1) 명령 프롬프트에서\n"
+                    "High-quality AI (VL) is selected.\n"
+                    "Missing: %s\n\n"
+                    "RapidOCR will be used until the required components are installed.\n\n"
+                    "Setup:\n1) In Command Prompt, run\n"
                     "   pip install torch torchvision transformers "
                     "huggingface_hub\n"
-                    "   (GPU 사용 시 CUDA 지원 torch 빌드)\n"
-                    "2) 이 대화상자를 다시 열어 'AI 고품질로'를 선택하면\n"
-                    "   모델 다운로드를 안내합니다." % vl.install_hint())
+                    "   (use a CUDA-enabled torch build for GPU acceleration)\n"
+                    "2) Reopen this dialog and choose High-quality AI to download the model."
+                    % vl.install_hint())
 
     def _download_vl_models(self):
         from . import vl
@@ -1048,18 +1069,17 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
 
 def show_licenses(parent):
-    QMessageBox.information(parent, "오픈소스 라이선스", (
-        "%s는 아래 오픈소스 소프트웨어로 만들어졌습니다.\n\n"
+    QMessageBox.information(parent, tr("오픈소스 라이선스"), (
+        "%s uses the following open-source software:\n\n"
         "• PyQt5 — GPL v3 (Riverbank Computing)\n"
         "• PyMuPDF / MuPDF — AGPL 3.0 (Artifex Software)\n"
         "• RapidOCR — Apache 2.0 (RapidAI)\n"
-        "• PaddleOCR 인식 모델 — Apache 2.0 (PaddlePaddle)\n"
+        "• PaddleOCR recognition models — Apache 2.0 (PaddlePaddle)\n"
         "• ONNX Runtime — MIT (Microsoft)\n"
         "• NumPy — BSD 3-Clause\n\n"
-        "자세한 내용은 프로그램 폴더의 LICENSES.md 참고.\n"
-        "개인 사용은 제약이 없으며, 이 프로그램을 외부에 배포할 경우\n"
-        "PyQt5(GPL)와 PyMuPDF(AGPL) 조건에 따라 소스 공개 의무가\n"
-        "생기는 점에 유의하세요.") % APP_NAME)
+        "See LICENSES.md in the application folder for details. If you "
+        "redistribute this application, review the source-disclosure "
+        "requirements of PyQt5 (GPL) and PyMuPDF (AGPL).") % APP_NAME)
 
 
 # ======================================================================
@@ -1069,6 +1089,10 @@ def show_licenses(parent):
 class AppWindow(QMainWindow):
     def __init__(self, updates_enabled=False):
         super().__init__()
+        self.setStatusBar(_TranslatedStatusBar(self))
+        application = QApplication.instance()
+        if application is not None:
+            install_i18n(application)
         self.updates_enabled = bool(updates_enabled)
         self.setWindowTitle(APP_NAME)
         self.resize(1100, 800)
@@ -1113,6 +1137,7 @@ class AppWindow(QMainWindow):
 
         self._fluent_backdrop_attempted = False
         self._fluent_backdrop_applied = False
+        translate_tree(self)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1485,17 +1510,52 @@ class AppWindow(QMainWindow):
     def _remove_tab(self, tab):
         if tab is self._presentation_tab:
             self.toggle_presentation(tab)
+        # OCR 프로세스에는 즉시 종료 신호를 보내되, wait와 대용량 렌더 캐시
+        # 해제는 탭이 사라진 화면이 한 프레임 그려진 뒤 처리한다.
+        tab.prepare_close_doc()
         i = self._tabs.indexOf(tab)
         if i >= 0:
             self._tabs.removeTab(i)
+        tab.hide()
         mb = getattr(tab, "_menubar", None)
-        tab.close_doc()
-        if mb is not None:
-            mb.setParent(None)
-            mb.deleteLater()  # 셸로 reparent됐을 수 있어 탭과 함께 안 지워진다
-        tab.deleteLater()
         if self._tabs.count() == 0:
             self._show_start()
+        QTimer.singleShot(
+            16, lambda closed_tab=tab, menu=mb:
+            self._dispose_removed_tab(closed_tab, menu))
+
+    @staticmethod
+    def _dispose_removed_tab(tab, menubar):
+        worker = getattr(tab, "_ocr_worker", None)
+        if worker is not None:
+            # OCR 작업 스레드를 UI에서 기다리지 않는다. 정상 종료가 늦으면
+            # 프로세스만 강제 종료하고 finished 신호에서 최종 정리한다.
+            worker.finished.connect(
+                lambda closed_tab=tab, menu=menubar:
+                AppWindow._finalize_removed_tab(closed_tab, menu))
+            if worker.isRunning():
+                QTimer.singleShot(
+                    2000, lambda active_worker=worker:
+                    AppWindow._kill_ocr_worker_if_running(active_worker))
+                return
+        AppWindow._finalize_removed_tab(tab, menubar)
+
+    @staticmethod
+    def _kill_ocr_worker_if_running(worker):
+        try:
+            if worker.isRunning():
+                worker.kill_process()
+        except RuntimeError:
+            # 정상 종료 뒤 부모 탭과 함께 이미 삭제된 QThread일 수 있다.
+            pass
+
+    @staticmethod
+    def _finalize_removed_tab(tab, menubar):
+        tab.close_doc()
+        if menubar is not None:
+            menubar.setParent(None)
+            menubar.deleteLater()  # 셸로 reparent됐을 수 있어 따로 정리한다
+        tab.deleteLater()
 
     # --- 종료/드롭 -----------------------------------------------------
 
@@ -1558,6 +1618,10 @@ def new_window(path=None, force_new=False, updates_enabled=None):
     공식 진입점은 ``updates_enabled=True``를 명시한다. 이미 열린 창에서 새
     창을 만드는 경우에는 첫 창의 모드를 이어받는다.
     """
+    application = QApplication.instance()
+    if application is not None:
+        # Embedded hosts use the same English UI without enabling sPDF updates.
+        install_i18n(application)
     if force_new or not _app_windows:
         if updates_enabled is None:
             updates_enabled = (
@@ -1567,6 +1631,7 @@ def new_window(path=None, force_new=False, updates_enabled=None):
             previous = _app_windows[-1]
             window.move(previous.x() + 30, previous.y() + 30)
         _app_windows.append(window)
+        translate_tree(window)
         window.show()
     else:
         window = _app_windows[0]

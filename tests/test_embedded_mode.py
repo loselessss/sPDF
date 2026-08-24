@@ -25,7 +25,7 @@ class EmbeddedModeTests(unittest.TestCase):
         self.assertFalse(window.updates_enabled)
         self.assertIsNone(window._update_service)
         self.assertFalse(window.check_for_updates(manual=True))
-        self.assertNotIn("업데이트 확인...", menu_texts)
+        self.assertNotIn("Check for Updates...", menu_texts)
         window.close()
 
     def test_standalone_window_keeps_update_feature(self):
@@ -39,7 +39,7 @@ class EmbeddedModeTests(unittest.TestCase):
 
         self.assertTrue(window.updates_enabled)
         self.assertIsNotNone(window._update_service)
-        self.assertIn("업데이트 확인...", menu_texts)
+        self.assertIn("Check for Updates...", menu_texts)
         window.close()
 
 

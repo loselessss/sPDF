@@ -5,6 +5,8 @@ get_text를 부르면 큰 페이지에서 버벅인다.
 """
 
 from PyQt5.QtCore import QRectF
+
+from .i18n import tr
 from PyQt5.QtWidgets import QApplication
 
 from .selection import payload_from_words
@@ -258,7 +260,7 @@ class TextSelectMixin:
     def _update_search_count(self):
         # 검색바의 "n/N" 라벨 — app.py가 만들어둔다.
         if not self._search_hits:
-            self._search_count.setText("0건")
+            self._search_count.setText(tr("0건"))
         else:
             self._search_count.setText(
                 "%d / %d" % (self._search_pos + 1, len(self._search_hits)))

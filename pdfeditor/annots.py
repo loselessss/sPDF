@@ -10,6 +10,8 @@ from PyQt5.QtWidgets import (
     QFileDialog, QInputDialog, QListWidgetItem, QMenu, QMessageBox, QToolTip,
 )
 
+from .i18n import tr
+
 from .icons import fluent_icon
 
 
@@ -205,7 +207,7 @@ class AnnotMixin:
     def _rebuild_notes_list(self):
         self._notes_list.clear()
         if self.doc is None:
-            self._notes_dock.setWindowTitle("메모 모아보기")
+            self._notes_dock.setWindowTitle(tr("메모 모아보기"))
             return
         n = 0
         for p in range(self.doc.page_count):
@@ -215,12 +217,12 @@ class AnnotMixin:
                 first = a["text"].splitlines()[0] if a["text"] else "(내용 없음)"
                 if len(first) > 40:
                     first = first[:40] + "…"
-                it = QListWidgetItem("%d쪽 — %s" % (p + 1, first))
+                it = QListWidgetItem(tr("%d쪽 — %s" % (p + 1, first)))
                 it.setToolTip(a["text"])  # 전체 내용은 툴팁으로
                 it.setData(Qt.UserRole, (p, a["xref"], a["rect"]))
                 self._notes_list.addItem(it)
                 n += 1
-        self._notes_dock.setWindowTitle("메모 모아보기 (%d)" % n)
+        self._notes_dock.setWindowTitle(tr("메모 모아보기 (%d)" % n))
 
     def _note_item_target(self, item):
         p, xref, rect = item.data(Qt.UserRole)

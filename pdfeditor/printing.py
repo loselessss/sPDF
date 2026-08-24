@@ -2,6 +2,8 @@
 
 import os
 
+from .i18n import tr
+
 
 def selected_page_indices(page_count, current_index=0, mode="all",
                           from_page=0, to_page=0, reverse=False):
@@ -119,8 +121,8 @@ class PrintMixin:
                     target_height,
                 )
                 painter.drawImage(target, image)
-                progress.setLabelText(
-                    "%d쪽 인쇄 준비 중…" % (page_index + 1))
+                progress.setLabelText(tr(
+                    "%d쪽 인쇄 준비 중…" % (page_index + 1)))
                 progress.setValue(position + 1)
                 QApplication.processEvents()
         except Exception as exc:  # 프린터/드라이버 오류는 사용자에게 설명한다.

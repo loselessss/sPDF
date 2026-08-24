@@ -166,12 +166,11 @@ class OcrWorker(QThread):
                         "(종료 코드 %s)." % self._proc.returncode)
                 self.failed.emit(hint + ("\n\n%s" % tail if tail else ""))
             errf.close()
-
-
 class OcrMixin:
     def _init_ocr_state(self):
         self._ocr_worker = None
         self._ocr_added = 0
+        self._closing_doc = False
 
     def _ocr_available(self):
         if not ocr_installed():
@@ -249,7 +248,7 @@ class OcrMixin:
         w.start()
 
     def _on_ocr_page(self, page, items):
-        if self.doc is None:
+        if self._closing_doc or self.doc is None:
             return  # OCR 도중 문서를 닫은 경우
         # 자식은 [x0,y0,x1,y1,text] 리스트로 보낸다 → 코어가 기대하는 튜플로.
         tuples = [(it[0], it[1], it[2], it[3], it[4]) for it in items]
@@ -260,11 +259,15 @@ class OcrMixin:
             self.mark_dirty()
 
     def _on_ocr_failed(self, msg):
+        if self._closing_doc:
+            return
         QMessageBox.critical(self, "OCR 실패", "OCR 중 오류가 발생했습니다.\n\n%s" % msg)
 
     def _on_ocr_finished(self):
         self._ocr_worker = None
         self._ocr_dlg.close()
+        if self._closing_doc:
+            return
         if self._ocr_added:
             self.refresh_page(self.page_index)  # 현재 페이지 검색 오버레이 갱신용
             self.statusBar().showMessage(

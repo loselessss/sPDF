@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 
 from . import settings
 from .icons import fluent_icon
+from .i18n import tr
 from .meta import APP_NAME, APP_VERSION
 
 
@@ -140,7 +141,7 @@ class StartPage(QWidget):
     def set_current_doc(self, name):
         """열려 있는 문서 이름 — None이면 '돌아가기' 버튼을 숨긴다."""
         if name:
-            self._back_btn.setText("← %s(으)로 돌아가기" % name)
+            self._back_btn.setText(tr("← %s(으)로 돌아가기" % name))
             self._back_btn.show()
         else:
             self._back_btn.hide()
