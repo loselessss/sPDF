@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 
 from .meta import APP_NAME, APP_VERSION
 from .icons import fluent_icon
+from .i18n import language
 
 HELP_HTML = """
 <h2>{name} 사용법</h2>
@@ -194,11 +195,14 @@ reordering, and merging participate in undo/redo.</p>
 
 def show_help(parent):
     dlg = QDialog(parent)
-    dlg.setWindowTitle("%s User Guide" % APP_NAME)
+    korean = language() == "ko"
+    dlg.setWindowTitle(
+        "%s 사용법" % APP_NAME if korean else "%s User Guide" % APP_NAME)
     dlg.resize(560, 640)
     lay = QVBoxLayout(dlg)
 
-    body = QLabel(HELP_HTML_EN.format(name=APP_NAME, ver=APP_VERSION))
+    template = HELP_HTML if korean else HELP_HTML_EN
+    body = QLabel(template.format(name=APP_NAME, ver=APP_VERSION))
     body.setWordWrap(True)
     body.setTextFormat(1)  # Qt.RichText
     inner = QWidget()

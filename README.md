@@ -1,127 +1,113 @@
 # sPDF
 
-가벼운 데스크톱 PDF 편집기 (PyQt5 + PyMuPDF). 설계 전반은 [PLAN.md](PLAN.md),
-오픈소스 고지는 [LICENSES.md](LICENSES.md) 참고.
+English | [한국어](README.ko.md)
 
-## 주요기능
-PDF 읽기, 주석 관리, 페이지 관리, 단어 수정, OCR
+A lightweight Windows desktop PDF editor built with PyQt5 and PyMuPDF. See
+[PLAN.md](PLAN.md) for design history and [LICENSES.md](LICENSES.md) for
+open-source notices.
 
-## 설치
+## Features
+
+- Read encrypted and regular PDFs with lazy page and thumbnail rendering.
+- Select, search, copy, annotate, edit, rotate, remove, merge, split, extract,
+  organize, and print pages.
+- Run offline Korean and English OCR with RapidOCR, with optional
+  PaddleOCR-VL high-quality OCR.
+- Work with multiple documents in tabs, move unsaved tabs between windows,
+  use two-page view, full screen, and presentation mode.
+- Use English or Korean UI and receive update notes in the selected language.
+
+## Installation
+
+Download the Windows installer from the
+[latest GitHub release](https://github.com/loselessss/sPDF/releases/latest).
+The application automatically checks at most once every 24 hours, or you can
+use **Help → Check for Updates** at any time. Automatic updates only accept an
+installer whose version matches the release and whose SHA-256 digest is
+verified.
+
+To run from source:
 
 ```bash
 pip install PyQt5 PyMuPDF
-pip install rapidocr onnxruntime   # OCR
+pip install rapidocr onnxruntime
+python run.py
+python run.py document.pdf
 ```
 
-## 실행
+Use `run.pyw` to start without a console window.
+
+## Windows integration
+
+The installer can add sPDF to the per-user **Open with** list. It does not
+silently force sPDF as the default PDF application. **Help → Default PDF App /
+Browser Settings** shows the current association and provides per-user options
+for Edge, Chrome, and Firefox to hand PDF links to the Windows default PDF app.
+
+For a development checkout without installation:
 
 ```bash
-python run.py            # 콘솔 표시 — 개발/디버그용
-python run.py 파일.pdf   # PDF를 열면서 시작
+python register_filetype.py
+python register_filetype.py --unregister
 ```
 
-`run.pyw`는 콘솔 없이 더블클릭/탐색기 연동용.
-
-Windows 설치본은 [GitHub 최신 릴리스](https://github.com/loselessss/sPDF/releases/latest)
-에서 받을 수 있습니다. 설치된 앱은 마지막 자동 확인 후 24시간이 지났을 때만
-새 릴리스를 확인하며, 도움말 → **업데이트 확인**에서는 언제든 수동으로 확인할
-수 있습니다. 앱 내부에서는 버전과
-정확히 일치하는 설치 파일만 내려받고 GitHub가 제공한 SHA-256을 검증한 뒤
-설치를 실행합니다.
-
-v1.8부터 Windows 11의 Segoe Fluent Icons와 Mica Alt를 활용한 아이콘 중심
-명령 모음을 사용합니다. 해당 시스템 기능이 없는 Windows에서는 동일 기능의
-자체 아이콘과 일반 배경으로 자동 전환됩니다.
-
-## 설치 파일 빌드 (Windows)
+## Build
 
 ```bat
-build_exe.bat        REM PyInstaller -> dist\sPDF\sPDF.exe (아이콘 자동 생성)
-build_installer.bat  REM Inno Setup  -> Output\sPDF_Setup_X.X.X.exe
+build_exe.bat
+build_installer.bat
 ```
 
-- 아이콘은 `make_icons.py`가 Pillow로 생성한다(`assets\spdf.ico` 앱,
-  `assets\spdf_doc.ico` 연결된 PDF 문서).
-- OCR 모델(det+cls+한국어 rec, 약 21MB)은 설치본에 번들되어 **오프라인**
-  동작한다(`spdf.spec`의 `_KEEP_MODELS` 화이트리스트). 안 쓰는 중국어 rec은
-  제외.
-- 버전은 `pdfeditor\meta.py`의 `APP_VERSION`과 `installer.iss`의
-  `MyAppVersion`을 **함께** 맞출 것(자동 동기화 안 됨).
-- `vX.Y.Z` 태그를 푸시하면 GitHub Actions가 테스트와 Windows 빌드를 실행하고
-  `sPDF_Setup_X.Y.Z.exe`, 최신 별칭, SHA-256 파일을 GitHub Release에 게시한다.
+`build_exe.bat` creates the application and OCR worker with PyInstaller.
+`build_installer.bat` packages them with Inno Setup. A pushed `vX.Y.Z` tag runs
+the release workflow and publishes the versioned installer, latest alias, and
+SHA-256 file.
 
-설치 시 "PDF 파일 '연결 프로그램' 목록에 sPDF 추가"를 선택하면 탐색기
-우클릭 → "연결 프로그램"에 나타나고, Windows '기본 앱'에서 sPDF를 기본
-PDF 앱으로 고를 수 있다(보안상 설치 프로그램이 기본값을 강제로 바꾸지는
-않음). 하위 옵션인 "설치 후 sPDF를 기본 PDF 앱으로 선택하기"를 체크하면
-설치 완료 후 Windows 기본 앱 설정이 열린다. 도움말 → **PDF 기본 프로그램 /
-브라우저 설정**에서는 현재 연결을 확인하고, Edge·Chrome·Firefox의 PDF 링크를
-Windows 기본 PDF 앱(sPDF)으로 넘기는 사용자별 정책을 켜고 끌 수 있다.
+The version in `pdfeditor/meta.py` and `installer.iss` must always match.
 
-## 탐색기에서 열기 (설치 없이, 개발용)
+## Release status
 
-```bash
-python register_filetype.py              # 등록
-python register_filetype.py --unregister # 해제
-```
+- [x] **v0.1–v0.3 Viewer foundation** — document opening, lazy thumbnails,
+  zoom and navigation, text selection/search/copy, annotations, saving, recent
+  files, and favorites.
+- [x] **v0.4–v0.9 OCR and editing** — offline RapidOCR, OCR preprocessing,
+  text editing, undo/redo, page operations, and scanned-document editing.
+- [x] **v1.0–v1.3 Distribution and document workflow** — Windows installer,
+  optional PaddleOCR-VL, tabbed documents, merge, split, and extraction.
+- [x] **v1.4–v1.6 Window and page organization** — move saved or unsaved tabs
+  between windows, browser PDF settings, hand/text tools, favorites command,
+  page organizer, and resizable long-document thumbnails.
+- [x] **v1.7–v1.9 Navigation and Fluent UI** — HiDPI rendering, accurate text
+  selection, clearer Windows process identity, antialiasing, Fluent-style UI,
+  thumbnail viewport navigation, and fit/zoom commands.
+- [x] **v1.10 Printing** — Ctrl+P with all/current/range/reverse printing.
+- [x] **v1.11 Presentation and two-page view** — paired page navigation,
+  full-screen and presentation modes, rotation commands, and update-free
+  embedded-module operation.
+- [x] **v1.12 International edition** — English UI and help content with a
+  translation catalog independent of PDF and OCR languages.
+- [x] **v1.12.1 Localized documentation and updates** — English default
+  README/changelog, separate Korean documents, English/Korean UI selection,
+  and updater notes matched to the selected UI language.
+- [ ] **Planned: AI OCR option** — Claude API for difficult content such as
+  handwriting.
 
-## 진행 상황
+## Source layout
 
-- [x] **v0.1 뷰어** — 열기(암호 PDF 포함)/썸네일(레이지 렌더)/줌/페이지 이동/드래그&드롭
-- [x] **v0.2 텍스트 선택·복사 + 검색** — 드래그/더블클릭/Ctrl+A 선택, Ctrl+C 복사(줄바꿈 복원), Ctrl+F 검색(F3/Shift+F3 이동)
-- [x] **v0.3 주석 + 저장 + 최근 파일** — 형광펜(Ctrl+H)/메모(Ctrl+M, 우클릭 메뉴), Ctrl+S 저장(.bak 백업), 저장 안 된 변경 확인, 최근 파일 메뉴(전체 경로 표시)
-  - v0.3.2: 메모 호버 툴팁/클릭으로 열기, 메모 모아보기 패널(Ctrl+Shift+M)
-- [x] **v0.4 OCR (RapidOCR)** — 현재 페이지(Ctrl+R)/전체 문서(Ctrl+Shift+R) OCR, 한국어+영어, 보이지 않는 텍스트 레이어 삽입 → 스캔본도 검색·복사 가능. 저장하면 검색가능 PDF로 반영
-  - v0.4.1: 렌더 배율을 페이지 크기 기준 자동 결정(A4≈6배) — 저해상도 스캔(영수증 등) 인식률 개선
-- [x] **v0.5 sPDF 개명 + 시작 페이지 + 즐겨찾기 + 오픈소스 고지** — Acrobat식 홈 화면(열기/즐겨찾기/최근), 즐겨찾기(파일 메뉴 + 홈 우클릭), 도움말→오픈소스 라이선스, LICENSES.md
-- [x] **v0.6 텍스트 편집(일반 PDF) + undo/redo** — 편집 모드(Ctrl+E)에서 글자 토막 클릭 → 수정, 실행취소/다시실행(Ctrl+Z / Ctrl+Y, 스냅샷 방식). 한계: 원본 폰트 대신 기본 폰트로 다시 써져 모양이 달라질 수 있고 리플로우 없음(그 줄 안에서만 교체)
-- [x] **v0.7 페이지 조작 + 사용법** — 회전(Ctrl+]/[)·삭제(Ctrl+Delete)·순서변경(썸네일 드래그)·여러 PDF 병합·범위별 분리·현재 페이지 추출. 문서 변경은 Ctrl+Z 되돌리기, 분리/추출은 원본을 유지. 도움말→사용법(F1) 다이얼로그
-- [x] **v0.8 새 창 + 휠 페이지 넘김 + OCR 품질** — 다른 파일은 새 창으로(Ctrl+N), 휠로 페이지 끝에서 다음/이전 장, OCR 전처리(deskew+sharpen)로 인식률 개선, 텍스트 있는 페이지 중복 OCR 방지
-- [x] **v0.9 스캔본 편집** — OCR 후 편집 모드에서 스캔 글자 클릭 → 주변 종이색을 샘플링해 덮고 새 글자 작성(옛 OCR 텍스트도 함께 제거해 검색 오염 방지). 빈 곳 클릭 = 자유 텍스트 박스. 일반 PDF/스캔본 자동 분기
-- [x] **v1.0 설치 파일** — PyInstaller 2-실행파일 빌드(GUI + OCR 워커 격리), 아이콘 자동 생성, Inno Setup 설치본, PDF 연결 등록 + 기본 프로그램 확인
-- [x] **v1.1 AI 고품질 OCR (PaddleOCR-VL)** — 도구→AI 고품질 OCR 설정에서 엔진 선택. PaddleOCR-VL 1.5(약 1B, transformers+torch)를 "Spotting" 태스크로 돌려 줄 단위 텍스트+좌표 인식, GPU(CUDA)에서 페이지당 수 초. 런타임(pip)·모델(약 2GB, 앱에서 다운로드)은 별도 설치, 미설치면 RapidOCR로 자동 동작
-- [x] **v1.2 탭 방식** — 여러 PDF를 한 창의 탭으로(Ctrl+T), 탭별 독립 상태(페이지·편집·검색·OCR), 중복 열기 시 그 탭으로 이동, 탭 순서 드래그, 모두 닫으면 시작 페이지. 창 방식(창마다 문서)에서 전환 — 활성 탭 메뉴바를 셸로 reparent하는 구조라 믹스인은 거의 그대로
-- [x] **v1.3 PDF 병합·분리** — 여러 PDF를 현재 문서에 순서대로 삽입하고, 페이지 범위를 그룹별 PDF로 분리하는 도구 보강
-- [x] **v1.4 창 간 탭 이동** — 탭을 다른 sPDF 창의 탭 막대나 빈 창으로 드래그해 이동. 별도 실행된 창 사이에서도 미저장 편집 상태와 원래 저장 경로를 유지하고, 마지막 탭을 내보낸 빈 창은 자동으로 닫힘
-- [x] **v1.4.1 브라우저 PDF 연결 설정** — Edge·Chrome·Firefox에서 연 PDF를 Windows 기본 PDF 앱(sPDF)으로 넘기는 사용자별 옵션과 상태 표시 추가
-- [x] **v1.4.2 OCR 품질 개선** — 저대비 스캔의 국소 명암 보정, 긴 페이지의 겹침 타일 인식, 중앙 여백 기반 2단 조판 분할과 중복 결과 병합으로 작은 글씨 인식 개선
-- [x] **v1.5 손 도구 / 텍스트 선택 도구** — 도구 모음과 보기 메뉴에서 상호작용 모드를 선택. 손 도구는 PDF를 클릭한 채 상하좌우로 이동하고, 텍스트 선택 도구는 기존 선택·복사·주석·편집 흐름을 유지
-- [x] **v1.5.1 OCR 엔진 명칭 개선** — OCR 설정의 모호한 '기본' 표현을 실제 엔진 이름인 RapidOCR로 통일
-- [x] **v1.5.2 Windows 빌드 출력 수정** — 빌드 배치 파일의 한글 인코딩 오해로 깨진 문구와 가짜 명령 오류가 출력되던 문제 해결
-- [x] **v1.5.3 즐겨찾기 도구** — 손 도구·텍스트 선택 도구 옆에서 현재 PDF를 바로 즐겨찾기에 추가하거나 해제
-- [x] **v1.6 페이지 구성 창** — 여러 페이지 묶음/한 장 이동, 외부 PDF 드롭 삽입, 복수 페이지 삭제를 별도 창에서 처리하고 모든 변경을 실행 취소
-- [x] **v1.6.1 썸네일 패널 개선** — 왼쪽 미리보기 너비를 드래그해 조절·저장하고 긴 PDF에서 23쪽 이후 썸네일이 비던 문제 해결
-- [x] **v1.6.2 HiDPI 렌더링** — Windows 화면 배율에 맞춰 본문과 썸네일을 선명하게 렌더링
-- [x] **v1.7 고화질 탐색 UI** — 최소 2배 슈퍼샘플링, 패널 반응형 썸네일, 1% 배율 입력, 현재 뷰 영역 표시, 탐색기에서 현재 PDF 위치 열기
-- [x] **v1.7.1 문장 흐름 선택** — 드래그 시작·끝 사이를 읽기 순서로 연속 선택하고 여러 줄 문장을 자연스럽게 이어서 복사
-- [x] **v1.7.2 Windows 정리** — 작업 관리자에서 sPDF와 OCR 작업 프로세스의 역할을 구분하고 앱 식별자를 통일하며, 종료 시 남은 OCR 프로세스와 대화상자 제목의 불필요한 `?` 도움말 버튼을 정리
-- [x] **v1.7.3 글자 안티앨리어싱** — MuPDF 최고 단계 그레이스케일 AA와 분수 배율 부드러운 보간으로 본문 계단 현상 완화
-- [x] **v1.8 Fluent Design UI** — Windows 11 스타일의 둥근 카드, 표면 계층, 강조색 버튼, 고해상도 선형 아이콘, 탭·메뉴·입력창·스크롤바 통합 테마 적용
-- [x] **v1.9 미리보기 탐색** — 왼쪽 썸네일의 원하는 위치를 클릭해 문서 화면을 이동하고, 현재 보기 영역의 세로 정렬을 보정하며 확대·축소·폭 맞춤·쪽 맞춤 명령 추가
-- [x] **v1.10 인쇄** — 파일 메뉴와 명령 모음의 인쇄 및 Ctrl+P, 전체·현재 쪽·쪽 범위·역순 인쇄 지원
-- [x] **v1.11 발표·두 장 보기 + 내부 모듈 모드** — F11 전체화면과 F5 프레젠테이션, 두 페이지를 나란히 보고 두 장 단위로 이동하는 명령 모음 토글 추가. 다른 프로그램이 sPDF 창을 내부 모듈로 사용할 때는 자체 업데이트 서비스·자동 확인·업데이트 메뉴를 비활성화하고 독립 실행본에서만 업데이트 기능 유지
-- [x] **v1.12 영어 국제판** — 메뉴, 명령 모음, 시작 화면, 대화상자, 상태 메시지, 업데이트 화면, 사용법과 설치 프로그램을 영어로 제공. UI 언어는 PDF 내용 및 한국어·영어 OCR 설정과 독립적으로 동작하며 향후 다른 번역을 추가할 수 있는 카탈로그 구조 적용
-- [ ] (예정) AI OCR 옵션 — Claude API (손글씨 등 최후 수단)
-
-## 구조
-
-```
+```text
 pdfeditor/
-  core.py     # PyMuPDF 래핑 — 열기/저장/렌더/텍스트추출/주석 (Qt 비의존)
-  viewer.py   # ViewerMixin — 썸네일/메인뷰/줌/페이지 이동
-  textsel.py  # TextSelectMixin — 선택/복사/검색
-  annots.py   # AnnotMixin — 형광펜/메모/저장/변경 추적
-  editing.py  # EditMixin — 텍스트 편집 + 스냅샷 undo/redo
-  pages.py    # PagesMixin — 회전/삭제/순서/병합/추출
-  help.py     # 사용법 다이얼로그(F1)
-  startpage.py# 시작 페이지(홈) — 열기/즐겨찾기/최근
-  ocr.py      # OcrMixin + 서브프로세스 워커 (부모는 onnxruntime 미로드)
-  ocr_subprocess.py  # OCR 자식 프로세스 (Qt 없이 onnxruntime/torch 실행)
-  vl.py       # VL(고품질 AI OCR) 설치 감지/사양 판정/모델 다운로드
-  widgets.py  # PageCanvas/PageView, ThumbList
-  settings.py # ~/.pdfeditor.json (최근 파일)
-  app.py      # MainWindow — 믹스인 조립
-  meta.py     # 버전 정보
-run.py / run.pyw
-register_filetype.py  # 탐색기 연동 (설계 §8)
+  core.py             PDF access, save, render, text, annotations
+  viewer.py           thumbnails, main view, zoom, navigation
+  textsel.py          selection, copy, search
+  annots.py           highlights, notes, save, change tracking
+  editing.py          text editing and undo/redo
+  pages.py            page rotation, deletion, merge, split, extraction
+  help.py             localized user guide
+  startpage.py        home, favorites, recent files
+  ocr.py              GUI-side OCR coordination
+  ocr_subprocess.py   isolated OCR worker protocol
+  vl.py               optional PaddleOCR-VL setup
+  settings.py         per-user settings
+  app.py              main window composition
+  meta.py             application version
 ```

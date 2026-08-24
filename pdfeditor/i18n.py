@@ -1,9 +1,8 @@
 """User-interface translation support.
 
-The application currently ships one international UI language: English.  The
-Korean strings already present in the source act as stable message keys.  New
-languages can be added as another catalog without changing document or OCR
-language handling.
+The application ships English and Korean user-interface modes. Korean strings
+in the source act as stable message keys, while English lives in a catalog.
+More languages can be added without changing document or OCR language handling.
 """
 
 import os
@@ -11,7 +10,7 @@ import re
 
 
 DEFAULT_LANGUAGE = "en"
-SUPPORTED_LANGUAGES = ("en",)
+SUPPORTED_LANGUAGES = ("en", "ko")
 _language = DEFAULT_LANGUAGE
 
 
@@ -79,6 +78,11 @@ EN = {
     "오픈소스 라이선스": "Open-source Licenses",
     "정보": "About",
     "목록 지우기": "Clear List",
+    "언어": "Language",
+    "한국어": "Korean",
+    "언어 변경": "Language Change",
+    "언어 변경 사항은 sPDF를 다시 실행하면 적용됩니다.":
+        "The language change will take effect after restarting sPDF.",
     "(비어 있음)": "(Empty)",
     "(빈 탭)": "(Empty Tab)",
     "현재 파일을 즐겨찾기에서 제거": "Remove Current File from Favorites",
@@ -470,9 +474,17 @@ def tr(text):
     return text
 
 
+def localize(english, korean):
+    """Return language-specific prose that is too long for the message map."""
+    return korean if _language == "ko" else english
+
+
 def install(app, language_code=None):
     """Install automatic translation for widgets created by Qt and the app."""
-    set_language(language_code or os.environ.get("SPDF_UI_LANGUAGE", DEFAULT_LANGUAGE))
+    if language_code is None:
+        from . import settings
+        language_code = os.environ.get("SPDF_UI_LANGUAGE") or settings.ui_language()
+    set_language(language_code)
     if getattr(app, "_spdf_i18n_filter", None) is not None:
         return app._spdf_i18n_filter
 

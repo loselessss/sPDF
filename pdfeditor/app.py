@@ -26,7 +26,7 @@ from . import settings
 from .annots import AnnotMixin
 from .editing import EditMixin
 from .icons import fluent_icon
-from .i18n import install as install_i18n, tr, translate_tree
+from .i18n import install as install_i18n, localize, tr, translate_tree
 from .meta import APP_NAME, APP_VERSION
 from .ocr import OcrMixin
 from .pages import PagesMixin
@@ -624,6 +624,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                       lambda: self._shell.check_for_updates(True), "update")
         self._act(h, "PDF 기본 프로그램 / 브라우저 설정...", None,
                   self.check_default_app, "settings")
+        self._shell._add_language_menu(h)
         self._act(h, "오픈소스 라이선스", None, self.show_licenses,
                   "license")
         self._act(h, "정보", None, self.show_about, "info")
@@ -951,16 +952,24 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         box = QMessageBox(self)
         box.setWindowTitle("AI 고품질 OCR 설정")
         box.setIcon(QMessageBox.Question)
-        box.setText(
+        box.setText(localize(
             "Choose an OCR engine.\n\n"
             "• RapidOCR: lightweight and fast; recognizes Korean and English on a CPU.\n"
             "• High-quality AI (VL): better for low-quality scans and complex layouts.\n"
             "  Requires torch + transformers (several GB), a model (about 2 GB), and preferably a GPU.\n\n"
             "Current accelerator: %s\n"
             "VL status: %s\n"
-            "Current selection: %s"
+            "Current selection: %s",
+            "OCR 엔진을 선택하세요.\n\n"
+            "• RapidOCR: 가볍고 빠르며 CPU에서 한국어와 영어를 인식합니다.\n"
+            "• AI 고품질(VL): 저품질 스캔과 복잡한 레이아웃에 강합니다.\n"
+            "  torch+transformers(수 GB), 모델(약 2GB)과 GPU 사용을 권장합니다.\n\n"
+            "현재 가속기: %s\n"
+            "VL 상태: %s\n"
+            "현재 선택: %s")
             % (desc, vl.install_hint(),
-               "High-quality AI (VL)" if cur == "vl" else "RapidOCR"))
+               localize("High-quality AI (VL)", "AI 고품질(VL)")
+               if cur == "vl" else "RapidOCR"))
         b_basic = box.addButton("RapidOCR로", QMessageBox.AcceptRole)
         b_basic.setIcon(fluent_icon("ocr"))
         b_vl = box.addButton("AI 고품질로", QMessageBox.AcceptRole)
@@ -977,7 +986,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             if level in ("poor", "marginal"):
                 ret = QMessageBox.question(
                     self, "VL 사양 확인",
-                    "%s\n\nUse High-quality AI (VL) anyway?" % reason,
+                    localize(
+                        "%s\n\nUse High-quality AI (VL) anyway?",
+                        "%s\n\n그래도 AI 고품질(VL)로 설정할까요?") % reason,
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 if ret != QMessageBox.Yes:
                     self.statusBar().showMessage("RapidOCR 유지", 4000)
@@ -988,23 +999,36 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             elif vl.runtime_present() and vl.can_download():
                 ret = QMessageBox.question(
                     self, "VL 모델 다운로드",
-                    "High-quality AI (VL) is selected.\n"
-                    "Download the model (about 2 GB) now?\n\n"
-                    "RapidOCR will be used until the download completes.",
+                    localize(
+                        "High-quality AI (VL) is selected.\n"
+                        "Download the model (about 2 GB) now?\n\n"
+                        "RapidOCR will be used until the download completes.",
+                        "AI 고품질(VL)을 선택했습니다.\n"
+                        "모델(약 2GB)을 지금 다운로드할까요?\n\n"
+                        "다운로드 전까지 OCR은 RapidOCR로 동작합니다."),
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
                 if ret == QMessageBox.Yes:
                     self._download_vl_models()
             else:
                 QMessageBox.information(
                     self, "VL 준비 필요",
-                    "High-quality AI (VL) is selected.\n"
-                    "Missing: %s\n\n"
-                    "RapidOCR will be used until the required components are installed.\n\n"
-                    "Setup:\n1) In Command Prompt, run\n"
-                    "   pip install torch torchvision transformers "
-                    "huggingface_hub\n"
-                    "   (use a CUDA-enabled torch build for GPU acceleration)\n"
-                    "2) Reopen this dialog and choose High-quality AI to download the model."
+                    localize(
+                        "High-quality AI (VL) is selected.\n"
+                        "Missing: %s\n\n"
+                        "RapidOCR will be used until the required components are installed.\n\n"
+                        "Setup:\n1) In Command Prompt, run\n"
+                        "   pip install torch torchvision transformers "
+                        "huggingface_hub\n"
+                        "   (use a CUDA-enabled torch build for GPU acceleration)\n"
+                        "2) Reopen this dialog and choose High-quality AI to download the model.",
+                        "AI 고품질(VL)을 선택했습니다.\n"
+                        "빠진 것: %s\n\n"
+                        "필요한 구성요소를 설치할 때까지 OCR은 RapidOCR로 동작합니다.\n\n"
+                        "설치 방법:\n1) 명령 프롬프트에서\n"
+                        "   pip install torch torchvision transformers "
+                        "huggingface_hub\n"
+                        "   (GPU 사용 시 CUDA 지원 torch 빌드)\n"
+                        "2) 이 대화상자를 다시 열어 AI 고품질을 선택하면 모델을 내려받습니다.")
                     % vl.install_hint())
 
     def _download_vl_models(self):
@@ -1070,16 +1094,27 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
 
 def show_licenses(parent):
     QMessageBox.information(parent, tr("오픈소스 라이선스"), (
-        "%s uses the following open-source software:\n\n"
-        "• PyQt5 — GPL v3 (Riverbank Computing)\n"
-        "• PyMuPDF / MuPDF — AGPL 3.0 (Artifex Software)\n"
-        "• RapidOCR — Apache 2.0 (RapidAI)\n"
-        "• PaddleOCR recognition models — Apache 2.0 (PaddlePaddle)\n"
-        "• ONNX Runtime — MIT (Microsoft)\n"
-        "• NumPy — BSD 3-Clause\n\n"
-        "See LICENSES.md in the application folder for details. If you "
-        "redistribute this application, review the source-disclosure "
-        "requirements of PyQt5 (GPL) and PyMuPDF (AGPL).") % APP_NAME)
+        localize(
+            "%s uses the following open-source software:\n\n"
+            "• PyQt5 — GPL v3 (Riverbank Computing)\n"
+            "• PyMuPDF / MuPDF — AGPL 3.0 (Artifex Software)\n"
+            "• RapidOCR — Apache 2.0 (RapidAI)\n"
+            "• PaddleOCR recognition models — Apache 2.0 (PaddlePaddle)\n"
+            "• ONNX Runtime — MIT (Microsoft)\n"
+            "• NumPy — BSD 3-Clause\n\n"
+            "See LICENSES.md in the application folder for details. If you "
+            "redistribute this application, review the source-disclosure "
+            "requirements of PyQt5 (GPL) and PyMuPDF (AGPL).",
+            "%s는 아래 오픈소스 소프트웨어로 만들어졌습니다.\n\n"
+            "• PyQt5 — GPL v3 (Riverbank Computing)\n"
+            "• PyMuPDF / MuPDF — AGPL 3.0 (Artifex Software)\n"
+            "• RapidOCR — Apache 2.0 (RapidAI)\n"
+            "• PaddleOCR 인식 모델 — Apache 2.0 (PaddlePaddle)\n"
+            "• ONNX Runtime — MIT (Microsoft)\n"
+            "• NumPy — BSD 3-Clause\n\n"
+            "자세한 내용은 프로그램 폴더의 LICENSES.md를 참고하세요. 외부에 "
+            "배포할 때는 PyQt5(GPL)와 PyMuPDF(AGPL)의 소스 공개 조건을 확인하세요."
+        )) % APP_NAME)
 
 
 # ======================================================================
@@ -1098,7 +1133,8 @@ class AppWindow(QMainWindow):
         self.resize(1100, 800)
         self.setAcceptDrops(True)
         self._update_service = (
-            GitHubUpdateService(APP_VERSION) if self.updates_enabled else None)
+            GitHubUpdateService(APP_VERSION, language=settings.ui_language())
+            if self.updates_enabled else None)
         self._update_worker = None
         self._available_update = None
         self._presentation_tab = None
@@ -1228,11 +1264,38 @@ class AppWindow(QMainWindow):
         h.addAction(_make_action(
             self, "PDF 기본 프로그램 / 브라우저 설정...", None,
             lambda: _show_default_app_settings(self), "settings"))
+        self._add_language_menu(h)
         h.addAction(_make_action(self, "오픈소스 라이선스", None,
                                  lambda: show_licenses(self), "license"))
         h.addAction(_make_action(
             self, "정보", None, self._shell_about, "info"))
         return mb
+
+    def _add_language_menu(self, parent_menu):
+        menu = parent_menu.addMenu(tr("언어"))
+        menu.setIcon(fluent_icon("settings"))
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        current = settings.ui_language()
+        for code, label in (("en", "English"), ("ko", tr("한국어"))):
+            action = QAction(label, menu)
+            action.setCheckable(True)
+            action.setChecked(code == current)
+            action.setIcon(fluent_icon("settings"))
+            action.triggered.connect(
+                lambda _checked=False, selected=code:
+                self._select_ui_language(selected))
+            group.addAction(action)
+            menu.addAction(action)
+        return menu
+
+    def _select_ui_language(self, language_code):
+        if language_code == settings.ui_language():
+            return
+        settings.set_ui_language(language_code)
+        QMessageBox.information(
+            self, tr("언어 변경"),
+            tr("언어 변경 사항은 sPDF를 다시 실행하면 적용됩니다."))
 
     def _shell_help(self):
         from .help import show_help

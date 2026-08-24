@@ -1,11 +1,16 @@
-# sPDF 릴리스 노트
+# sPDF Release Notes
 
-릴리스 날짜: 2026-08-24
+Release date: 2026-08-24
 
-## 1.12.0 주요 변경
+## 1.12.0 Highlights
 
-- sPDF 국제판의 메뉴, 명령 모음, 시작 화면, 대화상자, 상태 메시지와 사용법을 영어로 제공합니다.
-- 설치 프로그램과 Windows PDF 앱 등록 설명도 영어로 표시합니다.
-- 영어 UI에서도 기존 한국어·영어 OCR을 그대로 사용할 수 있습니다.
-- 번역 문구를 별도로 관리해 이후 다른 언어를 추가할 수 있는 기반을 마련했습니다.
-- 큰 PDF나 OCR 작업이 있던 탭도 닫기 버튼을 누르면 화면에서 즉시 사라지도록 개선했습니다.
+- sPDF now provides an English international interface for menus, the command bar, start page, dialogs, status messages, updater, user guide, and installer.
+- English UI remains independent from PDF content and the existing Korean and English OCR languages.
+- Translation text is maintained separately so more UI languages can be added later.
+- Closing a tab now removes it from the screen immediately, even when it used a large PDF or OCR.
+
+## 1.12.1 Improvements
+
+- The default README and changelog are now in English, with separately linked Korean versions.
+- English or Korean can be selected from **Help → Language**. Restart sPDF to apply the change.
+- The updater shows release notes in the selected UI language.

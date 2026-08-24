@@ -11,6 +11,8 @@ DEFAULT_THUMBNAIL_WIDTH = 160
 MIN_THUMBNAIL_WIDTH = 96
 MAX_THUMBNAIL_WIDTH = 480
 AUTOMATIC_UPDATE_INTERVAL_SECONDS = 24 * 60 * 60
+UI_LANGUAGES = ("en", "ko")
+DEFAULT_UI_LANGUAGE = "en"
 
 
 def _load():
@@ -57,6 +59,23 @@ def clear_recent():
     d = _load()
     d["recent"] = []
     _save(d)
+
+
+# --- 사용자 인터페이스 언어 -------------------------------------------
+
+def ui_language():
+    value = str(_load().get("ui_language", DEFAULT_UI_LANGUAGE)).lower()
+    return value if value in UI_LANGUAGES else DEFAULT_UI_LANGUAGE
+
+
+def set_ui_language(language):
+    normalized = str(language).lower()
+    if normalized not in UI_LANGUAGES:
+        return False
+    d = _load()
+    d["ui_language"] = normalized
+    _save(d)
+    return True
 
 
 # --- 문서 보기 ----------------------------------------------------------

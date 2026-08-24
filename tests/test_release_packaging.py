@@ -16,6 +16,21 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group(1), APP_VERSION)
 
+    def test_localized_release_documents_include_current_version(self):
+        for name in (
+                "README.md", "README.ko.md", "CHANGELOG.md",
+                "CHANGELOG.ko.md", "RELEASE_NOTES.md",
+                "RELEASE_NOTES.ko.md"):
+            content = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn(APP_VERSION, content, name)
+
+        self.assertIn(
+            "[한국어](README.ko.md)",
+            (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn(
+            "[English](README.md)",
+            (ROOT / "README.ko.md").read_text(encoding="utf-8"))
+
     def test_version_tag_builds_github_release(self):
         workflow = (
             ROOT / ".github" / "workflows" / "release.yml"
@@ -27,6 +42,8 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("sPDF_Setup_latest.exe", workflow)
         self.assertIn("gh release create", workflow)
         self.assertIn("python release_notes.py", workflow)
+        self.assertIn("--release-notes RELEASE_NOTES.md", workflow)
+        self.assertIn("--release-notes-ko RELEASE_NOTES.ko.md", workflow)
         self.assertIn("--notes-file release-notes.md", workflow)
         self.assertNotIn("--generate-notes", workflow)
         self.assertIn("gh release edit", workflow)

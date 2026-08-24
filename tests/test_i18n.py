@@ -1,6 +1,6 @@
 import unittest
 
-from pdfeditor.i18n import SUPPORTED_LANGUAGES, set_language, tr
+from pdfeditor.i18n import SUPPORTED_LANGUAGES, localize, set_language, tr
 
 
 class InternationalEditionTests(unittest.TestCase):
@@ -8,7 +8,7 @@ class InternationalEditionTests(unittest.TestCase):
         set_language("en")
 
     def test_first_international_language_is_english(self):
-        self.assertEqual(SUPPORTED_LANGUAGES, ("en",))
+        self.assertEqual(SUPPORTED_LANGUAGES, ("en", "ko"))
         self.assertEqual(tr("파일(&F)"), "&File")
         self.assertEqual(tr("페이지 구성..."), "Organize Pages...")
 
@@ -27,6 +27,11 @@ class InternationalEditionTests(unittest.TestCase):
     def test_unknown_language_falls_back_to_english(self):
         self.assertEqual(set_language("fr-FR"), "en")
         self.assertEqual(tr("저장"), "Save")
+
+    def test_korean_mode_preserves_source_messages(self):
+        self.assertEqual(set_language("ko"), "ko")
+        self.assertEqual(tr("저장"), "저장")
+        self.assertEqual(localize("English", "한국어"), "한국어")
 
 
 if __name__ == "__main__":

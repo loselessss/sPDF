@@ -2,7 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from release_notes import extract_release_notes, main
+from release_notes import (
+    compose_localized_documents, compose_localized_release_notes,
+    extract_release_notes, main)
 
 
 SAMPLE = """# 변경 이력
@@ -23,6 +25,13 @@ SAMPLE = """# 변경 이력
 
 - 선택 기능을 개선했습니다.
 """
+
+SAMPLE_EN = SAMPLE.replace("# 변경 이력", "# Changelog").replace(
+    "### 개선", "### Improvements").replace(
+    "프로세스 표시를 정리했습니다.", "Improved process display.").replace(
+    "### 버그 수정", "### Bug fixes").replace(
+    "종료 처리를 보강했습니다.", "Improved shutdown handling.").replace(
+    "선택 기능을 개선했습니다.", "Improved selection.")
 
 
 class ReleaseNotesTests(unittest.TestCase):
@@ -48,6 +57,40 @@ class ReleaseNotesTests(unittest.TestCase):
             self.assertEqual(
                 output.read_text(encoding="utf-8"),
                 extract_release_notes(SAMPLE, "1.7.2"))
+
+    def test_composes_bilingual_release_body(self):
+        notes = compose_localized_release_notes("1.7.2", SAMPLE_EN, SAMPLE)
+        self.assertIn("spdf-release-notes:start:en", notes)
+        self.assertIn("Improved shutdown handling.", notes)
+        self.assertIn("spdf-release-notes:start:ko", notes)
+        self.assertIn("종료 처리를 보강했습니다.", notes)
+
+    def test_cli_writes_bilingual_release_body(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            english = root / "CHANGELOG.md"
+            korean = root / "CHANGELOG.ko.md"
+            output = root / "notes.md"
+            english.write_text(SAMPLE_EN, encoding="utf-8")
+            korean.write_text(SAMPLE, encoding="utf-8")
+            main(["--version", "1.7.2", "--changelog", str(english),
+                  "--changelog-ko", str(korean), "--output", str(output)])
+            self.assertEqual(
+                output.read_text(encoding="utf-8"),
+                compose_localized_release_notes("1.7.2", SAMPLE_EN, SAMPLE))
+
+    def test_complete_release_documents_can_be_wrapped(self):
+        notes = compose_localized_documents(
+            "1.7.2", "# Release Notes\n\n## 1.7.2 Highlights\nEnglish",
+            "# 릴리스 노트\n\n## 1.7.2 주요 변경\n한국어")
+        self.assertIn("# Release Notes", notes)
+        self.assertIn("# 릴리스 노트", notes)
+        self.assertIn("spdf-release-notes:start:ko", notes)
+
+    def test_complete_release_documents_require_current_version(self):
+        with self.assertRaisesRegex(ValueError, "1.7.2"):
+            compose_localized_documents(
+                "1.7.2", "## 1.7.1 Highlights", "## 1.7.1 주요 변경")
 
 
 if __name__ == "__main__":

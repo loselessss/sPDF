@@ -33,6 +33,17 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
 
         self.assertTrue(settings.automatic_update_check_due(now=1000))
 
+    def test_ui_language_defaults_to_english(self):
+        self.assertEqual(settings.ui_language(), "en")
+
+    def test_ui_language_can_be_saved_as_korean(self):
+        self.assertTrue(settings.set_ui_language("ko"))
+        self.assertEqual(settings.ui_language(), "ko")
+
+    def test_invalid_ui_language_is_rejected(self):
+        self.assertFalse(settings.set_ui_language("fr"))
+        self.assertEqual(settings.ui_language(), "en")
+
 
 if __name__ == "__main__":
     unittest.main()

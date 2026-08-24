@@ -23,6 +23,11 @@ _INSTALLER_RE = re.compile(
     r"^sPDF_Setup_(\d+\.\d+\.\d+)\.exe$", re.IGNORECASE)
 _SHA256_RE = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
 _MAX_RELEASE_JSON_BYTES = 2 * 1024 * 1024
+_LOCALIZED_NOTES_RE = re.compile(
+    r"<!--\s*spdf-release-notes:start:(?P<language>en|ko)\s*-->"
+    r"(?P<body>.*?)"
+    r"<!--\s*spdf-release-notes:end:(?P=language)\s*-->",
+    re.DOTALL | re.IGNORECASE)
 
 
 class UpdateError(RuntimeError):
@@ -75,11 +80,26 @@ def _trusted_github_url(value, release_asset=False):
     return not release_asset or "/download/" in parsed.path.casefold()
 
 
+def localized_release_notes(body, language="en"):
+    """Return the requested language block from a bilingual release body."""
+    text = str(body or "")
+    blocks = {
+        match.group("language").lower(): match.group("body").strip()
+        for match in _LOCALIZED_NOTES_RE.finditer(text)
+    }
+    if not blocks:
+        return text
+    requested = str(language or "en").lower()
+    return blocks.get(requested) or blocks.get("en") or next(iter(blocks.values()))
+
+
 class GitHubUpdateService:
-    def __init__(self, current_version, opener=urlopen, download_root=None):
+    def __init__(self, current_version, opener=urlopen, download_root=None,
+                 language="en"):
         self.current_version = current_version
         self._open = opener
         self._download_root = download_root
+        self.language = language if language in ("en", "ko") else "en"
 
     def check(self):
         request = Request(
@@ -115,7 +135,8 @@ class GitHubUpdateService:
             version=latest_version,
             tag_name=tag_name,
             release_name=str(data.get("name") or tag_name),
-            release_notes=str(data.get("body") or ""),
+            release_notes=localized_release_notes(
+                data.get("body"), self.language),
             release_url=release_url,
             asset=self._select_installer(data.get("assets"), latest_version))
 

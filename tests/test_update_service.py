@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pdfeditor.update_service import GitHubUpdateService, UpdateError
+from pdfeditor.update_service import (
+    GitHubUpdateService, UpdateError, localized_release_notes)
 
 
 class FakeResponse:
@@ -23,7 +24,8 @@ class FakeResponse:
         return self.stream.read(size)
 
 
-def release_payload(tag="v1.6.1", content=b"installer", url=None):
+def release_payload(tag="v1.6.1", content=b"installer", url=None,
+                    body="변경 내용"):
     version = tag.lstrip("v")
     download = url or (
         "https://github.com/loselessss/sPDF/releases/download/%s/"
@@ -31,7 +33,7 @@ def release_payload(tag="v1.6.1", content=b"installer", url=None):
     return json.dumps({
         "tag_name": tag,
         "name": "sPDF %s" % version,
-        "body": "변경 내용",
+        "body": body,
         "html_url": (
             "https://github.com/loselessss/sPDF/releases/tag/%s" % tag),
         "assets": [{
@@ -44,6 +46,32 @@ def release_payload(tag="v1.6.1", content=b"installer", url=None):
 
 
 class UpdateServiceTests(unittest.TestCase):
+    def test_localized_release_notes_selects_requested_language(self):
+        body = (
+            "## English\n\n<!-- spdf-release-notes:start:en -->\n"
+            "English notes\n<!-- spdf-release-notes:end:en -->\n\n"
+            "## 한국어\n\n<!-- spdf-release-notes:start:ko -->\n"
+            "한국어 변경 내용\n<!-- spdf-release-notes:end:ko -->")
+        self.assertEqual(localized_release_notes(body, "en"), "English notes")
+        self.assertEqual(
+            localized_release_notes(body, "ko"), "한국어 변경 내용")
+
+    def test_legacy_release_notes_are_preserved(self):
+        self.assertEqual(localized_release_notes("기존 변경 내용", "en"),
+                         "기존 변경 내용")
+
+    def test_update_uses_configured_release_note_language(self):
+        body = (
+            "<!-- spdf-release-notes:start:en -->English notes"
+            "<!-- spdf-release-notes:end:en -->"
+            "<!-- spdf-release-notes:start:ko -->한국어 변경 내용"
+            "<!-- spdf-release-notes:end:ko -->")
+        service = GitHubUpdateService(
+            "1.6.0", language="ko",
+            opener=lambda _request, timeout: FakeResponse(
+                release_payload(body=body)))
+        self.assertEqual(service.check().release_notes, "한국어 변경 내용")
+
     def test_newer_release_selects_exact_versioned_installer(self):
         service = GitHubUpdateService(
             "1.6.0", opener=lambda _request, timeout: FakeResponse(

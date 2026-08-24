@@ -72,7 +72,7 @@ jobs:
           $version = $tag.TrimStart("v")
           $installer = "Output\sPDF_Setup_$version.exe"
           $latestInstaller = "Output\sPDF_Setup_latest.exe"
-          python release_notes.py --version $version --output release-notes.md
+          python release_notes.py --version $version --release-notes RELEASE_NOTES.md --release-notes-ko RELEASE_NOTES.ko.md --output release-notes.md
           gh release view $tag --json id 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release edit $tag --title "sPDF $version" `

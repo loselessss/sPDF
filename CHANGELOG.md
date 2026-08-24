@@ -1,236 +1,171 @@
-# 변경 이력
+# Changelog
+
+English | [한국어](CHANGELOG.ko.md)
+
+## 1.12.1 - 2026-08-24
+
+### Improvements
+
+- The default README and changelog are now written in English, with separate Korean versions linked at the top of each document.
+- English and Korean can be selected from **Help → Language**. The change takes effect after restarting sPDF.
+- The updater now shows the release notes that match the selected UI language. Older releases without language sections remain readable.
 
 ## 1.12.0 - 2026-08-24
 
-### 새 기능
+### New features
 
-- sPDF 국제판의 사용자 인터페이스와 설치 프로그램을 영어로 제공합니다. 메뉴, 명령 모음, 시작 화면, 대화상자, 상태 메시지, 업데이트 화면과 사용법을 영어로 표시합니다.
-- UI 번역을 별도 카탈로그로 분리해 이후 다른 언어를 기능 코드와 독립적으로 추가할 수 있도록 했습니다.
+- Added the English international edition covering menus, the command bar, start page, dialogs, status messages, updater, user guide, and installer.
+- Introduced a separate translation catalog so additional UI languages can be added independently of feature code.
 
-### 개선
+### Improvements
 
-- 인터페이스 언어와 PDF 내용 및 OCR 인식 언어를 분리했습니다. 영어 UI에서도 기존 한국어·영어 OCR을 그대로 사용할 수 있습니다.
-
-### 성능 개선
-
-- 탭의 닫기 버튼을 누르면 탭을 먼저 화면에서 제거하고 OCR 종료와 문서·렌더 캐시 정리를 다음 화면 갱신 뒤 처리하도록 바꿔, 큰 PDF나 OCR 작업이 있던 탭도 닫기 반응이 즉시 보이도록 했습니다.
+- Kept UI language independent from PDF content and Korean/English OCR recognition.
+- Tabs now disappear immediately when closed while OCR and render-cache cleanup continues after the next UI update.
 
 ## 1.11.0 - 2026-08-24
 
-### 새 기능
+### New features
 
-- 보기 메뉴와 상단 명령 모음에 `두 장 보기`를 추가했습니다. 현재 페이지가 포함된 두 페이지를 나란히 표시하고 왼쪽 썸네일에서도 두 장을 함께 강조하며, 다음·이전 이동은 두 장 단위로 진행합니다.
-- 두 장 보기에서도 각 페이지를 클릭해 선택·검색·주석·편집 대상으로 전환할 수 있으며 페이지별 좌표와 현재 보기 영역 표시가 올바르게 유지됩니다.
-- `F11` 전체화면과 `F5` 프레젠테이션 모드를 추가했습니다. 프레젠테이션에서는 메뉴·탭·썸네일·명령 모음·상태 표시를 숨기고 현재 문서를 화면에 맞추며 `Esc`로 원래 화면에 돌아옵니다.
+- Added two-page view with paired thumbnail selection and two-page navigation.
+- Added F11 full screen, F5 presentation mode, and command-bar page rotation.
 
-### 개선
+### Improvements
 
-- sPDF를 다른 프로그램의 내부 모듈로 사용할 때는 자체 업데이트 서비스와 자동 확인 타이머를 만들지 않고 도움말의 업데이트 확인 메뉴도 숨깁니다. 설치본과 `python -m pdfeditor`로 독립 실행할 때만 업데이트 기능을 켭니다.
-- 상단 명령 모음의 페이지 구성 옆에 현재 페이지를 왼쪽 또는 오른쪽으로 회전하는 아이콘을 추가했습니다.
+- Embedded sPDF windows no longer create or expose the standalone update service.
 
 ## 1.10.0 - 2026-08-11
 
-### 새 기능
+### New features
 
-- 파일 메뉴와 명령 모음에 `인쇄`를 추가하고 `Ctrl+P`로 Windows 인쇄 대화상자를 열 수 있습니다.
-- 전체 문서, 현재 쪽, 지정한 쪽 범위와 역순 인쇄를 지원하며 페이지를 한 장씩 처리해 큰 PDF에서도 메모리 사용이 누적되지 않습니다.
+- Added Ctrl+P printing for all pages, current page, ranges, and reverse order.
 
-### 버그 수정
+### Fixes and improvements
 
-- 왼쪽 페이지 미리보기의 이미지 영역과 페이지 번호 영역을 분리하여 10쪽 이후의 두 자리 이상 페이지 번호도 빠짐없이 표시되도록 수정했습니다.
-
-### 개선
-
-- OCR은 사용자가 현재 쪽 또는 전체 문서 OCR을 직접 요청했을 때만 실행되는 기존 방식을 유지하고, 자동 업데이트 확인은 마지막 확인 후 24시간이 지나야 다시 실행되도록 조정했습니다. 수동 업데이트 확인은 시간 제한 없이 사용할 수 있습니다.
-
-### 성능 개선
-
-- 긴 문서를 스크롤해도 썸네일 이미지는 현재 보이는 페이지 주변만 메모리에 유지하고, 종료 시 창을 먼저 숨긴 뒤 제한된 렌더 캐시를 정리하도록 바꿔 종료 반응을 빠르게 했습니다.
+- Restored page numbers for thumbnails after page 9.
+- Limited automatic update checks to once every 24 hours while preserving manual checks.
+- OCR runs only when explicitly requested, and shutdown no longer waits several seconds per OCR tab.
 
 ## 1.9.0 - 2026-08-11
 
-### 새 기능
+### New features
 
-- 왼쪽 페이지 미리보기에서 원하는 위치를 클릭하면 해당 지점이 실제 문서 화면의 중앙에 오도록 이동합니다.
-- 즐겨찾기 오른쪽 명령 모음에 확대, 축소, 폭 맞춤, 쪽 맞춤 아이콘을 추가했습니다.
+- Added clickable thumbnail viewport navigation and zoom in, zoom out, fit width, and fit page commands.
 
-### 버그 수정
+### Bug fixes
 
-- 미리보기의 현재 보기 영역 표시가 실제 페이지 이미지의 세로 여백을 반영하지 않아 위아래 위치가 어긋나던 문제를 수정했습니다.
+- Corrected vertical synchronization between the thumbnail viewport indicator and the main document view.
 
 ## 1.8.0 - 2026-08-11
 
-### 새 기능
+### New features
 
-- Windows 11 Fluent Design을 바탕으로 앱 전체의 색상, 글꼴, 버튼, 입력창, 메뉴, 탭, 목록과 스크롤바를 하나의 시각 체계로 통일했습니다. 지원되는 Windows 11에서는 탭 창용 Mica Alt 제목 표시줄도 적용됩니다.
-- 시작 화면의 즐겨찾기와 최근 파일을 둥근 카드 형태로 구성하고 주요 `PDF 열기` 동작을 강조색 버튼으로 표시합니다.
-- 파일·편집·페이지·주석·OCR·보기·도움말 메뉴와 검색, 업데이트, 페이지 구성 및 우클릭 메뉴에 아이콘을 추가했습니다. Windows 11에서는 실제 Segoe Fluent Icons 시스템 글꼴을 사용하고, 구형 Windows에서는 자체 선형 아이콘으로 대체합니다.
+- Added a Fluent-inspired Windows UI with rounded surfaces, compact typography, consistent icons, and theme fallbacks.
 
-### 개선
+### Bug fixes
 
-- 손 도구와 텍스트 선택 도구의 선택 상태를 강조색으로 구분하고 문서·썸네일·검색·상태 영역의 표면 계층을 더 명확하게 표시합니다.
-- 업데이트 설치와 위험한 페이지 삭제처럼 성격이 다른 동작을 색상과 버튼 위계로 구분했습니다.
-- 기본 글꼴을 9pt로 조정하고 버튼·탭·메뉴·목록의 높이와 여백을 줄여 기존 화면 밀도에 가깝게 다듬었습니다.
-- 고전적인 Qt Fusion 스타일과 글자 중심 도구 모음을 제거하고, 열기·저장·실행 취소·선택 도구 등 자주 쓰는 기능을 20px 아이콘 명령 모음으로 재구성했습니다.
-- 시작 화면의 긴 파일 경로는 가운데 말줄임으로 표시해 불필요한 가로 스크롤바와 오른쪽 아래 스크롤 코너가 나타나지 않게 했습니다.
-
-### 버그 수정
-
-- 페이지 구성 창에서 목록 여백 때문에 현재 스크롤 위치를 찾지 못해 10페이지 이후의 썸네일이 렌더링되지 않던 문제를 수정했습니다.
+- Fixed the recent-file card corner artifact and page-organizer rendering after page 10.
+- Removed an accidental Paper Organizer source copy from the sPDF repository.
 
 ## 1.7.3 - 2026-08-09
 
-### 개선
+### Improvements
 
-- PDF 본문의 텍스트와 벡터 그래픽을 MuPDF 최고 단계 그레이스케일 안티앨리어싱으로 렌더링합니다.
-- Windows 분수 화면 배율이나 PDF 분수 확대 배율에서도 최근접 픽셀 확대처럼 계단지지 않도록 부드러운 픽셀 변환을 적용합니다.
-- LCD 서브픽셀 배열에 의존하는 ClearType 대신 캡처·다중 모니터·회전 화면에서도 색 번짐이 없는 그레이스케일 방식을 사용합니다.
+- Improved text antialiasing and fractional-scale interpolation.
 
 ## 1.7.2 - 2026-08-03
 
-### 개선
+### Improvements
 
-- 작업 관리자에서 sPDF와 OCR 작업 프로세스가 제품명과 역할로 구분되어 표시되도록 Windows 실행 파일 정보를 추가했습니다.
-- 모든 sPDF 창이 Windows에서 동일한 데스크톱 앱으로 인식되도록 앱 식별자를 통일했습니다.
+- Improved Windows process grouping and labels for the main app and OCR worker.
 
-### 버그 수정
+### Bug fixes
 
-- OCR 중 창을 종료할 때 작업 프로세스가 남을 수 있는 경우를 방지하고, 정상 종료되지 않으면 강제로 정리하도록 보강했습니다.
-- 업데이트·설정·확인 창을 포함한 모든 대화상자 제목 표시줄에서 사용하지 않는 `?` 도움말 버튼을 제거했습니다.
+- Removed unnecessary title-bar help buttons and strengthened OCR cleanup during exit.
 
 ## 1.7.1 - 2026-08-01
 
-### 개선
+### Improvements
 
-- 텍스트 드래그 선택을 사각 영역 방식에서 시작 단어와 끝 단어 사이의 읽기 순서를 따르는 연속 선택 방식으로 변경했습니다.
-- 여러 줄에 걸친 문장을 복사할 때 화면상의 줄바꿈은 공백으로 자연스럽게 연결하고 문단 사이만 줄바꿈합니다.
-- 역방향 드래그와 단어 사이 공백에서 끝나는 드래그도 자연스럽게 처리합니다.
+- Improved continuous text selection and copying across wrapped lines.
 
 ## 1.7.0 - 2026-08-01
 
-### 새 기능
+### New features
 
-- 하단 상태 표시줄에서 확대 배율을 10~800% 범위로 직접 입력할 수 있습니다.
-- Ctrl 확대·축소는 큰 단계로, Alt 확대·축소는 1% 미세 단계로 구분했습니다.
-- 페이지를 확대하면 왼쪽 썸네일에 현재 보고 있는 영역을 반투명 사각형으로 표시합니다.
-- 파일 메뉴의 `탐색기에서 현재 위치 열기`로 현재 PDF를 선택한 Windows 탐색기를 열 수 있습니다.
-
-### 개선
-
-- 썸네일 이미지와 항목 폭이 왼쪽 패널 너비에 맞춰 함께 변하고, 페이지 번호 영역은 안정적으로 유지됩니다.
-- 본문과 썸네일을 모니터 배율과 관계없이 최소 2배 해상도로 렌더해 첫 화면부터 선명하게 표시합니다.
-- 탭의 실제 배치가 끝난 직후 창 너비와 모니터 배율을 다시 확인해 Paper Organizer에서 열 때도 초기 저화질 렌더가 남지 않게 했습니다.
+- Added HiDPI document rendering, responsive thumbnails, 1% zoom controls, visible-area indication, and **Open File Location**.
 
 ## 1.6.2 - 2026-07-29
 
-### 개선
+### Improvements
 
-- Windows 고해상도·분수 배율 화면에서 장치 픽셀 비율에 맞춰 본문과 썸네일을
-  더 선명하게 렌더링하되 논리적인 페이지 크기와 주석 좌표는 그대로 유지합니다.
+- Improved document and thumbnail sharpness on scaled Windows displays.
 
 ## 1.6.1 - 2026-07-29
 
-### 개선
+### Improvements
 
-- 왼쪽 썸네일 패널의 경계를 드래그해 너비를 조절하고 다음 실행에도 유지할 수 있게 했습니다.
+- Added a resizable, persistent thumbnail-panel width.
 
-### 버그 수정
+### Bug fixes
 
-- 렌더 전후로 썸네일 항목 높이가 달라지고 목록 여백을 페이지로 찾지 못해 긴 PDF의 23쪽 이후 썸네일이 렌더되지 않던 문제를 수정했습니다.
+- Fixed missing thumbnails in longer documents.
 
 ## 1.6.0 - 2026-07-26
 
-### 새 기능
+### New features
 
-- 페이지 메뉴의 `페이지 구성`에서 별도 창으로 문서 전체 페이지를 관리할 수 있습니다.
-- 여러 페이지를 선택해 한 묶음으로 옮기거나 드래그한 한 페이지만 옮기는 방식을 선택할 수 있습니다.
-- 외부 PDF를 페이지 목록의 원하는 위치에 끌어 놓으면 모든 페이지가 그 위치에 자동 삽입됩니다.
-- 페이지 구성 창에서 여러 페이지를 한 번에 삭제할 수 있으며 모든 구성 변경은 실행 취소할 수 있습니다.
-- 대용량 PDF에서도 메모리 사용을 제한하도록 화면에 보이는 페이지 썸네일만 지연 렌더링합니다.
-- GitHub Releases에서 새 버전을 확인하고 설치 파일을 내려받아 SHA-256 검증 후 설치할 수 있습니다.
-- `vX.Y.Z` 태그를 푸시하면 Windows 설치 파일과 체크섬을 자동으로 빌드해 GitHub Release로 게시합니다.
+- Added a dedicated page organizer with previews, drag-and-drop PDF/image insertion, reordering, deletion, and undo support.
 
 ## 1.5.3 - 2026-07-23
 
-### 개선
+### Improvements
 
-- 문서 도구 모음의 손 도구와 텍스트 선택 도구 옆에 현재 PDF를 바로 등록할 수 있는 `★ 즐겨찾기 추가` 버튼을 배치했습니다.
-- 현재 문서의 등록 상태에 따라 버튼이 `★ 즐겨찾기 추가` 또는 `★ 즐겨찾기 해제`로 바뀌며, 다른 이름으로 저장한 뒤에도 새 경로를 기준으로 상태가 갱신됩니다.
+- Added a command-bar favorite toggle beside the hand and text tools.
 
 ## 1.5.2 - 2026-07-22
 
-### 버그 수정
+### Bug fixes
 
-- Windows `cmd.exe`가 UTF-8 한글이 포함된 빌드 배치 파일 일부를 명령으로 잘못 해석해 오류와 깨진 문구를 출력하던 문제를 수정했습니다.
-- 실행 파일 및 설치 파일 빌드 배치의 안내 문구를 ASCII로 바꾸고 CRLF 줄바꿈을 유지해 Windows 콘솔 호환성을 높였습니다.
+- Fixed garbled Korean build-script output and unintended command errors.
 
 ## 1.5.1 - 2026-07-22
 
-### 개선
+### Improvements
 
-- AI 고품질 OCR 설정에서 모호했던 `기본으로` 버튼을 `RapidOCR로`로 변경했습니다.
-- OCR 엔진 설명, 현재 선택, 유지 상태와 VL 미설치 폴백 안내에서 `기본` 대신 실제 엔진 이름인 `RapidOCR`을 사용하도록 통일했습니다.
+- Renamed the ambiguous default OCR option to RapidOCR.
 
 ## 1.5.0 - 2026-07-22
 
-### 새 기능
+### New features
 
-- 문서 도구 모음과 보기 메뉴에 손 도구와 텍스트 선택 도구를 추가했습니다.
-- 손 도구에서 PDF를 왼쪽 클릭한 채 드래그해 확대된 페이지를 상하좌우로 이동할 수 있습니다.
-- 선택한 도구에 따라 손 모양과 텍스트 선택 커서가 바뀌어 현재 모드를 확인할 수 있습니다.
-
-### 개선
-
-- 텍스트 편집 모드나 메모 배치를 시작하면 위치 클릭이 동작하도록 텍스트 선택 도구로 자동 전환합니다.
-- 각 문서 탭이 선택한 도구 상태를 독립적으로 유지합니다.
-
-### 기타
-
-- PyQt5 환경에서 도구별 커서와 드래그 스크롤 방향을 확인하는 GUI 테스트를 추가했습니다.
+- Added selectable hand and text-selection tools with click-and-drag document panning.
 
 ## 1.4.2 - 2026-07-22
 
-### 개선
+### Improvements
 
-- 흐린 저대비 스캔에만 국소 명암 보정을 적용해 글자와 배경의 구분을 강화했습니다.
-- 긴 페이지를 겹치는 세로 구간으로 나눠 RapidOCR의 내부 축소로 작은 글씨가 뭉개지는 문제를 줄였습니다.
-- 중앙의 지속적인 여백을 감지해 2단 조판을 왼쪽 단부터 오른쪽 단 순서로 나눠 인식하도록 했습니다.
-- 겹친 구간에서 중복 인식된 동일 문장을 좌표 기준으로 병합하도록 했습니다.
-
-### 기타
-
-- 단일/2단 조판 판별, 타일 범위, 좌표 복원, 중복 제거를 검증하는 합성 이미지 테스트를 추가했습니다.
+- Improved OCR for low-contrast scans, long pages, and two-column layouts.
 
 ## 1.4.1 - 2026-07-22
 
-### 개선
+### Improvements
 
-- PDF 기본 프로그램 설정 화면을 체크박스 기반 브라우저 설정 화면으로 개편했습니다.
-- Microsoft Edge뿐 아니라 Google Chrome과 Mozilla Firefox에서도 PDF 링크를 Windows 기본 PDF 앱(sPDF)으로 열 수 있게 했습니다.
-- 브라우저별 사용자 정책 상태를 읽고 한 화면에서 적용하거나 해제할 수 있게 했습니다.
-
-### 기타
-
-- 이후 사용자에게 보이는 변경은 범위에 따라 자동으로 버전을 올리고 이 변경 이력을 함께 갱신하도록 저장소 규칙을 보강했습니다.
+- Added per-user Edge, Chrome, and Firefox PDF handoff settings.
 
 ## 1.4.0 - 2026-07-22
 
-### 새 기능
+### New features
 
-- 탭을 다른 sPDF 창이나 빈 창으로 드래그해 옮길 수 있게 했습니다.
-- 별도 실행된 창 사이에서도 미저장 PDF 스냅샷과 원래 저장 경로를 유지하도록 했습니다.
-- 마지막 탭을 옮겨 빈 창이 되면 해당 창을 자동으로 닫도록 했습니다.
+- Added cross-window tab transfer while preserving unsaved state and closing an emptied source window.
 
 ## 1.3.0 - 2026-07-22
 
-### 새 기능
+### New features
 
-- 여러 PDF를 현재 문서에 순서대로 삽입하는 병합 기능을 추가했습니다.
-- 페이지 범위를 그룹별 PDF로 내보내는 분리 기능을 추가했습니다.
+- Added reinforced PDF merge and split workflows.
 
 ## 1.2.0 - 2026-07-20
 
-### 새 기능
+### New features
 
-- 창마다 문서를 열던 구조를 한 창의 다중 문서 탭 구조로 전환했습니다.
-- 탭별 페이지·편집·검색·OCR 상태와 탭 순서 변경을 지원합니다.
+- Added multi-document tabs with independent document state and draggable tab ordering.

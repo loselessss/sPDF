@@ -1,4 +1,4 @@
-"""CHANGELOG.md에서 지정한 버전의 GitHub 릴리스 본문을 추출한다."""
+"""Build GitHub release notes from localized changelog entries."""
 
 import argparse
 import re
@@ -28,15 +28,67 @@ def extract_release_notes(changelog, version):
     return notes + "\n"
 
 
+def compose_localized_release_notes(version, english, korean):
+    """Compose a bilingual body that the updater can select by UI language."""
+    sections = []
+    for code, title, changelog in (
+            ("en", "English", english), ("ko", "한국어", korean)):
+        notes = extract_release_notes(changelog, version).strip()
+        sections.append(
+            "## %s\n\n"
+            "<!-- spdf-release-notes:start:%s -->\n%s\n"
+            "<!-- spdf-release-notes:end:%s -->"
+            % (title, code, notes, code))
+    return "\n\n".join(sections) + "\n"
+
+
+def compose_localized_documents(version, english, korean):
+    """Wrap complete, curated release-note documents for updater selection."""
+    sections = []
+    for code, title, document in (
+            ("en", "English", english), ("ko", "한국어", korean)):
+        body = str(document).strip()
+        if not body:
+            raise ValueError("%s release notes are empty." % title)
+        if not re.search(
+                r"^##\s+%s(?:\s|$)" % re.escape(version), body,
+                re.MULTILINE):
+            raise ValueError(
+                "%s release notes do not contain version %s."
+                % (title, version))
+        sections.append(
+            "## %s\n\n"
+            "<!-- spdf-release-notes:start:%s -->\n%s\n"
+            "<!-- spdf-release-notes:end:%s -->"
+            % (title, code, body, code))
+    return "\n\n".join(sections) + "\n"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
     parser.add_argument("--changelog", default="CHANGELOG.md")
+    parser.add_argument("--changelog-ko")
+    parser.add_argument("--release-notes")
+    parser.add_argument("--release-notes-ko")
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
 
-    changelog = Path(args.changelog).read_text(encoding="utf-8")
-    notes = extract_release_notes(changelog, args.version)
+    if args.release_notes or args.release_notes_ko:
+        if not args.release_notes or not args.release_notes_ko:
+            parser.error(
+                "--release-notes and --release-notes-ko must be used together")
+        english = Path(args.release_notes).read_text(encoding="utf-8")
+        korean = Path(args.release_notes_ko).read_text(encoding="utf-8")
+        notes = compose_localized_documents(args.version, english, korean)
+    elif args.changelog_ko:
+        changelog = Path(args.changelog).read_text(encoding="utf-8")
+        korean = Path(args.changelog_ko).read_text(encoding="utf-8")
+        notes = compose_localized_release_notes(
+            args.version, changelog, korean)
+    else:
+        changelog = Path(args.changelog).read_text(encoding="utf-8")
+        notes = extract_release_notes(changelog, args.version)
     Path(args.output).write_text(notes, encoding="utf-8")
 
 
