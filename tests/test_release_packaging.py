@@ -16,6 +16,13 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group(1), APP_VERSION)
 
+    def test_installer_offers_english_and_korean(self):
+        installer = Path("installer.iss").read_text(encoding="utf-8-sig")
+        self.assertIn('Name: "english"', installer)
+        self.assertIn('Name: "korean"', installer)
+        self.assertIn("ShowLanguageDialog=yes", installer)
+        self.assertIn('ValueName: "UILanguage"', installer)
+
     def test_localized_release_documents_include_current_version(self):
         for name in (
                 "README.md", "README.ko.md", "CHANGELOG.md",

@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .icons import fluent_icon
-from .i18n import tr
+from .i18n import localize, tr
 
 def _size_text(size):
     return "%.1f MB" % (size / (1024 * 1024)) if size > 0 else tr("크기 정보 없음")
@@ -67,8 +67,9 @@ class UpdateDialog(QDialog):
         self.setMinimumSize(600, 450)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
-            "<h3>sPDF %s is available.</h3>" % update.version))
+        layout.addWidget(QLabel(localize(
+            "<h3>sPDF %s is available.</h3>" % update.version,
+            "<h3>sPDF %s 업데이트가 있습니다.</h3>" % update.version)))
         form = QFormLayout()
         form.addRow(tr("현재 버전"), QLabel(service.current_version))
         form.addRow(tr("새 버전"), QLabel(update.version))

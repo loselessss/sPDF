@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import uuid
 
-from PyQt5.QtCore import QMimeData, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, QMimeData, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QDrag
 from PyQt5.QtWidgets import (
     QAction, QActionGroup, QApplication, QCheckBox, QDialog, QDialogButtonBox,
@@ -638,7 +638,15 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.addSeparator()
         tool_bar.addAction(self._favorite_act)
         tool_bar.addSeparator()
-        tool_bar.addAction(self._sidebar_cycle_act)
+        self._sidebar_button = QToolButton(tool_bar)
+        self._sidebar_button.setObjectName("sidebarRibbonButton")
+        self._sidebar_button.setText(tr("왼쪽 패널"))
+        self._sidebar_button.setIcon(fluent_icon("pages"))
+        self._sidebar_button.setIconSize(QSize(20, 20))
+        self._sidebar_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._sidebar_button.setPopupMode(QToolButton.InstantPopup)
+        self._sidebar_button.setMenu(sidebar_menu)
+        tool_bar.addWidget(self._sidebar_button)
         tool_bar.addAction(self._zoom_in_act)
         tool_bar.addAction(self._zoom_out_act)
         tool_bar.addAction(self._fit_width_act)
@@ -1181,6 +1189,9 @@ class AppWindow(QMainWindow):
         application = QApplication.instance()
         if application is not None:
             install_i18n(application)
+            # 페이지 뷰와 스크롤 영역이 화살표 키를 먼저 소비하므로, 발표
+            # 중에는 셸이 자식 위젯의 키 입력을 선행해서 받는다.
+            application.installEventFilter(self)
         self.updates_enabled = bool(updates_enabled)
         self.setWindowTitle(APP_NAME)
         self.resize(1100, 800)
@@ -1287,10 +1298,31 @@ class AppWindow(QMainWindow):
         self.showFullScreen()
         self._sync_view_mode_actions()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape and self.presentation_active:
+    def _handle_presentation_key(self, event):
+        if not self.presentation_active or event.modifiers() not in (
+                Qt.NoModifier, Qt.KeypadModifier):
+            return False
+        if event.key() == Qt.Key_Escape:
             self.toggle_presentation(self._presentation_tab)
-            event.accept()
+        elif event.key() in (Qt.Key_Right, Qt.Key_Down):
+            self._presentation_tab.next_page()
+        elif event.key() in (Qt.Key_Left, Qt.Key_Up):
+            self._presentation_tab.prev_page()
+        else:
+            return False
+        event.accept()
+        return True
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.KeyPress and (
+                watched is self or
+                isinstance(watched, QWidget) and self.isAncestorOf(watched)):
+            if self._handle_presentation_key(event):
+                return True
+        return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event):
+        if self._handle_presentation_key(event):
             return
         super().keyPressEvent(event)
 

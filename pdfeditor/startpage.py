@@ -81,10 +81,12 @@ class StartPage(QWidget):
         ver = QLabel("v%s — PDF 보기 · 주석 · OCR" % APP_VERSION)
         ver.setObjectName("subtitle")
 
-        btn = QPushButton("PDF/Illustrator 파일 열기...")
+        # 시작 화면에서는 주 용도인 PDF를 전면에 둔다. PDF 호환 AI 열기는
+        # 파일 메뉴와 드래그 앤 드롭에서 계속 지원한다.
+        btn = QPushButton("PDF 파일 열기...")
         btn.setProperty("accent", True)
         btn.setIcon(fluent_icon("open", "#ffffff"))
-        btn.setFixedWidth(132)
+        btn.setMinimumWidth(132)
         btn.clicked.connect(lambda _c=False: self.browse.emit())
 
         # 문서를 열어둔 채 홈에 온 경우에만 보이는 '돌아가기' 버튼

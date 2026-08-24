@@ -264,6 +264,15 @@ class ViewerMixin:
                 "none": "close", "thumbnails": "pages",
                 "bookmarks": "notes",
             }[mode]))
+        if hasattr(self, "_sidebar_button"):
+            icon_name = {
+                "none": "close", "thumbnails": "pages",
+                "bookmarks": "notes",
+            }[mode]
+            self._sidebar_button.setIcon(fluent_icon(icon_name))
+            self._sidebar_button.setToolTip(localize(
+                "Choose the left panel (current: %s)",
+                "왼쪽 패널 선택 (현재: %s)") % labels[mode])
         if persist:
             settings.set_sidebar_mode(mode)
 

@@ -66,8 +66,30 @@ def clear_recent():
 # --- 사용자 인터페이스 언어 -------------------------------------------
 
 def ui_language():
-    value = str(_load().get("ui_language", DEFAULT_UI_LANGUAGE)).lower()
+    data = _load()
+    value = data.get("ui_language")
+    if value is None:
+        value = _installer_ui_language()
+    value = str(value or DEFAULT_UI_LANGUAGE).lower()
     return value if value in UI_LANGUAGES else DEFAULT_UI_LANGUAGE
+
+
+def _installer_ui_language():
+    """Return the language selected in the Windows installer, if available."""
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(hive, r"Software\sPDF") as key:
+                    value, _kind = winreg.QueryValueEx(key, "UILanguage")
+                    return str(value).lower()
+            except OSError:
+                continue
+    except (ImportError, OSError):
+        pass
+    return None
 
 
 def set_ui_language(language):

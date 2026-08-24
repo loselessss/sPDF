@@ -5,7 +5,7 @@
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.14.0"
+#define MyAppVersion "1.14.1"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"
@@ -28,18 +28,23 @@ PrivilegesRequiredOverridesAllowed=dialog
 SetupIconFile=assets\spdf.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
+ShowLanguageDialog=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Languages: english
+Name: "desktopicon"; Description: "바탕 화면 바로 가기 만들기"; GroupDescription: "추가 바로 가기:"; Languages: korean
 ; PDF/Illustrator 연결은 '연결 프로그램 후보'로만 등록(기본값을 강제로 뺏지 않음).
 ; 사용자가 나중에 Windows '기본 앱'에서 sPDF를 직접 고를 수 있다.
-Name: "associate"; Description: "Add sPDF to the Open with list for PDF and Illustrator files"; GroupDescription: "File associations:"
+Name: "associate"; Description: "Add sPDF to the Open with list for PDF and Illustrator files"; GroupDescription: "File associations:"; Languages: english
+Name: "associate"; Description: "PDF 및 Illustrator 파일의 연결 프로그램 목록에 sPDF 추가"; GroupDescription: "파일 연결:"; Languages: korean
 ; Windows 8 이상에서는 설치 프로그램이 기본 앱을 직접 바꿀 수 없다.
 ; 선택 시 설치 완료 후 Windows 기본 앱 설정을 열어 사용자가 확정한다.
-Name: "associate\defaultpdf"; Description: "Choose sPDF as the default PDF app after installation (opens Windows Settings)"; GroupDescription: "File associations:"; Flags: unchecked
+Name: "associate\defaultpdf"; Description: "Choose sPDF as the default PDF app after installation (opens Windows Settings)"; GroupDescription: "File associations:"; Flags: unchecked; Languages: english
+Name: "associate\defaultpdf"; Description: "설치 후 sPDF를 기본 PDF 앱으로 선택(Windows 설정 열기)"; GroupDescription: "파일 연결:"; Flags: unchecked; Languages: korean
 
 [Files]
 Source: "dist\sPDF\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -52,6 +57,8 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID:
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelId}"; Tasks: desktopicon
 
 [Registry]
+; 설치 시 고른 언어를 앱의 최초 UI 언어 기본값으로 전달한다.
+Root: HKA; Subkey: "Software\sPDF"; ValueType: string; ValueName: "UILanguage"; ValueData: "{code:GetUiLanguage}"; Flags: uninsdeletevalue
 ; --- ProgId: sPDF로 PDF를 열었을 때의 아이콘/실행 명령 ---
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}"; ValueType: string; ValueData: "PDF / Illustrator Document"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}\DefaultIcon"; ValueType: string; ValueData: "{app}\assets\spdf_doc.ico"
@@ -69,5 +76,16 @@ Root: HKA; Subkey: "Software\sPDF\Capabilities\FileAssociations"; ValueType: str
 Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: "Software\sPDF\Capabilities"; Flags: uninsdeletevalue; Tasks: associate
 
 [Run]
-Filename: "ms-settings:defaultapps"; Description: "Choose sPDF as the default PDF app"; Flags: shellexec nowait skipifsilent runasoriginaluser; Tasks: associate\defaultpdf
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch sPDF"; Flags: nowait postinstall skipifsilent
+Filename: "ms-settings:defaultapps"; Description: "Choose sPDF as the default PDF app"; Flags: shellexec nowait skipifsilent runasoriginaluser; Tasks: associate\defaultpdf; Languages: english
+Filename: "ms-settings:defaultapps"; Description: "sPDF를 기본 PDF 앱으로 선택"; Flags: shellexec nowait skipifsilent runasoriginaluser; Tasks: associate\defaultpdf; Languages: korean
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch sPDF"; Flags: nowait postinstall skipifsilent; Languages: english
+Filename: "{app}\{#MyAppExeName}"; Description: "sPDF 실행"; Flags: nowait postinstall skipifsilent; Languages: korean
+
+[Code]
+function GetUiLanguage(Param: String): String;
+begin
+  if ActiveLanguage = 'korean' then
+    Result := 'ko'
+  else
+    Result := 'en';
+end;

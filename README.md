@@ -101,6 +101,10 @@ The version in `pdfeditor/meta.py` and `installer.iss` must always match.
 - [x] **v1.14.0 PDF optimization and navigation** — lossless/balanced/strong
   size reduction, hidden/thumbnail/bookmark sidebar modes, and safe Ctrl+click
   navigation for document and web links.
+- [x] **v1.14.1 Language and presentation polish** — installer language
+  selection sets the initial UI language, the home page emphasizes PDF,
+  updater language stays consistent, presentation accepts arrow navigation,
+  and a labeled ribbon menu makes the left panel easy to choose.
 - [ ] **Planned: AI OCR option** — Claude API for difficult content such as
   handwriting.
 

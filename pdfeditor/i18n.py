@@ -103,6 +103,7 @@ EN = {
     "이 위치에는 링크가 없습니다": "There is no link at this location",
     "목록 지우기": "Clear List",
     "언어": "Language",
+    "왼쪽 패널": "Left Panel",
     "한국어": "Korean",
     "언어 변경": "Language Change",
     "언어 변경 사항은 sPDF를 다시 실행하면 적용됩니다.":
@@ -124,6 +125,7 @@ EN = {
     # Home and document chrome
     "PDF 열기...": "Open PDF...",
     "PDF/Illustrator 파일 열기...": "Open PDF/Illustrator File...",
+    "PDF 파일 열기...": "Open PDF File...",
     "v%s — PDF 보기 · 주석 · OCR": "v%s — PDF viewing · annotations · OCR",
     "★ 즐겨찾기": "★ Favorites",
     "(별표한 파일이 없습니다 — 최근 파일에서 우클릭)":

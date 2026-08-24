@@ -15,11 +15,18 @@ class EmbeddedModeTests(unittest.TestCase):
         from PyQt5.QtWidgets import QApplication
         cls.app = QApplication.instance() or QApplication([])
 
+    def setUp(self):
+        # Other localization tests intentionally switch the process-wide
+        # catalog. Embedded-mode assertions use the international default.
+        from pdfeditor.i18n import set_language
+        set_language("en")
+
     def test_internal_module_window_disables_all_update_entry_points(self):
         from PyQt5.QtWidgets import QAction
         from pdfeditor.app import AppWindow
 
-        window = AppWindow()
+        with patch("pdfeditor.app.settings.ui_language", return_value="en"):
+            window = AppWindow()
         menu_texts = [action.text() for action in window.findChildren(QAction)]
 
         self.assertFalse(window.updates_enabled)
@@ -33,7 +40,8 @@ class EmbeddedModeTests(unittest.TestCase):
         from pdfeditor.app import AppWindow
 
         with patch("pdfeditor.app.settings.automatic_update_check_due",
-                   return_value=False):
+                   return_value=False), patch(
+                       "pdfeditor.app.settings.ui_language", return_value="en"):
             window = AppWindow(updates_enabled=True)
         menu_texts = [action.text() for action in window.findChildren(QAction)]
 

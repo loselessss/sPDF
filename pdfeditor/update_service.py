@@ -224,8 +224,10 @@ class GitHubUpdateService:
                 not _INSTALLER_RE.fullmatch(installer.name):
             raise UpdateError("실행할 업데이트 설치 파일이 올바르지 않습니다.")
         try:
+            installer_language = "korean" if self.language == "ko" else "english"
             subprocess.Popen(
-                [str(installer), "/SP-", "/CLOSEAPPLICATIONS"],
+                [str(installer), "/SP-", "/CLOSEAPPLICATIONS",
+                 "/LANG=%s" % installer_language],
                 close_fds=True,
                 creationflags=getattr(
                     subprocess, "CREATE_NEW_PROCESS_GROUP", 0))

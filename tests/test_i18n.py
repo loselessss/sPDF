@@ -14,6 +14,7 @@ class InternationalEditionTests(unittest.TestCase):
         self.assertEqual(
             tr("PDF/Illustrator 파일 열기..."),
             "Open PDF/Illustrator File...")
+        self.assertEqual(tr("PDF 파일 열기..."), "Open PDF File...")
         self.assertIn(
             "PDF/Illustrator Files (*.pdf *.ai)",
             tr("PDF/Illustrator 파일 (*.pdf *.ai);;PDF 파일 (*.pdf);;"

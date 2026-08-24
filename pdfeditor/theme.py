@@ -174,6 +174,19 @@ QToolBar QToolButton {
     border-radius: 5px;
 }
 
+QToolBar QToolButton#sidebarRibbonButton {
+    min-width: 112px;
+    max-width: 148px;
+    padding: 0 9px;
+    font-weight: 600;
+}
+
+QToolBar QToolButton#sidebarRibbonButton::menu-indicator {
+    subcontrol-position: right center;
+    subcontrol-origin: padding;
+    right: 5px;
+}
+
 QToolBar QToolButton:hover {
     background: #e9e9e9;
 }

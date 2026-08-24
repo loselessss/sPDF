@@ -63,7 +63,14 @@ class FluentThemeTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
         ).read_text(encoding="utf-8")
         self.assertIn("Qt.ToolButtonIconOnly", source)
-        self.assertNotIn("Qt.ToolButtonTextBesideIcon", source)
+        self.assertIn("sidebarRibbonButton", source)
+        self.assertIn("Qt.ToolButtonTextBesideIcon", source)
+
+    def test_command_bar_exposes_labeled_sidebar_menu(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("tool_bar.addWidget(self._sidebar_button)", source)
 
     def test_command_bar_exposes_both_page_rotation_actions(self):
         source = (

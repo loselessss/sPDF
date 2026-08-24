@@ -34,7 +34,12 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
         self.assertTrue(settings.automatic_update_check_due(now=1000))
 
     def test_ui_language_defaults_to_english(self):
-        self.assertEqual(settings.ui_language(), "en")
+        with patch.object(settings, "_installer_ui_language", return_value=None):
+            self.assertEqual(settings.ui_language(), "en")
+
+    def test_ui_language_uses_installer_choice_before_user_setting(self):
+        with patch.object(settings, "_installer_ui_language", return_value="ko"):
+            self.assertEqual(settings.ui_language(), "ko")
 
     def test_ui_language_can_be_saved_as_korean(self):
         self.assertTrue(settings.set_ui_language("ko"))

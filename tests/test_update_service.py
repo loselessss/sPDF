@@ -117,8 +117,19 @@ class UpdateServiceTests(unittest.TestCase):
             service = GitHubUpdateService("1.6.0")
             with patch("pdfeditor.update_service.subprocess.Popen") as popen:
                 service.launch_installer(installer)
-            self.assertEqual(popen.call_args.args[0][0], str(installer.resolve()))
+            command = popen.call_args.args[0]
+            self.assertEqual(command[0], str(installer.resolve()))
+            self.assertIn("/LANG=english", command)
             self.assertNotIn("shell", popen.call_args.kwargs)
+
+    def test_korean_updater_prefers_korean_installer_language(self):
+        with tempfile.TemporaryDirectory() as temp:
+            installer = Path(temp) / "sPDF_Setup_1.6.1.exe"
+            installer.write_bytes(b"MZ")
+            service = GitHubUpdateService("1.6.0", language="ko")
+            with patch("pdfeditor.update_service.subprocess.Popen") as popen:
+                service.launch_installer(installer)
+            self.assertIn("/LANG=korean", popen.call_args.args[0])
 
 
 if __name__ == "__main__":

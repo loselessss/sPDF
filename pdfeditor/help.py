@@ -113,6 +113,7 @@ HELP_HTML = """
 <tr><td><b>Ctrl+Shift+2</b></td><td>한 장 보기 / 두 장 보기 전환</td></tr>
 <tr><td><b>F11</b></td><td>메뉴와 명령 모음을 유지한 전체화면 전환</td></tr>
 <tr><td><b>F5</b></td><td>문서만 표시하는 프레젠테이션 모드 시작</td></tr>
+<tr><td><b>← / ↑ / → / ↓</b></td><td>프레젠테이션 모드에서 이전·다음 페이지 이동</td></tr>
 <tr><td><b>Esc</b></td><td>프레젠테이션 모드 종료</td></tr>
 <tr><td><b>Ctrl+Delete</b></td><td>현재 페이지 삭제</td></tr>
 <tr><td>썸네일 <b>드래그</b></td><td>페이지 순서 변경</td></tr>
@@ -159,6 +160,7 @@ PDF or PDF-compatible Illustrator files onto the window.</p>
 <tr><td><b>Ctrl+Shift+2</b></td><td>Toggle two-page view</td></tr>
 <tr><td><b>F11</b></td><td>Toggle full screen</td></tr>
 <tr><td><b>F5 / Esc</b></td><td>Start / leave presentation mode</td></tr>
+<tr><td><b>Arrow keys</b></td><td>Move to the previous or next page in presentation mode</td></tr>
 </table>
 
 <h3>✂️ Selection and search</h3>

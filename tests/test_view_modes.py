@@ -9,6 +9,33 @@ HAS_PYQT5 = importlib.util.find_spec("PyQt5") is not None
 
 @unittest.skipUnless(HAS_PYQT5, "PyQt5가 설치된 환경에서 실행")
 class WindowViewModeTests(unittest.TestCase):
+    def test_presentation_arrow_keys_navigate_pages(self):
+        from PyQt5.QtCore import QEvent, Qt
+        from PyQt5.QtGui import QKeyEvent
+        from pdfeditor.app import AppWindow
+
+        tab = Mock()
+        host = Mock(presentation_active=True, _presentation_tab=tab)
+        right = QKeyEvent(QEvent.KeyPress, Qt.Key_Right, Qt.NoModifier)
+        left = QKeyEvent(QEvent.KeyPress, Qt.Key_Left, Qt.NoModifier)
+
+        self.assertTrue(AppWindow._handle_presentation_key(host, right))
+        self.assertTrue(AppWindow._handle_presentation_key(host, left))
+        tab.next_page.assert_called_once_with()
+        tab.prev_page.assert_called_once_with()
+
+    def test_modified_arrows_are_not_taken_by_presentation(self):
+        from PyQt5.QtCore import QEvent, Qt
+        from PyQt5.QtGui import QKeyEvent
+        from pdfeditor.app import AppWindow
+
+        tab = Mock()
+        host = Mock(presentation_active=True, _presentation_tab=tab)
+        event = QKeyEvent(QEvent.KeyPress, Qt.Key_Right, Qt.ControlModifier)
+
+        self.assertFalse(AppWindow._handle_presentation_key(host, event))
+        tab.next_page.assert_not_called()
+
     def test_tab_is_detached_before_slow_resources_are_released(self):
         from pdfeditor.app import AppWindow
 
