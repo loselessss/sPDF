@@ -9,6 +9,8 @@ open-source notices.
 ## Features
 
 - Read encrypted and regular PDFs with lazy page and thumbnail rendering.
+- Open PDF-compatible Adobe Illustrator (`.ai`) files without overwriting the
+  Illustrator source when saving edits.
 - Select, search, copy, annotate, edit, rotate, remove, merge, split, extract,
   organize, and print pages.
 - Run offline Korean and English OCR with RapidOCR, with optional
@@ -39,8 +41,9 @@ Use `run.pyw` to start without a console window.
 
 ## Windows integration
 
-The installer can add sPDF to the per-user **Open with** list. It does not
-silently force sPDF as the default PDF application. **Help → Default PDF App /
+The installer can add sPDF to the per-user **Open with** list for PDF and
+PDF-compatible Illustrator files. It does not silently force sPDF as the
+default application. **Help → Default PDF App /
 Browser Settings** shows the current association and provides per-user options
 for Edge, Chrome, and Firefox to hand PDF links to the Windows default PDF app.
 
@@ -89,6 +92,9 @@ The version in `pdfeditor/meta.py` and `installer.iss` must always match.
 - [x] **v1.12.1 Localized documentation and updates** — English default
   README/changelog, separate Korean documents, English/Korean UI selection,
   and updater notes matched to the selected UI language.
+- [x] **v1.13.0 Illustrator support** — open, drag, organize, and merge
+  PDF-compatible `.ai` files; register sPDF in the Windows **Open with** list;
+  export edits to PDF so the Illustrator source remains untouched.
 - [ ] **Planned: AI OCR option** — Claude API for difficult content such as
   handwriting.
 

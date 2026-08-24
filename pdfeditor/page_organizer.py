@@ -1,7 +1,8 @@
 """별도 페이지 구성 창.
 
 현재 문서의 페이지를 여러 장 선택해 한 묶음으로 옮기거나, 드래그한 한
-장만 옮길 수 있다. 외부 PDF 파일은 목록의 원하는 위치에 드롭해 삽입한다.
+장만 옮길 수 있다. 외부 PDF/PDF 호환 Illustrator 파일은 목록의 원하는
+위치에 드롭해 삽입한다.
 썸네일은 화면에 보이는 항목만 렌더해 큰 문서에서도 메모리를 제한한다.
 """
 
@@ -20,6 +21,7 @@ from .i18n import tr
 
 from .widgets import qimage_from_render
 from .icons import fluent_icon
+from .filetypes import DOCUMENT_OPEN_FILTER, is_supported_document
 
 
 PAGE_MIME = "application/x-spdf-page-indices"
@@ -120,7 +122,7 @@ class PageOrganizerList(QListWidget):
         if not mime.hasUrls():
             return []
         paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
-        return [path for path in paths if path.lower().endswith(".pdf")]
+        return [path for path in paths if is_supported_document(path)]
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat(PAGE_MIME) or self._pdf_paths(event.mimeData()):
@@ -267,7 +269,8 @@ class PageOrganizerDialog(QDialog):
 
     def choose_pdfs(self):
         paths, _filter = QFileDialog.getOpenFileNames(
-            self, "추가할 PDF 선택", "", "PDF 파일 (*.pdf)")
+            self, "추가할 PDF/Illustrator 파일 선택", "",
+            tr(DOCUMENT_OPEN_FILTER))
         if not paths:
             return
         selected = sorted(self.pages.row(item) for item in self.pages.selectedItems())

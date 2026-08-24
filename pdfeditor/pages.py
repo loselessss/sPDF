@@ -8,6 +8,9 @@ import os
 
 from PyQt5.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox
 
+from .filetypes import DOCUMENT_OPEN_FILTER
+from .i18n import tr
+
 from .core import PasswordRequired
 from .page_ranges import page_group_label, parse_page_groups
 from .page_organizer import PageOrganizerDialog
@@ -177,7 +180,8 @@ class PagesMixin:
         if self.doc is None:
             return
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "병합할 PDF 선택 (여러 파일 선택 가능)", "", "PDF 파일 (*.pdf)")
+            self, "병합할 PDF/Illustrator 파일 선택 (여러 파일 선택 가능)",
+            "", tr(DOCUMENT_OPEN_FILTER))
         if not paths:
             return
         # 현재 페이지 '뒤'에 끼워넣는 게 직관적

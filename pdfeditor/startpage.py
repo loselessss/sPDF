@@ -81,7 +81,7 @@ class StartPage(QWidget):
         ver = QLabel("v%s — PDF 보기 · 주석 · OCR" % APP_VERSION)
         ver.setObjectName("subtitle")
 
-        btn = QPushButton("PDF 열기...")
+        btn = QPushButton("PDF/Illustrator 파일 열기...")
         btn.setProperty("accent", True)
         btn.setIcon(fluent_icon("open", "#ffffff"))
         btn.setFixedWidth(132)

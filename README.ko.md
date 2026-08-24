@@ -2,7 +2,8 @@
 
 [English](README.md) | 한국어
 
-가벼운 데스크톱 PDF 편집기 (PyQt5 + PyMuPDF). 설계 전반은 [PLAN.md](PLAN.md),
+가벼운 데스크톱 PDF 편집기 (PyQt5 + PyMuPDF). PDF 호환 옵션으로 저장된
+Adobe Illustrator(`.ai`) 파일도 열 수 있습니다. 설계 전반은 [PLAN.md](PLAN.md),
 오픈소스 고지는 [LICENSES.md](LICENSES.md) 참고.
 
 ## 주요기능
@@ -52,8 +53,9 @@ build_installer.bat  REM Inno Setup  -> Output\sPDF_Setup_X.X.X.exe
 - `vX.Y.Z` 태그를 푸시하면 GitHub Actions가 테스트와 Windows 빌드를 실행하고
   `sPDF_Setup_X.Y.Z.exe`, 최신 별칭, SHA-256 파일을 GitHub Release에 게시한다.
 
-설치 시 "PDF 파일 '연결 프로그램' 목록에 sPDF 추가"를 선택하면 탐색기
-우클릭 → "연결 프로그램"에 나타나고, Windows '기본 앱'에서 sPDF를 기본
+설치 시 "PDF 및 Illustrator 파일 '연결 프로그램' 목록에 sPDF 추가"를 선택하면
+PDF와 PDF 호환 `.ai` 파일의 탐색기 우클릭 → "연결 프로그램"에 나타나고,
+Windows '기본 앱'에서 sPDF를 기본
 PDF 앱으로 고를 수 있다(보안상 설치 프로그램이 기본값을 강제로 바꾸지는
 않음). 하위 옵션인 "설치 후 sPDF를 기본 PDF 앱으로 선택하기"를 체크하면
 설치 완료 후 Windows 기본 앱 설정이 열린다. 도움말 → **PDF 기본 프로그램 /
@@ -104,6 +106,7 @@ python register_filetype.py --unregister # 해제
 - [x] **v1.11 발표·두 장 보기 + 내부 모듈 모드** — F11 전체화면과 F5 프레젠테이션, 두 페이지를 나란히 보고 두 장 단위로 이동하는 명령 모음 토글 추가. 다른 프로그램이 sPDF 창을 내부 모듈로 사용할 때는 자체 업데이트 서비스·자동 확인·업데이트 메뉴를 비활성화하고 독립 실행본에서만 업데이트 기능 유지
 - [x] **v1.12 영어 국제판** — 메뉴, 명령 모음, 시작 화면, 대화상자, 상태 메시지, 업데이트 화면, 사용법과 설치 프로그램을 영어로 제공. UI 언어는 PDF 내용 및 한국어·영어 OCR 설정과 독립적으로 동작하며 향후 다른 번역을 추가할 수 있는 카탈로그 구조 적용
 - [x] **v1.12.1 언어별 문서·업데이트 안내** — 기본 README와 변경 이력을 영어로 제공하고 한국어 문서를 별도로 분리. 도움말에서 영어·한국어 UI를 선택할 수 있으며 업데이트 변경 내용도 설정 언어에 맞춰 표시
+- [x] **v1.13.0 Illustrator 파일 지원** — PDF 호환 `.ai` 파일을 열기·드래그·페이지 구성·병합하고 Windows 연결 프로그램에 등록. 수정 내용은 PDF로 저장해 Illustrator 원본을 보존
 - [ ] (예정) AI OCR 옵션 — Claude API (손글씨 등 최후 수단)
 
 ## 구조

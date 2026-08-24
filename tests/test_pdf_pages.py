@@ -40,6 +40,20 @@ class PdfPageOperationTests(unittest.TestCase):
         self.assertEqual(ANTIALIAS_LEVEL, 8)
         self.assertEqual(tools.level, 8)
 
+    def test_pdf_compatible_illustrator_file_opens_as_pdf(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source.pdf"
+            illustrator = Path(temp) / "drawing.ai"
+            _make_pdf(source, ["Illustrator PDF data"])
+            illustrator.write_bytes(source.read_bytes())
+            document = Document(str(illustrator))
+            try:
+                self.assertEqual(document.page_count, 1)
+                self.assertIn(
+                    "Illustrator PDF data", document._doc[0].get_text())
+            finally:
+                document.close()
+
     def test_page_order_moves_single_page_between_pages(self):
         order, selected = page_order_after_move(5, [0], 4)
         self.assertEqual(order, [1, 2, 3, 0, 4])

@@ -11,6 +11,13 @@ class InternationalEditionTests(unittest.TestCase):
         self.assertEqual(SUPPORTED_LANGUAGES, ("en", "ko"))
         self.assertEqual(tr("파일(&F)"), "&File")
         self.assertEqual(tr("페이지 구성..."), "Organize Pages...")
+        self.assertEqual(
+            tr("PDF/Illustrator 파일 열기..."),
+            "Open PDF/Illustrator File...")
+        self.assertIn(
+            "PDF/Illustrator Files (*.pdf *.ai)",
+            tr("PDF/Illustrator 파일 (*.pdf *.ai);;PDF 파일 (*.pdf);;"
+               "Illustrator 파일 (*.ai)"))
 
     def test_dynamic_ui_messages_are_translated(self):
         self.assertEqual(tr("12쪽"), "Page 12")

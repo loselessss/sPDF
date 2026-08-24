@@ -2,15 +2,10 @@
 
 Release date: 2026-08-24
 
-## 1.12.0 Highlights
+## 1.13.0 Highlights
 
-- sPDF now provides an English international interface for menus, the command bar, start page, dialogs, status messages, updater, user guide, and installer.
-- English UI remains independent from PDF content and the existing Korean and English OCR languages.
-- Translation text is maintained separately so more UI languages can be added later.
-- Closing a tab now removes it from the screen immediately, even when it used a large PDF or OCR.
-
-## 1.12.1 Improvements
-
-- The default README and changelog are now in English, with separately linked Korean versions.
-- English or Korean can be selected from **Help → Language**. Restart sPDF to apply the change.
-- The updater shows release notes in the selected UI language.
+- PDF-compatible Adobe Illustrator (`.ai`) files can now be opened directly in sPDF.
+- Illustrator files can be opened from the file picker, recent files, drag and drop, command-line launch, page organizer, and merge workflow.
+- The Windows installer adds sPDF to the `.ai` **Open with** list without changing the default application.
+- Saving an edited Illustrator file exports it to PDF instead of overwriting the `.ai` source and its Illustrator-specific data.
+- Files saved without Illustrator's PDF compatibility option show a clear compatibility message.

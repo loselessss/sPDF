@@ -99,6 +99,7 @@ EN = {
 
     # Home and document chrome
     "PDF 열기...": "Open PDF...",
+    "PDF/Illustrator 파일 열기...": "Open PDF/Illustrator File...",
     "v%s — PDF 보기 · 주석 · OCR": "v%s — PDF viewing · annotations · OCR",
     "★ 즐겨찾기": "★ Favorites",
     "(별표한 파일이 없습니다 — 최근 파일에서 우클릭)":
@@ -113,6 +114,9 @@ EN = {
     "열기 실패": "Open Failed",
     "PDF 열기": "Open PDF",
     "PDF 파일 (*.pdf)": "PDF Files (*.pdf)",
+    "PDF/Illustrator 파일 열기": "Open PDF/Illustrator File",
+    "PDF/Illustrator 파일 (*.pdf *.ai);;PDF 파일 (*.pdf);;Illustrator 파일 (*.ai)":
+        "PDF/Illustrator Files (*.pdf *.ai);;PDF Files (*.pdf);;Illustrator Files (*.ai)",
     "PDF 파일 여러 개 선택": "Select PDF Files",
     "저장할 PDF": "Save PDF",
     "모든 파일 (*)": "All Files (*)",
@@ -151,6 +155,8 @@ EN = {
         "The download finished, but the model could not be verified.\nTry again.",
     "페이지 구성": "Organize Pages",
     "추가할 PDF 선택": "Select a PDF to Add",
+    "추가할 PDF/Illustrator 파일 선택":
+        "Select a PDF/Illustrator File to Add",
     "삭제 불가": "Cannot Delete",
     "문서에는 최소 한 페이지가 남아 있어야 합니다.":
         "The document must contain at least one page.",
@@ -235,6 +241,8 @@ EN = {
     "파일 덮어쓰기": "Replace Files",
     "현재 페이지 추출": "Extract Current Page",
     "병합할 PDF 선택 (여러 파일 선택 가능)": "Select PDFs to Merge (multiple selection allowed)",
+    "병합할 PDF/Illustrator 파일 선택 (여러 파일 선택 가능)":
+        "Select PDF/Illustrator Files to Merge (multiple selection allowed)",
     "분리한 PDF를 저장할 폴더": "Folder for Split PDFs",
     "저장되지 않은 변경": "Unsaved Changes",
     "저장하지 않은 주석이 있습니다. 저장할까요?": "You have unsaved changes. Save them?",

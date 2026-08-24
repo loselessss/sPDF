@@ -5,7 +5,7 @@
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.12.1"
+#define MyAppVersion "1.13.0"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"
@@ -34,9 +34,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
-; PDF 연결은 '연결 프로그램 후보'로만 등록(기본값을 강제로 뺏지 않음).
+; PDF/Illustrator 연결은 '연결 프로그램 후보'로만 등록(기본값을 강제로 뺏지 않음).
 ; 사용자가 나중에 Windows '기본 앱'에서 sPDF를 직접 고를 수 있다.
-Name: "associate"; Description: "Add sPDF to the Open with list for PDF files"; GroupDescription: "File associations:"
+Name: "associate"; Description: "Add sPDF to the Open with list for PDF and Illustrator files"; GroupDescription: "File associations:"
 ; Windows 8 이상에서는 설치 프로그램이 기본 앱을 직접 바꿀 수 없다.
 ; 선택 시 설치 완료 후 Windows 기본 앱 설정을 열어 사용자가 확정한다.
 Name: "associate\defaultpdf"; Description: "Choose sPDF as the default PDF app after installation (opens Windows Settings)"; GroupDescription: "File associations:"; Flags: unchecked
@@ -53,17 +53,19 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserMo
 
 [Registry]
 ; --- ProgId: sPDF로 PDF를 열었을 때의 아이콘/실행 명령 ---
-Root: HKA; Subkey: "Software\Classes\{#MyProgId}"; ValueType: string; ValueData: "PDF Document"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}"; ValueType: string; ValueData: "PDF / Illustrator Document"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}\DefaultIcon"; ValueType: string; ValueData: "{app}\assets\spdf_doc.ico"
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
-; --- .pdf의 '연결 프로그램' 후보 목록에 추가(기본값은 안 건드림) ---
+; --- .pdf/.ai의 '연결 프로그램' 후보 목록에 추가(기본값은 안 건드림) ---
 Root: HKA; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: none; ValueName: "{#MyProgId}"; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.ai\OpenWithProgids"; ValueType: none; ValueName: "{#MyProgId}"; Flags: uninsdeletevalue; Tasks: associate
 
 ; --- Windows '기본 앱' 목록에 sPDF가 나타나도록 Capabilities 등록 ---
 Root: HKA; Subkey: "Software\sPDF\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey; Tasks: associate
 Root: HKA; Subkey: "Software\sPDF\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Lightweight PDF viewer, annotation, OCR, and editing tool"; Tasks: associate
 Root: HKA; Subkey: "Software\sPDF\Capabilities\FileAssociations"; ValueType: string; ValueName: ".pdf"; ValueData: "{#MyProgId}"; Tasks: associate
+Root: HKA; Subkey: "Software\sPDF\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ai"; ValueData: "{#MyProgId}"; Tasks: associate
 Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: "Software\sPDF\Capabilities"; Flags: uninsdeletevalue; Tasks: associate
 
 [Run]

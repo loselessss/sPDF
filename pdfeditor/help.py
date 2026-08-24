@@ -17,10 +17,10 @@ HELP_HTML = """
 
 <h3>📂 파일</h3>
 <table cellpadding="4">
-<tr><td><b>Ctrl+O</b> / <b>Ctrl+T</b></td><td>PDF 열기 — 새 <b>탭</b>으로</td></tr>
+<tr><td><b>Ctrl+O</b> / <b>Ctrl+T</b></td><td>PDF 또는 PDF 호환 Illustrator 파일 열기 — 새 <b>탭</b>으로</td></tr>
 <tr><td><b>Ctrl+Shift+N</b></td><td>새 sPDF 창</td></tr>
 <tr><td>도움말 메뉴</td><td><b>PDF 기본 프로그램 / 브라우저 설정</b> — Edge·Chrome·Firefox의 PDF 링크를 sPDF로 열기</td></tr>
-<tr><td><b>Ctrl+S</b></td><td>저장 (원본은 <code>.bak</code>으로 자동 백업)</td></tr>
+<tr><td><b>Ctrl+S</b></td><td>저장 (원본은 <code>.bak</code>으로 자동 백업). Illustrator 원본은 덮어쓰지 않고 PDF로 저장</td></tr>
 <tr><td><b>Ctrl+Shift+S</b></td><td>다른 이름으로 저장</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>탭 닫기</td></tr>
 </table>
@@ -130,9 +130,9 @@ HELP_HTML_EN = """
 
 <h3>📂 Files and tabs</h3>
 <table cellpadding="4">
-<tr><td><b>Ctrl+O / Ctrl+T</b></td><td>Open a PDF in a new tab</td></tr>
+<tr><td><b>Ctrl+O / Ctrl+T</b></td><td>Open a PDF or PDF-compatible Illustrator file in a new tab</td></tr>
 <tr><td><b>Ctrl+Shift+N</b></td><td>Open a new sPDF window</td></tr>
-<tr><td><b>Ctrl+S</b></td><td>Save and create a <code>.bak</code> backup</td></tr>
+<tr><td><b>Ctrl+S</b></td><td>Save and create a <code>.bak</code> backup. Illustrator sources are exported to PDF instead of being overwritten</td></tr>
 <tr><td><b>Ctrl+Shift+S</b></td><td>Save as</td></tr>
 <tr><td><b>Ctrl+P</b></td><td>Print</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>Close the current tab</td></tr>
@@ -140,7 +140,7 @@ HELP_HTML_EN = """
 <p>Drag tabs to reorder them or move them to another sPDF window. Unsaved
 changes move with the tab, and an empty source window closes automatically.
 The home page provides favorites and recent files. You can also drag and drop
-PDF files onto the window.</p>
+PDF or PDF-compatible Illustrator files onto the window.</p>
 
 <h3>🔍 View and navigation</h3>
 <table cellpadding="4">

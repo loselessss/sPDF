@@ -26,6 +26,8 @@ from . import settings
 from .annots import AnnotMixin
 from .editing import EditMixin
 from .icons import fluent_icon
+from .filetypes import (
+    DOCUMENT_OPEN_FILTER, is_illustrator_document, is_supported_document)
 from .i18n import install as install_i18n, localize, tr, translate_tree
 from .meta import APP_NAME, APP_VERSION
 from .ocr import OcrMixin
@@ -807,7 +809,15 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                 if not ok:
                     return
             except Exception as e:
-                QMessageBox.critical(self, "열기 실패", "파일을 열 수 없습니다.\n\n%s" % e)
+                if is_illustrator_document(path):
+                    message = localize(
+                        "This Illustrator file cannot be opened. Only .ai "
+                        "files saved with PDF compatibility enabled are supported.",
+                        "이 Illustrator 파일은 열 수 없습니다. PDF 호환 옵션을 "
+                        "켜고 저장한 .ai 파일만 지원합니다.")
+                else:
+                    message = "파일을 열 수 없습니다.\n\n%s" % e
+                QMessageBox.critical(self, "열기 실패", message)
                 return
 
         self._set_document(doc, path)
@@ -1412,7 +1422,8 @@ class AppWindow(QMainWindow):
     # --- 파일 열기 (탭으로) --------------------------------------------
 
     def open_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "PDF 열기", "", "PDF 파일 (*.pdf)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "PDF/Illustrator 파일 열기", "", tr(DOCUMENT_OPEN_FILTER))
         if path:
             self.open_in_tab(path)
 
@@ -1650,7 +1661,7 @@ class AppWindow(QMainWindow):
             ev.accept()
             return
         urls = ev.mimeData().urls()
-        if urls and urls[0].toLocalFile().lower().endswith(".pdf"):
+        if any(is_supported_document(url.toLocalFile()) for url in urls):
             ev.acceptProposedAction()
 
     def dropEvent(self, ev):
@@ -1664,7 +1675,7 @@ class AppWindow(QMainWindow):
             return
         for url in ev.mimeData().urls():
             p = url.toLocalFile()
-            if p.lower().endswith(".pdf"):
+            if is_supported_document(p):
                 self.open_in_tab(p)
 
 

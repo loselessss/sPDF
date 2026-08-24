@@ -9,6 +9,8 @@ import tempfile
 
 import fitz
 
+from .filetypes import is_illustrator_document
+
 
 ANTIALIAS_LEVEL = 8
 
@@ -53,7 +55,10 @@ class Document:
 
     @staticmethod
     def _open(path, password):
-        doc = fitz.open(path)
+        # PDF-compatible Illustrator files contain a PDF representation, but
+        # their .ai extension is not consistently auto-detected by MuPDF.
+        doc = fitz.open(path, filetype="pdf") \
+            if is_illustrator_document(path) else fitz.open(path)
         if doc.needs_pass:
             if password is None or not doc.authenticate(password):
                 doc.close()

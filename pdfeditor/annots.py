@@ -12,6 +12,8 @@ from PyQt5.QtWidgets import (
 
 from .i18n import tr
 
+from .filetypes import is_illustrator_document, suggested_pdf_path
+
 from .icons import fluent_icon
 
 
@@ -65,6 +67,8 @@ class AnnotMixin:
     def save(self):
         if self.doc is None:
             return False
+        if is_illustrator_document(self.doc.path):
+            return self.save_as_dialog()
         try:
             self.doc.save_as(self.doc.path)  # 원본은 .bak으로 백업된다
         except Exception as e:
@@ -79,9 +83,11 @@ class AnnotMixin:
         if self.doc is None:
             return False
         path, _ = QFileDialog.getSaveFileName(
-            self, "다른 이름으로 저장", self.doc.path, "PDF 파일 (*.pdf)")
+            self, "다른 이름으로 저장", suggested_pdf_path(self.doc.path),
+            "PDF 파일 (*.pdf)")
         if not path:
             return False
+        path = suggested_pdf_path(path)
         try:
             self.doc.save_as(path)
         except Exception as e:

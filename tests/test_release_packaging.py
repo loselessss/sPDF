@@ -73,6 +73,16 @@ class ReleasePackagingTests(unittest.TestCase):
         worker = (ROOT / "ocr_worker_main.py").read_text(encoding="utf-8")
         self.assertIn("set_current_process_app_id()", worker)
 
+    def test_installer_registers_pdf_and_illustrator_open_with(self):
+        installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
+        self.assertIn(
+            'Subkey: "Software\\Classes\\.pdf\\OpenWithProgids"',
+            installer)
+        self.assertIn(
+            'Subkey: "Software\\Classes\\.ai\\OpenWithProgids"',
+            installer)
+        self.assertIn('ValueName: ".ai"', installer)
+
     def test_app_disables_dialog_context_help_before_startup(self):
         startup = (
             ROOT / "pdfeditor" / "__main__.py"

@@ -2,6 +2,18 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
+## 1.13.0 - 2026-08-24
+
+### New features
+
+- PDF-compatible Adobe Illustrator (`.ai`) files can now be opened from the file picker, recent files, drag and drop, command-line launch, page organizer, and PDF merge workflow.
+- The Windows installer adds sPDF to the per-user **Open with** list for `.ai` files without changing the default application.
+
+### Improvements
+
+- Saving changes made to an Illustrator file always opens a PDF destination instead of overwriting the original `.ai` file and its Illustrator-specific data.
+- Illustrator files without embedded PDF-compatible data now show a clear compatibility message.
+
 ## 1.12.1 - 2026-08-24
 
 ### Improvements
