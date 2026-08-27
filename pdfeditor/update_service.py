@@ -101,6 +101,42 @@ class GitHubUpdateService:
         self._download_root = download_root
         self.language = language if language in ("en", "ko") else "en"
 
+    def _download_directory(self):
+        return Path(self._download_root) if self._download_root is not None else (
+            Path(tempfile.gettempdir()) / "sPDF" / "updates")
+
+    def cleanup_downloads(self):
+        """Remove only sPDF updater files from the dedicated temp directory.
+
+        The newly installed application calls this more than once because the
+        installer executable can remain locked briefly while Inno Setup exits.
+        Unrelated files are deliberately left alone.
+        """
+        root = self._download_directory()
+        if not root.is_dir():
+            return 0
+        removed = 0
+        try:
+            entries = list(root.iterdir())
+        except OSError:
+            return 0
+        for path in entries:
+            name = path.name
+            installer_name = (
+                name[:-5] if name.casefold().endswith(".part") else name)
+            if not _INSTALLER_RE.fullmatch(installer_name) or not path.is_file():
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                continue
+        try:
+            root.rmdir()
+        except OSError:
+            pass
+        return removed
+
     def check(self):
         request = Request(
             GITHUB_API_URL,
@@ -170,8 +206,7 @@ class GitHubUpdateService:
         if not asset.sha256:
             raise UpdateError(
                 "설치 파일의 SHA-256 정보가 없어 자동 업데이트할 수 없습니다.")
-        root = self._download_root or (
-            Path(tempfile.gettempdir()) / "sPDF" / "updates")
+        root = self._download_directory()
         root.mkdir(parents=True, exist_ok=True)
         destination = root / asset.name
         partial = destination.with_suffix(destination.suffix + ".part")

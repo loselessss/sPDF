@@ -32,7 +32,7 @@ def register():
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
                           r"Software\Classes\%s" % PROG_ID) as k:
         winreg.SetValueEx(
-            k, "", 0, winreg.REG_SZ, "PDF / Illustrator Document")
+            k, "", 0, winreg.REG_SZ, "PDF")
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
                           r"Software\Classes\%s\shell\open\command" % PROG_ID) as k:
         winreg.SetValueEx(k, "", 0, winreg.REG_SZ, command)

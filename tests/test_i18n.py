@@ -23,6 +23,12 @@ class InternationalEditionTests(unittest.TestCase):
         self.assertEqual(tr("페이지 미리보기"), "Page Thumbnails")
         self.assertEqual(tr("책갈피"), "Bookmarks")
         self.assertEqual(tr("지원하지 않는 링크"), "Unsupported Link")
+        self.assertEqual(tr("현재 페이지 책갈피 추가"),
+                         "Bookmark Current Page")
+        self.assertEqual(tr("페이지 여백 자르기..."),
+                         "Crop Page Margins...")
+        self.assertEqual(tr("미저장 작업 복구..."),
+                         "Recover Unsaved Work...")
 
     def test_dynamic_ui_messages_are_translated(self):
         self.assertEqual(tr("12쪽"), "Page 12")

@@ -46,8 +46,27 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
         self.assertEqual(settings.ui_language(), "ko")
 
     def test_invalid_ui_language_is_rejected(self):
-        self.assertFalse(settings.set_ui_language("fr"))
-        self.assertEqual(settings.ui_language(), "en")
+        with patch.object(settings, "_installer_ui_language", return_value=None):
+            self.assertFalse(settings.set_ui_language("fr"))
+            self.assertEqual(settings.ui_language(), "en")
+
+    def test_reading_positions_are_bounded_and_validated(self):
+        self.assertIsNone(settings.reading_position("missing.pdf"))
+        state = {"page": 4, "zoom": 1.5, "vertical": 0.7}
+        for index in range(105):
+            settings.set_reading_position("%s.pdf" % index, state)
+        self.assertIsNone(settings.reading_position("0.pdf"))
+        self.assertEqual(settings.reading_position("104.pdf")["page"], 4)
+        self.assertEqual(settings.reading_position("104.pdf")["vertical"], 0.7)
+        self.assertIsNone(settings._clean_reading_position({"page": 0, "zoom": float("nan")}))
+
+    def test_failed_settings_write_preserves_previous_settings(self):
+        settings.set_sidebar_mode("bookmarks")
+        original = Path(self.settings_path).read_bytes()
+        with patch.object(settings.json, "dump", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                settings.set_sidebar_mode("none")
+        self.assertEqual(Path(self.settings_path).read_bytes(), original)
 
     def test_sidebar_mode_defaults_to_thumbnails_and_can_be_saved(self):
         self.assertEqual(

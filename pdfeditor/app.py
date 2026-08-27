@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
 from . import settings
 from .annots import AnnotMixin
 from .editing import EditMixin
+from .document_tools import DocumentToolsMixin
 from .icons import fluent_icon
 from .filetypes import (
     DOCUMENT_OPEN_FILTER, is_illustrator_document, is_supported_document)
@@ -317,7 +318,7 @@ class TransferTabBar(QTabBar):
 
 # MRO 주의: TextSelectMixin이 ViewerMixin보다 앞이어야 show_page 훅
 # (페이지 전환 시 선택 초기화/검색 오버레이 재적용)이 동작한다.
-class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
+class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                   PrintMixin, TextSelectMixin, ViewerMixin):
 
     title_changed = pyqtSignal()  # 탭 라벨/창 제목 갱신 신호(셸이 받는다)
@@ -332,6 +333,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._init_annot_state()
         self._init_ocr_state()
         self._init_edit_state()
+        from .recovery_ui import TabRecovery
+        self._recovery = TabRecovery(self, shell._recovery_store)
+        self._recovered_unsaved = False
         self._build_ui()
         self._menubar = self.menuBar()  # 활성화 시 셸로 reparent (참조 보관)
 
@@ -375,6 +379,10 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
             self.navigate_from_thumbnail)
         self.thumbs.page_moved.connect(self.on_thumb_moved)
         self.bookmarks.page_selected.connect(self.show_page)
+        self.bookmarks.add_requested.connect(self.add_current_bookmark)
+        self.bookmarks.rename_requested.connect(self.rename_bookmark)
+        self.bookmarks.delete_requested.connect(self.delete_bookmark)
+        self.bookmarks.reorder_requested.connect(self.reorder_bookmarks)
         self.thumbs.verticalScrollBar().valueChanged.connect(
             lambda _v: self._schedule_thumbs())
         self.thumbs.thumbnail_width_changed.connect(
@@ -382,6 +390,7 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self.view.zoom_changed.connect(self.on_zoom_changed)
         self.view.viewport_changed.connect(
             self.update_thumbnail_viewport_marker)
+        self.view.viewport_changed.connect(self.schedule_reading_position)
         self.view.page_flip.connect(self.on_wheel_flip)
         self.view.canvas.drag_selected.connect(self.on_drag_selected)
         self.view.canvas.selection_cleared.connect(self._clear_selection)
@@ -482,6 +491,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                   self.save_as_dialog, "save_as")
         self._act(m, "PDF 용량 줄이기...", None,
                   self.compress_pdf, "download")
+        if self._shell._recovery_store is not None:
+            self._act(m, "미저장 작업 복구...", None,
+                      self._shell.show_recovery, "undo")
         self._print_act = self._act(
             m, "인쇄...", "Ctrl+P", self.print_document, "print")
         self._act(m, "탐색기에서 현재 위치 열기", None,
@@ -530,6 +542,11 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._act(p, "PDF 분리...", None, self.split_pdf, "split")
         self._act(p, "현재 페이지 추출...", None,
                   self.extract_current_page, "extract")
+        p.addSeparator()
+        self._act(p, "페이지 여백 자르기...", None,
+                  self.crop_page_margins, "edit")
+        self._act(p, "현재 페이지 책갈피 추가", "Ctrl+B",
+                  self.add_current_bookmark, "notes")
 
         a = self.menuBar().addMenu("주석(&A)")
         self._act(a, "선택 영역 형광펜", "Ctrl+H",
@@ -550,6 +567,13 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                   self.show_ocr_engine_dialog, "ai")
 
         v = self.menuBar().addMenu("보기(&V)")
+        self._back_view_act = self._act(
+            v, "이전 보기", "Alt+Left", self.navigate_history, "back")
+        self._forward_view_act = self._act(
+            v, "다음 보기", "Alt+Right",
+            lambda: self.navigate_history(False), "external")
+        self._sync_navigation_actions()
+        v.addSeparator()
         self._zoom_in_act = self._act(
             v, "확대", "Ctrl++", self.zoom_in, "zoom_in")
         self._zoom_out_act = self._act(
@@ -622,6 +646,8 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         tool_bar.setIconSize(QSize(20, 20))
         tool_bar.setToolButtonStyle(Qt.ToolButtonIconOnly)
         tool_bar.addAction(self._open_act)
+        tool_bar.addAction(self._back_view_act)
+        tool_bar.addAction(self._forward_view_act)
         tool_bar.addAction(self._save_act)
         tool_bar.addAction(self._print_act)
         tool_bar.addSeparator()
@@ -643,7 +669,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         self._sidebar_button.setText(tr("왼쪽 패널"))
         self._sidebar_button.setIcon(fluent_icon("pages"))
         self._sidebar_button.setIconSize(QSize(20, 20))
-        self._sidebar_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._sidebar_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._sidebar_button.setToolTip(tr("왼쪽 패널"))
+        self._sidebar_button.setAccessibleName(tr("왼쪽 패널"))
         self._sidebar_button.setPopupMode(QToolButton.InstantPopup)
         self._sidebar_button.setMenu(sidebar_menu)
         tool_bar.addWidget(self._sidebar_button)
@@ -881,21 +909,30 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                 self, "탭 이동 실패", "편집 중인 문서를 옮길 수 없습니다.\n\n%s" % e)
             return False
         self._set_document(doc, original_path)
-        self._dirty = True
-        self._update_title()
+        self.mark_dirty()
         return True
 
     def _set_document(self, doc, path):
         """파일/전송 스냅샷에 공통인 문서 탭 초기화를 한곳에서 수행한다."""
         self.doc = doc
+        self._view_ready = False
+        self.clear_navigation_history()
+        self._initial_reading_state = settings.reading_position(path)
         self.page_index = 0
         self._sync_favorite_action()
         self.thumbs.reset_pages(doc.page_count)
         self.bookmarks.set_bookmarks(doc.bookmarks())
         self._update_title()
         settings.push_recent(path)
-        self._set_fit_zoom(0)
-        self.show_page(0)
+        initial = self._initial_reading_state
+        target = max(0, min(initial["page"], doc.page_count - 1)) if initial else 0
+        if initial:
+            self._two_page_mode = initial["two_page"]
+            self._two_page_act.setChecked(self._two_page_mode)
+            self.view.zoom = initial["zoom"]
+        else:
+            self._set_fit_zoom(target)
+        self.show_page(target)
         # 탭이 실제 화면에 배치된 뒤 확정된 폭과 모니터 DPR로 다시 맞춘다.
         QTimer.singleShot(0, lambda d=doc: self.finish_initial_layout(d))
         self._schedule_thumbs()
@@ -909,6 +946,9 @@ class DocumentTab(QMainWindow, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
         if getattr(self, "_closing_doc", False):
             return
         self._closing_doc = True
+        self.save_reading_position()
+        self._position_timer.stop()
+        self._recovery.clear()
         self._thumb_timer.stop()
         self._thumbnail_width_timer.stop()
         self._save_thumbnail_width()
@@ -1186,6 +1226,10 @@ class AppWindow(QMainWindow):
     def __init__(self, updates_enabled=False):
         super().__init__()
         self.setStatusBar(_TranslatedStatusBar(self))
+        # DocumentTab already has the visible document status bar. The shell's
+        # status bar is retained for update messages, but its own QSizeGrip
+        # would draw a second resize handle at the very bottom-right.
+        self.statusBar().setSizeGripEnabled(False)
         application = QApplication.instance()
         if application is not None:
             install_i18n(application)
@@ -1193,12 +1237,23 @@ class AppWindow(QMainWindow):
             # 중에는 셸이 자식 위젯의 키 입력을 선행해서 받는다.
             application.installEventFilter(self)
         self.updates_enabled = bool(updates_enabled)
+        self._recovery_store = (
+            getattr(application, "_spdf_recovery_store", None)
+            if self.updates_enabled else None)
         self.setWindowTitle(APP_NAME)
         self.resize(1100, 800)
         self.setAcceptDrops(True)
         self._update_service = (
             GitHubUpdateService(APP_VERSION, language=settings.ui_language())
             if self.updates_enabled else None)
+        if self._update_service is not None and not getattr(
+                application, "_spdf_update_cleanup_started", False):
+            application._spdf_update_cleanup_started = True
+            # The installer may still hold its own executable when the
+            # post-install launch starts sPDF, so retry after it has exited.
+            self._update_service.cleanup_downloads()
+            QTimer.singleShot(2000, self._update_service.cleanup_downloads)
+            QTimer.singleShot(10000, self._update_service.cleanup_downloads)
         self._update_worker = None
         self._available_update = None
         self._presentation_tab = None
@@ -1238,6 +1293,17 @@ class AppWindow(QMainWindow):
         self._fluent_backdrop_attempted = False
         self._fluent_backdrop_applied = False
         translate_tree(self)
+
+        if self._recovery_store is not None and not getattr(
+                application, "_spdf_recovery_prompted", False):
+            application._spdf_recovery_prompted = True
+            QTimer.singleShot(400, lambda: self.show_recovery(automatic=True))
+
+    def show_recovery(self, automatic=False):
+        if self.isHidden():
+            return
+        from .recovery_ui import show_recovery_dialog
+        show_recovery_dialog(self, automatic=automatic)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1337,6 +1403,9 @@ class AppWindow(QMainWindow):
             self, "새 창", "Ctrl+Shift+N", lambda: new_window(force_new=True),
             "new_window"))
         m.addSeparator()
+        if self._recovery_store is not None:
+            m.addAction(_make_action(
+                self, "미저장 작업 복구...", None, self.show_recovery, "undo"))
         m.addAction(_make_action(
             self, "종료", "Ctrl+Q", self.close, "power"))
         h = mb.addMenu("도움말(&H)")

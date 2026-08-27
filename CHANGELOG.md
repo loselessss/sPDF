@@ -2,29 +2,22 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.14.1 - 2026-08-24
-
-### Improvements
-
-- The Windows installer now asks for English or Korean and uses that choice as sPDF's initial interface language.
-- The start page presents PDF as the primary file type while PDF-compatible Illustrator files remain available through the File menu and drag and drop.
-- Presentation mode now accepts the arrow keys for previous and next page navigation even when the document view has keyboard focus.
-- Replaced the hard-to-discover left-panel cycle icon with a labeled ribbon drop-down for Hidden, Page Thumbnails, and Bookmarks.
-
-### Bug fixes
-
-- The update dialog no longer mixes an English availability heading into the Korean interface, and a launched update installer defaults to the current interface language.
-
-## 1.14.0 - 2026-08-24
+## 1.15.0 - 2026-08-27
 
 ### New features
 
-- Added **Reduce PDF Size** with lossless, balanced, and strong presets. Compressed results are written to a separate PDF so the open original remains unchanged.
-- The left navigation panel now cycles through hidden, page thumbnails, and the PDF's hierarchical bookmarks. Its last mode is remembered.
-- Ctrl+click follows internal PDF destinations and opens web or email links in the default app, in both text-selection and hand-tool modes.
+- Return to earlier views with Alt+Left / Alt+Right, including page, zoom, and scroll position. Reopening a document restores its last reading position.
+- Add the current page as a bookmark with Ctrl+B, rename or delete bookmarks from the sidebar, and drag them to change order or nesting. Bookmark edits support undo/redo.
+- Drag an area to keep in the page-margin crop preview and apply relative margins to the current page, a range, or all pages. Cropping changes the visible area without erasing content and supports undo/redo.
+- Standalone sPDF saves separate recovery copies every 30 seconds while edits are pending. After an interrupted session, restore or discard copies without overwriting originals. Protected PDFs and copies over 512 MB are excluded.
 
 ### Improvements
 
-- File- and program-launch links embedded in PDFs are blocked for safety.
-- Password-protected PDFs are left unchanged rather than silently weakening their security settings during compression.
-- Bookmarks stay synchronized with the current page and refresh after page-structure edits.
+- Windows Explorer shows the registered document type simply as `PDF`; Illustrator support remains unchanged.
+- Reorganized the README around what sPDF does, common workflows, installation, and important behavior instead of version-by-version development history.
+- Reduced the left-panel ribbon menu to an icon with a tooltip and drop-down, freeing space for document controls.
+- The updated application removes downloaded installer and interrupted-download files from its dedicated temporary update folder, retrying after setup releases the installer.
+
+### Bug fixes
+
+- Removed the duplicate resize handle drawn by the outer window status bar.

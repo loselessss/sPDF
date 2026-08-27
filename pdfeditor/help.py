@@ -24,6 +24,7 @@ HELP_HTML = """
 <tr><td><b>Ctrl+Shift+S</b></td><td>다른 이름으로 저장</td></tr>
 <tr><td>파일 → <b>PDF 용량 줄이기</b></td><td>무손실·균형·강한 압축 중에서 선택해 별도 PDF로 저장</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>탭 닫기</td></tr>
+<tr><td>파일 → <b>미저장 작업 복구</b></td><td>비정상 종료 후 남은 사본 복구·삭제 (독립 실행본)</td></tr>
 </table>
 <p>여러 PDF를 <b>탭</b>으로 엽니다. 각 탭은 페이지·편집·검색 상태를 따로
 가집니다. 이미 열어둔 파일을 또 열면 새 탭 대신 <b>그 탭으로</b> 이동합니다
@@ -36,7 +37,9 @@ HELP_HTML = """
 열립니다. 암호가 걸린 PDF는 열 때 비밀번호를 물어봅니다.</p>
 
 <h3>🔍 보기 · 이동</h3>
+<p>파일을 다시 열면 마지막 쪽·배율·스크롤 위치를 복원합니다.</p>
 <table cellpadding="4">
+<tr><td><b>Alt+← / Alt+→</b></td><td>페이지·링크 이동 전 보기로 돌아가기 / 다시 앞으로</td></tr>
 <tr><td><b>Ctrl + 마우스휠</b></td><td>큰 단계 확대/축소</td></tr>
 <tr><td><b>Ctrl++ / Ctrl+-</b></td><td>큰 단계 확대 / 축소</td></tr>
 <tr><td><b>Alt + 마우스휠</b></td><td>1% 단위 확대/축소</td></tr>
@@ -108,6 +111,10 @@ HELP_HTML = """
 줄로 밀리지 않습니다(그 줄 안에서만 교체). 내용 수정용입니다.</p>
 
 <h3>📑 페이지 조작</h3>
+<p><b>Ctrl+B</b>로 현재 쪽을 책갈피에 추가합니다. 왼쪽 책갈피에서 우클릭으로
+이름 변경·삭제, 드래그로 순서와 계층을 바꿀 수 있습니다. 변경은 저장해야 PDF에 남습니다.</p>
+<p>페이지 → <b>페이지 여백 자르기</b>에서 남길 영역을 드래그하고 현재 쪽·지정한 쪽·
+전체 쪽을 선택합니다. 내용은 삭제하지 않고 표시 영역만 바꾸며 Ctrl+Z로 되돌릴 수 있습니다.</p>
 <table cellpadding="4">
 <tr><td><b>Ctrl+] / Ctrl+[</b></td><td>오른쪽 / 왼쪽으로 회전</td></tr>
 <tr><td><b>Ctrl+Shift+2</b></td><td>한 장 보기 / 두 장 보기 전환</td></tr>
@@ -126,6 +133,9 @@ HELP_HTML = """
 
 <p style="color:gray;">도움말 → 오픈소스 라이선스에서 사용된 오픈소스
 목록을 볼 수 있습니다.</p>
+<p>미저장 작업 복구는 편집이 있을 때 30초 간격으로 사본을 갱신합니다.
+보호된 PDF와 512 MB 초과 사본은 제외되므로 직접 저장하세요. 복구한 문서는
+원본 보호를 위해 다른 이름으로 저장합니다.</p>
 """
 
 HELP_HTML_EN = """
@@ -141,6 +151,7 @@ HELP_HTML_EN = """
 <tr><td>File → <b>Reduce PDF Size</b></td><td>Save a separate PDF using lossless, balanced, or strong compression</td></tr>
 <tr><td><b>Ctrl+P</b></td><td>Print</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>Close the current tab</td></tr>
+<tr><td>File → <b>Recover Unsaved Work</b></td><td>Restore or discard copies from an interrupted standalone session</td></tr>
 </table>
 <p>Drag tabs to reorder them or move them to another sPDF window. Unsaved
 changes move with the tab, and an empty source window closes automatically.
@@ -148,7 +159,9 @@ The home page provides favorites and recent files. You can also drag and drop
 PDF or PDF-compatible Illustrator files onto the window.</p>
 
 <h3>🔍 View and navigation</h3>
+<p>Reopening a document restores its last page, zoom, and scroll position.</p>
 <table cellpadding="4">
+<tr><td><b>Alt+Left / Alt+Right</b></td><td>Return to the previous view / go forward again after navigation</td></tr>
 <tr><td><b>Ctrl + mouse wheel</b></td><td>Zoom in larger steps</td></tr>
 <tr><td><b>Alt + mouse wheel</b></td><td>Zoom in 1% steps</td></tr>
 <tr><td><b>Ctrl+0</b></td><td>Fit width</td></tr>
@@ -187,6 +200,11 @@ PDF or PDF-compatible Illustrator files onto the window.</p>
 separate model. OCR language is independent of the interface language.</p>
 
 <h3>✏️ Editing and pages</h3>
+<p><b>Ctrl+B</b> bookmarks the current page. Right-click a bookmark to rename
+or delete it, or drag it to change its order and nesting. Save to keep changes.</p>
+<p>Page → <b>Crop Page Margins</b> lets you drag an area to keep and apply the
+relative margins to the current page, a range, or all pages. Cropping changes
+the visible area, not the underlying content. Ctrl+Z undoes it.</p>
 <table cellpadding="4">
 <tr><td><b>Ctrl+E</b></td><td>Toggle text editing</td></tr>
 <tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>Undo / redo</td></tr>
@@ -198,6 +216,9 @@ reflow editor. Replacement fonts may look different. Page rotation, deletion,
 reordering, and merging participate in undo/redo.</p>
 
 <p style="color:gray;">See Help → Open-source Licenses for third-party notices.</p>
+<p>Recovery copies refresh every 30 seconds while edits are pending. Protected
+PDFs and copies over 512 MB are excluded, so save manually. Recovered documents
+use Save As first to protect the originals.</p>
 """
 
 

@@ -5,7 +5,7 @@
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.14.1"
+#define MyAppVersion "1.15.0"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"
@@ -60,7 +60,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserMo
 ; 설치 시 고른 언어를 앱의 최초 UI 언어 기본값으로 전달한다.
 Root: HKA; Subkey: "Software\sPDF"; ValueType: string; ValueName: "UILanguage"; ValueData: "{code:GetUiLanguage}"; Flags: uninsdeletevalue
 ; --- ProgId: sPDF로 PDF를 열었을 때의 아이콘/실행 명령 ---
-Root: HKA; Subkey: "Software\Classes\{#MyProgId}"; ValueType: string; ValueData: "PDF / Illustrator Document"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}"; ValueType: string; ValueData: "PDF"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}\DefaultIcon"; ValueType: string; ValueData: "{app}\assets\spdf_doc.ico"
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 

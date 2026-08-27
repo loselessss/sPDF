@@ -79,13 +79,13 @@ class Document:
     @property
     def password_protected(self):
         """Whether this document required a password when it was opened."""
-        if self._password:
+        if self._password or self._doc.metadata.get("encryption"):
             return True
         try:
             probe = fitz.open(self.path, filetype="pdf") \
                 if is_illustrator_document(self.path) else fitz.open(self.path)
             try:
-                return bool(probe.needs_pass)
+                return bool(probe.needs_pass or probe.metadata.get("encryption"))
             finally:
                 probe.close()
         except Exception:
@@ -139,6 +139,77 @@ class Document:
                 "file": str(link.get("file") or ""),
             }
         return None
+
+    def ensure_editable(self):
+        if not self._doc.permissions & fitz.PDF_PERM_MODIFY:
+            raise PermissionError("This PDF does not permit document changes.")
+
+    def add_bookmark(self, title, page):
+        self.ensure_editable()
+        if not title.strip() or not 0 <= page < self.page_count:
+            raise ValueError("Invalid bookmark.")
+        toc = self._doc.get_toc(False)
+        toc.append([1, title.strip(), page + 1])
+        self._doc.set_toc(toc)
+
+    def rename_bookmark(self, index, title):
+        self.ensure_editable()
+        toc = self._doc.get_toc(False)
+        if not 0 <= index < len(toc):
+            raise ValueError("Invalid bookmark.")
+        if not title.strip():
+            raise ValueError("A bookmark needs a title.")
+        self._doc.set_toc_item(index, title=title.strip())
+
+    def delete_bookmark(self, index):
+        self.ensure_editable()
+        toc = self._doc.get_toc(False)
+        if not 0 <= index < len(toc):
+            raise ValueError("Invalid bookmark.")
+        level = toc[index][0]
+        end = index + 1
+        while end < len(toc) and toc[end][0] > level:
+            end += 1
+        del toc[index:end]
+        self._doc.set_toc(toc)
+
+    def reorder_bookmarks(self, order):
+        self.ensure_editable()
+        toc = self._doc.get_toc(False)
+        if sorted(index for level, index in order) != list(range(len(toc))):
+            raise ValueError("Invalid bookmark order.")
+        result = []
+        previous = 0
+        for level, index in order:
+            if not 1 <= level <= previous + 1:
+                raise ValueError("Invalid bookmark hierarchy.")
+            result.append([level] + toc[index][1:])
+            previous = level
+        self._doc.set_toc(result)
+
+    def crop_pages(self, indices, fractions):
+        """Crop visible margins by relative DISPLAY coordinates, not redaction."""
+        self.ensure_editable()
+        x0, y0, x1, y1 = map(float, fractions)
+        if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+            raise ValueError("Invalid crop rectangle.")
+        indices = sorted(set(indices))
+        if not indices or indices[0] < 0 or indices[-1] >= self.page_count:
+            raise ValueError("Invalid page selection.")
+        crops = []
+        for index in indices:
+            page = self._doc[index]
+            w, h = page.rect.width, page.rect.height
+            selected = fitz.Rect(x0 * w, y0 * h, x1 * w, y1 * h)
+            rect = selected * page.derotation_matrix
+            origin = page.cropbox_position
+            rect = fitz.Rect(rect.x0 + origin.x, rect.y0 + origin.y,
+                             rect.x1 + origin.x, rect.y1 + origin.y)
+            if rect.width < 1 or rect.height < 1:
+                raise ValueError("The crop area is too small.")
+            crops.append((index, rect))
+        for index, rect in crops:
+            self._doc[index].set_cropbox(rect)
 
     # --- 텍스트 -----------------------------------------------------
 

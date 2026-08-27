@@ -316,6 +316,7 @@ class PagesMixin:
         _after_page_content_changed(내용만 바뀜)와 달리 썸네일 목록 자체를
         새로 만들어야 한다.
         """
+        self.clear_navigation_history()
         self._cache.clear()
         self._words_cache.clear()
         if hasattr(self, "_annot_cache"):
@@ -328,7 +329,11 @@ class PagesMixin:
         self.thumbs.reset_pages(count)
         self.thumbs.blockSignals(False)
         self.bookmarks.set_bookmarks(self.doc.bookmarks())
-        self.show_page(max(0, min(keep_page, count - 1)))
+        self._restoring_view = True
+        try:
+            self.show_page(max(0, min(keep_page, count - 1)))
+        finally:
+            self._restoring_view = False
         self._schedule_thumbs()
         if hasattr(self, "_notes_dock") and self._notes_dock.isVisible():
             self._rebuild_notes_list()

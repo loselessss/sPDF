@@ -110,6 +110,24 @@ class UpdateServiceTests(unittest.TestCase):
             self.assertEqual(result.read_bytes(), content)
             self.assertEqual(progress[-1].completed_bytes, len(content))
 
+    def test_cleanup_removes_only_updater_temp_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "updates"
+            root.mkdir()
+            installer = root / "sPDF_Setup_1.6.1.exe"
+            partial = root / "sPDF_Setup_1.6.2.exe.part"
+            unrelated = root / "notes.txt"
+            invalid = root / "other_setup.exe"
+            for path in (installer, partial, unrelated, invalid):
+                path.write_bytes(b"data")
+            service = GitHubUpdateService("1.6.0", download_root=root)
+
+            self.assertEqual(service.cleanup_downloads(), 2)
+            self.assertFalse(installer.exists())
+            self.assertFalse(partial.exists())
+            self.assertTrue(unrelated.exists())
+            self.assertTrue(invalid.exists())
+
     def test_installer_launch_does_not_use_shell(self):
         with tempfile.TemporaryDirectory() as temp:
             installer = Path(temp) / "sPDF_Setup_1.6.1.exe"

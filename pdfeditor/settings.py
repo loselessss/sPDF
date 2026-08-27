@@ -1,6 +1,8 @@
 """사용자 설정 — ~/.spdf.json (최근 파일/즐겨찾기 등)."""
 
 import json
+import math
+import tempfile
 import os
 import time
 
@@ -33,8 +35,16 @@ def _load():
 
 
 def _save(data):
-    with open(PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
+    fd, temporary = tempfile.mkstemp(
+        prefix=".spdf-settings-", suffix=".tmp",
+        dir=os.path.dirname(os.path.abspath(PATH)))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=1)
+        os.replace(temporary, PATH)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 def recent_files():
@@ -133,6 +143,47 @@ def set_sidebar_mode(mode):
     d["sidebar_mode"] = normalized
     _save(d)
     return True
+
+
+def reading_position(path):
+    positions = _load().get("reading_positions", {})
+    if not isinstance(positions, dict):
+        return None
+    value = positions.get(os.path.normcase(os.path.abspath(path)), {})
+    return _clean_reading_position(value)
+
+
+def _clean_reading_position(value):
+    try:
+        state = {"page": max(0, int(value["page"])),
+                 "zoom": float(value["zoom"]),
+                 "horizontal": float(value.get("horizontal", 0)),
+                 "vertical": float(value.get("vertical", 0)),
+                 "two_page": bool(value.get("two_page", False))}
+        if not all(math.isfinite(state[k]) for k in
+                   ("zoom", "horizontal", "vertical")):
+            return None
+        state["zoom"] = max(0.1, min(8.0, state["zoom"]))
+        for key in ("horizontal", "vertical"):
+            state[key] = max(0.0, min(1.0, state[key]))
+        return state
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def set_reading_position(path, state):
+    state = _clean_reading_position(state)
+    if state is None:
+        return
+    data = _load()
+    positions = data.get("reading_positions", {})
+    if not isinstance(positions, dict):
+        positions = {}
+    key = os.path.normcase(os.path.abspath(path))
+    positions.pop(key, None)
+    positions[key] = state
+    data["reading_positions"] = dict(list(positions.items())[-100:])
+    _save(data)
 
 
 # --- 즐겨찾기 ----------------------------------------------------------

@@ -1,20 +1,12 @@
 # sPDF Release Notes
 
-Release date: 2026-08-24
+Release date: 2026-08-27
 
-## 1.14.1 Highlights
+## 1.15.0 Highlights
 
-- Choose English or Korean during installation and use that choice for sPDF's initial interface.
-- Keep the home screen focused on opening PDFs while retaining Illustrator support in secondary entry points.
-- Show the updater consistently in the selected interface language and preselect that language in update installers.
-- Navigate previous and next pages with the arrow keys in presentation mode.
-- Choose the left panel from a clearly labeled ribbon drop-down.
-
-## 1.14.0 Highlights
-
-- Reduce PDF size with lossless, balanced, or strong compression and save the result as a separate file.
-- Cycle the left navigation panel through hidden, page thumbnails, and hierarchical PDF bookmarks.
-- Ctrl+click an internal document link to move to its destination.
-- Ctrl+click a web or email link to open it in the default app.
-- Links that launch files or programs are blocked for safety.
-- Password-protected PDFs are not recompressed, so their security settings remain intact.
+- Use Alt+Left / Alt+Right to return to earlier views, and reopen documents at the last page, zoom, and scroll position.
+- Add bookmarks with Ctrl+B; rename, delete, and drag them in the sidebar.
+- Crop page margins by dragging a preview area and applying it to the current page, a range, or all pages. Bookmark and crop edits can be undone.
+- Recover unsaved work after an interrupted standalone session from separate copies refreshed every 30 seconds. Recovered documents use Save As first; protected PDFs and copies over 512 MB are excluded.
+- Windows Explorer now labels the registered file type simply as PDF.
+- Temporary installer and interrupted-download files are removed after the updated application starts.

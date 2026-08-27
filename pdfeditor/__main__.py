@@ -36,6 +36,15 @@ def main():
     from .i18n import install as install_i18n
     install_i18n(app)
     apply_fluent_theme(app)
+    from .recovery_ui import application_recovery_store
+    try:
+        application_recovery_store()
+    except OSError:
+        from PyQt5.QtWidgets import QMessageBox
+        from .i18n import localize
+        QMessageBox.warning(None, APP_NAME, localize(
+            "The recovery folder is not writable. Save your work manually.",
+            "복구 폴더에 쓸 수 없습니다. 작업을 직접 저장하세요."))
     import os
     icon = app_icon()
     if os.path.exists(icon):

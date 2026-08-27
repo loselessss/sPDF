@@ -31,6 +31,8 @@ class EmbeddedModeTests(unittest.TestCase):
 
         self.assertFalse(window.updates_enabled)
         self.assertIsNone(window._update_service)
+        self.assertIsNone(window._recovery_store)
+        self.assertFalse(window.statusBar().isSizeGripEnabled())
         self.assertFalse(window.check_for_updates(manual=True))
         self.assertNotIn("Check for Updates...", menu_texts)
         window.close()
@@ -39,10 +41,24 @@ class EmbeddedModeTests(unittest.TestCase):
         from PyQt5.QtWidgets import QAction
         from pdfeditor.app import AppWindow
 
-        with patch("pdfeditor.app.settings.automatic_update_check_due",
-                   return_value=False), patch(
-                       "pdfeditor.app.settings.ui_language", return_value="en"):
-            window = AppWindow(updates_enabled=True)
+        cleanup_flag = getattr(self.app, "_spdf_update_cleanup_started", None)
+        if hasattr(self.app, "_spdf_update_cleanup_started"):
+            del self.app._spdf_update_cleanup_started
+        try:
+            cleanup_patch = patch(
+                "pdfeditor.app.GitHubUpdateService.cleanup_downloads")
+            with patch("pdfeditor.app.settings.automatic_update_check_due",
+                       return_value=False), patch(
+                           "pdfeditor.app.settings.ui_language",
+                           return_value="en"), cleanup_patch as cleanup:
+                window = AppWindow(updates_enabled=True)
+            cleanup.assert_called_once()
+        finally:
+            if cleanup_flag is None:
+                if hasattr(self.app, "_spdf_update_cleanup_started"):
+                    del self.app._spdf_update_cleanup_started
+            else:
+                self.app._spdf_update_cleanup_started = cleanup_flag
         menu_texts = [action.text() for action in window.findChildren(QAction)]
 
         self.assertTrue(window.updates_enabled)

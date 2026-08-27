@@ -12,6 +12,7 @@ from . import settings
 from .icons import fluent_icon
 from .i18n import localize, tr
 from .widgets import qimage_from_render
+from .navigation import NavigationMixin
 
 CACHE_RADIUS = 2  # 현재 페이지 기준 앞뒤로 유지할 페이지 수
 MIN_RENDER_PIXEL_RATIO = 2.0  # 일반 화면도 2배 슈퍼샘플링해 초기 확대 품질 보장
@@ -29,12 +30,13 @@ def render_pixel_ratio(widget):
     return max(ratios)
 
 
-class ViewerMixin:
+class ViewerMixin(NavigationMixin):
     def _init_viewer_state(self):
         self.doc = None
         self.page_index = 0
         self._two_page_mode = False
         self._cache = {}  # (page, zoom) -> QImage
+        self._init_navigation()
         # 썸네일 스크롤 중 매번 렌더하면 버벅이므로 멈춘 뒤 한 번만 그린다.
         self._thumb_timer = QTimer(self)
         self._thumb_timer.setSingleShot(True)
@@ -53,6 +55,8 @@ class ViewerMixin:
         if self.doc is None:
             return
         index = max(0, min(index, self.doc.page_count - 1))
+        if index != self.page_index:
+            self.remember_navigation()
         self.page_index = index
         self._render_current()
         self._trim_cache()
@@ -63,6 +67,7 @@ class ViewerMixin:
         self.thumbs.set_spread_pages(self.visible_document_pages())
         self.bookmarks.select_page(index)
         self._update_page_label()
+        self.schedule_reading_position()
 
     def _render_current(self):
         pixel_ratio = render_pixel_ratio(self.view)
@@ -181,6 +186,12 @@ class ViewerMixin:
         """창 배치가 끝난 실제 폭으로 맞춤 배율과 HiDPI 이미지를 확정한다."""
         if self.doc is not document or self.doc is None:
             return
+        if self._initial_reading_state is not None:
+            state = self._initial_reading_state
+            self._initial_reading_state = None
+            self.restore_view_state(state)
+            self._view_ready = True
+            return
         old_zoom = self.view.zoom
         self._set_fit_zoom(self.page_index)
         if self.view.zoom != old_zoom:
@@ -188,6 +199,7 @@ class ViewerMixin:
         self._render_current()
         self._update_page_label()
         self.update_thumbnail_viewport_marker()
+        self._view_ready = True
 
     def refresh_page(self, index):
         """페이지 내용이 바뀌었을 때(주석 등) 렌더 캐시와 썸네일을 무효화."""
@@ -293,6 +305,8 @@ class ViewerMixin:
             return
         if link["kind"] == "goto" and link["page"] >= 0:
             target_page = min(link["page"], self.doc.page_count - 1)
+            if target_page == self.page_index:
+                self.remember_navigation()
             self.show_page(target_page)
             if link["to"] is not None:
                 width, height = self.doc.page_size(target_page)
@@ -369,6 +383,8 @@ class ViewerMixin:
             return
         if page != self.page_index:
             self.show_page(page)
+        else:
+            self.remember_navigation()
         self.view.center_on_page_fraction(point)
 
     def on_thumbnail_splitter_moved(self, _pos, index):

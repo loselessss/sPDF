@@ -23,6 +23,17 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("ShowLanguageDialog=yes", installer)
         self.assertIn('ValueName: "UILanguage"', installer)
 
+    def test_registered_document_type_is_simply_pdf(self):
+        installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
+        self.assertIn(
+            'Subkey: "Software\\Classes\\{#MyProgId}"; '
+            'ValueType: string; ValueData: "PDF";', installer)
+        registration = (ROOT / "register_filetype.py").read_text(
+            encoding="utf-8")
+        self.assertIn('k, "", 0, winreg.REG_SZ, "PDF")', registration)
+        self.assertNotIn("PDF / Illustrator Document", installer)
+        self.assertNotIn("PDF / Illustrator Document", registration)
+
     def test_localized_release_documents_include_current_version(self):
         for name in (
                 "README.md", "README.ko.md", "CHANGELOG.md",

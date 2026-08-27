@@ -64,9 +64,14 @@ class FluentThemeTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("Qt.ToolButtonIconOnly", source)
         self.assertIn("sidebarRibbonButton", source)
-        self.assertIn("Qt.ToolButtonTextBesideIcon", source)
+        self.assertIn(
+            "self._sidebar_button.setToolButtonStyle(Qt.ToolButtonIconOnly)",
+            source)
+        self.assertNotIn(
+            "self._sidebar_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)",
+            source)
 
-    def test_command_bar_exposes_labeled_sidebar_menu(self):
+    def test_command_bar_exposes_sidebar_menu(self):
         source = (
             Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
         ).read_text(encoding="utf-8")

@@ -49,6 +49,9 @@ class AnnotMixin:
     def mark_dirty(self):
         self._dirty = True
         self._update_title()
+        recovery = getattr(self, "_recovery", None)
+        if recovery is not None:
+            recovery.changed()
 
     def maybe_save(self):
         """저장 안 된 변경이 있으면 물어본다. False면 진행 중단(취소)."""
@@ -67,7 +70,8 @@ class AnnotMixin:
     def save(self):
         if self.doc is None:
             return False
-        if is_illustrator_document(self.doc.path):
+        if (is_illustrator_document(self.doc.path) or
+                getattr(self, "_recovered_unsaved", False)):
             return self.save_as_dialog()
         try:
             self.doc.save_as(self.doc.path)  # 원본은 .bak으로 백업된다
@@ -75,6 +79,7 @@ class AnnotMixin:
             QMessageBox.critical(self, "저장 실패", "저장할 수 없습니다.\n\n%s" % e)
             return False
         self._dirty = False
+        self._recovery.clear()
         self._update_title()
         self.statusBar().showMessage("저장됨: %s" % self.doc.path, 3000)
         return True
@@ -96,6 +101,8 @@ class AnnotMixin:
         # 이후 Ctrl+S는 새 경로에 저장되도록 현재 문서를 갈아탄다.
         self.doc.path = path
         self._dirty = False
+        self._recovered_unsaved = False
+        self._recovery.clear()
         self._sync_favorite_action()
         self._update_title()
         self.statusBar().showMessage("저장됨: %s" % path, 3000)

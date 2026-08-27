@@ -5,7 +5,7 @@ from PyQt5.QtGui import QColor, QImage, QIcon, QPainter, QPalette, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QListWidget, QListWidgetItem,
     QScrollArea, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
-    QTreeWidget, QTreeWidgetItem, QWidget,
+    QTreeWidget, QTreeWidgetItem, QWidget, QMenu,
 )
 
 from .i18n import tr
@@ -25,12 +25,17 @@ SEARCH_COLOR = QColor(255, 200, 0, 80)
 SEARCH_CUR_COLOR = QColor(255, 120, 0, 110)
 EDIT_BOX_COLOR = QColor(0, 160, 90, 160)  # 편집 가능한 span 테두리(초록)
 BOOKMARK_PAGE_ROLE = Qt.UserRole + 10
+BOOKMARK_INDEX_ROLE = Qt.UserRole + 11
 
 
 class BookmarkTree(QTreeWidget):
     """Hierarchical PDF outline that emits zero-based destination pages."""
 
     page_selected = pyqtSignal(int)
+    add_requested = pyqtSignal()
+    rename_requested = pyqtSignal(int, str)
+    delete_requested = pyqtSignal(int)
+    reorder_requested = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,17 +44,25 @@ class BookmarkTree(QTreeWidget):
         self.setUniformRowHeights(True)
         self.itemActivated.connect(self._activate)
         self.itemClicked.connect(self._activate)
+        self.itemChanged.connect(self._renamed)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDefaultDropAction(Qt.MoveAction)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
 
     def set_bookmarks(self, entries):
+        self.blockSignals(True)
         self.clear()
         parents = []
-        for level, title, page in entries:
+        for index, (level, title, page) in enumerate(entries):
             level = max(1, int(level))
             item = QTreeWidgetItem([str(title or tr("(제목 없음)"))])
             page_index = int(page) - 1
             item.setData(0, BOOKMARK_PAGE_ROLE, page_index)
+            item.setData(0, BOOKMARK_INDEX_ROLE, index)
+            item.setFlags(item.flags() | Qt.ItemIsEditable)
             if page_index >= 0:
-                item.setToolTip(0, "%d쪽" % (page_index + 1))
+                item.setToolTip(0, tr("%d쪽" % (page_index + 1)))
             if level == 1 or not parents:
                 self.addTopLevelItem(item)
                 parents = [item]
@@ -62,6 +75,48 @@ class BookmarkTree(QTreeWidget):
             empty.setFlags(empty.flags() & ~Qt.ItemIsEnabled)
             self.addTopLevelItem(empty)
         self.expandToDepth(0)
+        self.blockSignals(False)
+
+    def _renamed(self, item, column):
+        index = item.data(0, BOOKMARK_INDEX_ROLE)
+        if index is not None:
+            title = item.text(0)
+            QTimer.singleShot(0, lambda: self.rename_requested.emit(int(index), title))
+
+    def _context_menu(self, position):
+        from .icons import fluent_icon
+        menu = QMenu(self)
+        action = menu.addAction(fluent_icon("add_file"),
+                                tr("현재 페이지 책갈피 추가"))
+        action.triggered.connect(self.add_requested)
+        item = self.itemAt(position)
+        if item is not None and item.data(0, BOOKMARK_INDEX_ROLE) is not None:
+            action = menu.addAction(fluent_icon("edit"), tr("책갈피 이름 변경"))
+            action.triggered.connect(lambda: self.editItem(item, 0))
+            action = menu.addAction(fluent_icon("delete"), tr("책갈피 삭제"))
+            index = int(item.data(0, BOOKMARK_INDEX_ROLE))
+            action.triggered.connect(lambda: self.delete_requested.emit(index))
+        menu.exec_(self.viewport().mapToGlobal(position))
+
+    def dropEvent(self, event):
+        self.blockSignals(True)
+        try:
+            super().dropEvent(event)
+        finally:
+            self.blockSignals(False)
+        order = []
+
+        def visit(parent, level):
+            for i in range(parent.childCount()):
+                item = parent.child(i)
+                index = item.data(0, BOOKMARK_INDEX_ROLE)
+                if index is not None:
+                    order.append((level, int(index)))
+                    visit(item, level + 1)
+
+        visit(self.invisibleRootItem(), 1)
+        if order:
+            QTimer.singleShot(0, lambda: self.reorder_requested.emit(order))
 
     def _activate(self, item, _column=0):
         page = item.data(0, BOOKMARK_PAGE_ROLE)
