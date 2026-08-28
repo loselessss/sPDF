@@ -628,8 +628,11 @@ class ThumbList(QListWidget):
         self.setDragEnabled(False)
         self.setAcceptDrops(False)
         self.setDropIndicatorShown(False)
+        self.setMouseTracking(True)
         self.currentRowChanged.connect(self._on_row)
         self._navigation_press = None
+        self._marker_dragging = False
+        self._marker_drag_offset = QPointF()
         self._viewport_page = -1
         self._viewport_rect = None
         self._spread_rows = set()
@@ -642,19 +645,54 @@ class ThumbList(QListWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            marker = self._viewport_marker_rect()
+            if not marker.isEmpty() and marker.contains(QPointF(event.pos())):
+                image_rect = self._thumbnail_image_rect(self._viewport_page)
+                self._marker_dragging = True
+                self._navigation_press = None
+                self._marker_drag_offset = QPointF(
+                    (event.pos().x() - marker.left()) / image_rect.width(),
+                    (event.pos().y() - marker.top()) / image_rect.height(),
+                )
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
             self._navigation_press = QPoint(event.pos())
         else:
             self._navigation_press = None
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._marker_dragging:
+            target = self._marker_drag_target(event.pos())
+            if target is not None:
+                self.page_position_requested.emit(self._viewport_page, target)
+            event.accept()
+            return
         if self._navigation_press is not None and (
                 event.pos() - self._navigation_press
         ).manhattanLength() >= QApplication.startDragDistance():
             self._navigation_press = None
+        marker = self._viewport_marker_rect()
+        self.setCursor(
+            Qt.OpenHandCursor
+            if not marker.isEmpty() and marker.contains(QPointF(event.pos()))
+            else Qt.ArrowCursor)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._marker_dragging:
+            target = self._marker_drag_target(event.pos())
+            self._marker_dragging = False
+            if target is not None:
+                self.page_position_requested.emit(self._viewport_page, target)
+            marker = self._viewport_marker_rect()
+            self.setCursor(
+                Qt.OpenHandCursor
+                if marker.contains(QPointF(event.pos()))
+                else Qt.ArrowCursor)
+            event.accept()
+            return
         navigation_press = self._navigation_press
         self._navigation_press = None
         super().mouseReleaseEvent(event)
@@ -664,6 +702,11 @@ class ThumbList(QListWidget):
         if target is not None:
             row, point = target
             self.page_position_requested.emit(row, point)
+
+    def leaveEvent(self, event):
+        if not self._marker_dragging:
+            self.setCursor(Qt.ArrowCursor)
+        super().leaveEvent(event)
 
     def reset_pages(self, count):
         """페이지 수만큼 빈 항목 생성 — 아이콘은 나중에 채워진다."""
@@ -833,6 +876,37 @@ class ThumbList(QListWidget):
             (point.y() - image_rect.top()) / image_rect.height(),
         )
 
+    def _viewport_marker_rect(self):
+        """Return the visible blue viewport marker in thumbnail coordinates."""
+        if self._viewport_rect is None or self._viewport_page < 0:
+            return QRectF()
+        image_rect = self._thumbnail_image_rect(self._viewport_page)
+        if image_rect.isEmpty():
+            return QRectF()
+        return QRectF(
+            image_rect.left() + self._viewport_rect.x() * image_rect.width(),
+            image_rect.top() + self._viewport_rect.y() * image_rect.height(),
+            self._viewport_rect.width() * image_rect.width(),
+            self._viewport_rect.height() * image_rect.height())
+
+    def _marker_drag_target(self, pos):
+        """Convert a dragged marker position to the page point to center."""
+        if self._viewport_rect is None or self._viewport_page < 0:
+            return None
+        image_rect = self._thumbnail_image_rect(self._viewport_page)
+        if image_rect.isEmpty():
+            return None
+        point = QPointF(
+            (pos.x() - image_rect.left()) / image_rect.width(),
+            (pos.y() - image_rect.top()) / image_rect.height())
+        width = min(1.0, max(0.0, self._viewport_rect.width()))
+        height = min(1.0, max(0.0, self._viewport_rect.height()))
+        left = max(0.0, min(1.0 - width,
+                           point.x() - self._marker_drag_offset.x()))
+        top = max(0.0, min(1.0 - height,
+                          point.y() - self._marker_drag_offset.y()))
+        return QPointF(left + width / 2, top + height / 2)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self.viewport())
@@ -854,14 +928,9 @@ class ThumbList(QListWidget):
         item_rect = self.visualItemRect(item)
         if not item_rect.intersects(self.viewport().rect()):
             return
-        image_rect = self._thumbnail_image_rect(self._viewport_page)
-        if image_rect.isEmpty():
+        marker = self._viewport_marker_rect()
+        if marker.isEmpty():
             return
-        marker = QRectF(
-            image_rect.left() + self._viewport_rect.x() * image_rect.width(),
-            image_rect.top() + self._viewport_rect.y() * image_rect.height(),
-            self._viewport_rect.width() * image_rect.width(),
-            self._viewport_rect.height() * image_rect.height())
         painter = QPainter(self.viewport())
         painter.setBrush(QColor(0, 120, 215, 45))
         painter.setPen(QPen(QColor(0, 100, 210), 2))

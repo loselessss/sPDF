@@ -2,7 +2,7 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.16.7 - 2026-08-28
+## 1.17.0 - 2026-08-28
 
 ### New features
 
@@ -11,6 +11,7 @@ English | [한국어](CHANGELOG.ko.md)
 - Crop visible page margins by dragging a preview area and add adjustable text watermarks to selected pages. Both participate in undo/redo.
 - Convert multiple images into one PDF or export selected PDF pages to PNG or JPEG at a chosen resolution.
 - Use one integrated print window for preview, printer selection, page range, reverse order, copies, Auto/Portrait/Landscape orientation, and one-sided or duplex output.
+- Drag the blue viewport marker in a sidebar thumbnail to continuously pan around a zoomed page.
 
 ### Improvements
 

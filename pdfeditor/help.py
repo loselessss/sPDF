@@ -49,7 +49,8 @@ HELP_HTML = """
 <tr><td><b>하단 배율</b></td><td>10~800% 직접 입력</td></tr>
 <tr><td><b>Ctrl+0</b></td><td>창 너비에 맞춤</td></tr>
 <tr><td><b>PgUp / PgDown</b></td><td>이전 / 다음 페이지</td></tr>
-<tr><td>왼쪽 <b>썸네일</b> 클릭</td><td>해당 페이지로 이동</td></tr>
+<tr><td>왼쪽 <b>썸네일</b> 클릭</td><td>해당 페이지 또는 확대된 페이지의 선택 위치로 이동</td></tr>
+<tr><td>썸네일의 <b>파란 네모 드래그</b></td><td>확대된 본문 위치를 연속해서 이동</td></tr>
 <tr><td><b>Ctrl+Shift+B</b></td><td>왼쪽 패널을 없음 → 페이지 미리보기 → 책갈피로 전환</td></tr>
 <tr><td><b>Ctrl+클릭</b></td><td>PDF 내부 링크로 이동하거나 웹·메일 링크를 기본 앱으로 열기</td></tr>
 <tr><td><b>마우스 휠</b></td><td>스크롤 — 페이지 끝에 닿으면 다음/이전 장으로</td></tr>
@@ -174,6 +175,7 @@ PDF or PDF-compatible Illustrator files onto the window.</p>
 <tr><td><b>Ctrl+0</b></td><td>Fit width</td></tr>
 <tr><td><b>PgUp / PgDown</b></td><td>Previous / next page</td></tr>
 <tr><td><b>Ctrl+Shift+B</b></td><td>Cycle the left panel through hidden, page thumbnails, and bookmarks</td></tr>
+<tr><td><b>Click / drag the blue thumbnail marker</b></td><td>Jump to or continuously pan around a zoomed page</td></tr>
 <tr><td><b>Ctrl+click</b></td><td>Follow an internal link or open a web or email link in the default app</td></tr>
 <tr><td><b>Hand tool</b></td><td>Click and drag to pan</td></tr>
 <tr><td><b>Text selection tool</b></td><td>Drag across text to select it</td></tr>

@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.16.7** · English and Korean interface · Windows
+**Current version: 1.17.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -17,8 +17,9 @@ computer unless you explicitly use an external link or optional model download.
   on long documents.
 - Switch the left panel between page thumbnails, PDF bookmarks, and a hidden
   view.
-- Click a precise point in a sidebar thumbnail to center that part of a zoomed
-  page. Page reordering is kept in the dedicated page organizer.
+- Click a precise point in a sidebar thumbnail or drag its blue viewport marker
+  to move around a zoomed page. Page reordering is kept in the dedicated page
+  organizer.
 - Use two-page view, full screen, or presentation mode, and return to earlier
   page/zoom/scroll positions with Alt+Left and Alt+Right.
 - Reopen a document where you stopped reading and Ctrl+click document or web

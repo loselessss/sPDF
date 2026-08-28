@@ -223,6 +223,41 @@ class ThumbnailTests(unittest.TestCase):
                          ["1", "2", "3"])
         thumbs.close()
 
+    def test_viewport_marker_can_be_dragged_to_pan_zoomed_page(self):
+        from PyQt5.QtCore import QPoint, QRectF, Qt
+        from PyQt5.QtGui import QImage
+        from PyQt5.QtTest import QTest
+        from pdfeditor.widgets import ThumbList
+
+        thumbs = ThumbList()
+        thumbs.resize(180, 500)
+        thumbs.reset_pages(1)
+        thumbs.show()
+        thumbs.set_thumb(0, QImage(120, 180, QImage.Format_RGB888))
+        thumbs.set_viewport_marker(0, QRectF(0.1, 0.1, 0.3, 0.3))
+        self.app.processEvents()
+
+        marker = thumbs._viewport_marker_rect()
+        image_rect = thumbs._thumbnail_image_rect(0)
+        requested = []
+        thumbs.page_position_requested.connect(
+            lambda page, point: requested.append((page, point)))
+        start = QPoint(round(marker.center().x()), round(marker.center().y()))
+        end = QPoint(
+            round(image_rect.left() + image_rect.width() * 0.8),
+            round(image_rect.top() + image_rect.height() * 0.7),
+        )
+        QTest.mousePress(thumbs.viewport(), Qt.LeftButton, pos=start)
+        QTest.mouseMove(thumbs.viewport(), end)
+        QTest.mouseRelease(thumbs.viewport(), Qt.LeftButton, pos=end)
+
+        self.assertTrue(requested)
+        self.assertEqual(requested[-1][0], 0)
+        self.assertAlmostEqual(requested[-1][1].x(), 0.8, places=1)
+        self.assertAlmostEqual(requested[-1][1].y(), 0.7, places=1)
+        self.assertEqual(thumbs.item(0).text(), "1")
+        thumbs.close()
+
 
 if __name__ == "__main__":
     unittest.main()
