@@ -26,6 +26,10 @@ class DocumentWorkflowTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt5.QtWidgets import QApplication
         cls.app = QApplication.instance() or QApplication([])
+        # Every test closes its top-level window.  Keep the shared test
+        # application alive between cases so the offscreen Windows backend
+        # does not race QApplication shutdown with the next AppWindow setup.
+        cls.app.setQuitOnLastWindowClosed(False)
 
     def setUp(self):
         import fitz
