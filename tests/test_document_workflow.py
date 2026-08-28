@@ -59,13 +59,9 @@ class DocumentWorkflowTests(unittest.TestCase):
             self.app.processEvents()
 
     def tearDown(self):
-        from PyQt5.QtCore import QCoreApplication, QEvent
-
         for i in range(self.window._tabs.count()):
             self.window._tabs.widget(i)._dirty = False
         self.window.close()
-        self.window.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         self.events()
         self.settings_patch.stop()
         self.old_patch.stop()

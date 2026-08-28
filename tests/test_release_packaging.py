@@ -61,6 +61,7 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn('      - "v*.*.*"', workflow)
         self.assertIn("cmd /c build_exe.bat", workflow)
         self.assertIn("cmd /c build_installer.bat", workflow)
+        self.assertIn("python ci_test_runner.py", workflow)
         self.assertIn("Get-FileHash -Algorithm SHA256", workflow)
         self.assertIn("sPDF_Setup_latest.exe", workflow)
         self.assertIn("gh release create", workflow)
