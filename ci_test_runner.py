@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import unittest
 
 
 ROOT = Path(__file__).resolve().parent
@@ -18,11 +19,20 @@ def _run(test_name):
         filter(None, (str(TESTS), env.get("PYTHONPATH", ""))))
     print("\n=== %s ===" % test_name, flush=True)
     return subprocess.run(
-        [sys.executable, "-m", "unittest", test_name, "-v"],
+        [sys.executable, str(Path(__file__).resolve()), "--single", test_name],
         cwd=ROOT,
         env=env,
         check=False,
     ).returncode
+
+
+def _run_single(test_name):
+    """Return the unittest result without running unstable Qt DLL teardown."""
+    suite = unittest.defaultTestLoader.loadTestsFromName(test_name)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0 if result.wasSuccessful() else 1)
 
 
 def _document_window_tests():
@@ -54,4 +64,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--single":
+        _run_single(sys.argv[2])
     raise SystemExit(main())
