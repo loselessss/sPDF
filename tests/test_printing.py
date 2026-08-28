@@ -44,23 +44,28 @@ class PrintingTests(unittest.TestCase):
     def test_print_options_apply_range_reverse_duplex_and_copies(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt5.QtPrintSupport import QPrinter
-        from PyQt5.QtWidgets import QApplication
         from pdfeditor.printing import apply_print_options
 
-        app = QApplication.instance() or QApplication([])
-        printer = QPrinter(QPrinter.HighResolution)
+        class RecordingPrinter:
+            def __getattr__(self, name):
+                if name.startswith("set"):
+                    return lambda *values: setattr(
+                        self, name[3:].lower(), values[0] if len(values) == 1
+                        else values)
+                raise AttributeError(name)
+
+        printer = RecordingPrinter()
         apply_print_options(printer, {
             "mode": "range", "from_page": 2, "to_page": 4,
             "reverse": True, "duplex": "short", "copies": 3,
             "orientation": "landscape",
         })
 
-        self.assertEqual(printer.printRange(), QPrinter.PageRange)
-        self.assertEqual((printer.fromPage(), printer.toPage()), (2, 4))
-        self.assertEqual(printer.duplex(), QPrinter.DuplexShortSide)
-        self.assertEqual(printer.copyCount(), 3)
-        self.assertEqual(printer.orientation(), QPrinter.Landscape)
-        app.processEvents()
+        self.assertEqual(printer.printrange, QPrinter.PageRange)
+        self.assertEqual(printer.fromto, (2, 4))
+        self.assertEqual(printer.duplex, QPrinter.DuplexShortSide)
+        self.assertEqual(printer.copycount, 3)
+        self.assertEqual(printer.orientation, QPrinter.Landscape)
 
     @unittest.skipUnless(
         importlib.util.find_spec("PyQt5"),
@@ -69,11 +74,24 @@ class PrintingTests(unittest.TestCase):
     def test_new_printer_applies_saved_duplex_mode(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt5.QtPrintSupport import QPrinter
-        from PyQt5.QtWidgets import QApplication
         from pdfeditor import settings
         from pdfeditor.printing import PrintMixin
 
-        app = QApplication.instance() or QApplication([])
+        class RecordingPrinter:
+            HighResolution = QPrinter.HighResolution
+            DuplexNone = QPrinter.DuplexNone
+            DuplexLongSide = QPrinter.DuplexLongSide
+            DuplexShortSide = QPrinter.DuplexShortSide
+
+            def __init__(self, mode):
+                self.mode = mode
+                self.duplex = None
+
+            def setDocName(self, name):
+                self.doc_name = name
+
+            def setDuplex(self, duplex):
+                self.duplex = duplex
 
         class FakeHost(PrintMixin):
             class Document:
@@ -82,10 +100,11 @@ class PrintingTests(unittest.TestCase):
             doc = Document()
 
         with mock.patch.object(settings, "print_duplex_mode",
-                               return_value="long"):
+                               return_value="long"), mock.patch(
+                                   "PyQt5.QtPrintSupport.QPrinter",
+                                   RecordingPrinter):
             printer = FakeHost()._new_printer()
-        self.assertEqual(printer.duplex(), QPrinter.DuplexLongSide)
-        app.processEvents()
+        self.assertEqual(printer.duplex, QPrinter.DuplexLongSide)
 
     @unittest.skipUnless(
         importlib.util.find_spec("PyQt5"),
