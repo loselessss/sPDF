@@ -180,6 +180,7 @@ class EditMixin:
         스냅샷 복원은 문서 전체를 갈아치우므로 렌더/단어/주석 캐시가 전부
         낡는다 — 한 번에 정리한다.
         """
+        self.doc.invalidate_render()
         self._cache.clear()
         self._words_cache.clear()
         if hasattr(self, "_annot_cache"):

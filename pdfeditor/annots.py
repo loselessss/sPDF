@@ -17,6 +17,13 @@ from .filetypes import is_illustrator_document, suggested_pdf_path
 from .icons import fluent_icon
 
 
+def _set_unsaved_button_texts(dialog):
+    """Qt/Windows 언어와 무관하게 sPDF UI 언어로 버튼을 표시한다."""
+    dialog.button(QMessageBox.Save).setText(tr("저장"))
+    dialog.button(QMessageBox.Discard).setText(tr("저장 안 함"))
+    dialog.button(QMessageBox.Cancel).setText(tr("취소"))
+
+
 class AnnotMixin:
     def _init_annot_state(self):
         self._dirty = False
@@ -57,10 +64,16 @@ class AnnotMixin:
         """저장 안 된 변경이 있으면 물어본다. False면 진행 중단(취소)."""
         if not self._dirty or self.doc is None:
             return True
-        ret = QMessageBox.question(
-            self, "저장되지 않은 변경",
-            "저장하지 않은 주석이 있습니다. 저장할까요?",
-            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+        dialog = QMessageBox(
+            QMessageBox.Question,
+            tr("저장되지 않은 변경"),
+            tr("저장하지 않은 주석이 있습니다. 저장할까요?"),
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            self,
+        )
+        dialog.setDefaultButton(QMessageBox.Save)
+        _set_unsaved_button_texts(dialog)
+        ret = dialog.exec_()
         if ret == QMessageBox.Save:
             return self.save()
         return ret == QMessageBox.Discard

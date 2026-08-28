@@ -23,6 +23,8 @@ HELP_HTML = """
 <tr><td><b>Ctrl+S</b></td><td>저장 (원본은 <code>.bak</code>으로 자동 백업). Illustrator 원본은 덮어쓰지 않고 PDF로 저장</td></tr>
 <tr><td><b>Ctrl+Shift+S</b></td><td>다른 이름으로 저장</td></tr>
 <tr><td>파일 → <b>PDF 용량 줄이기</b></td><td>무손실·균형·강한 압축 중에서 선택해 별도 PDF로 저장</td></tr>
+<tr><td>파일 → <b>이미지를 PDF로 / PDF를 이미지로</b></td><td>여러 이미지를 한 PDF로 만들거나 PDF 쪽을 PNG·JPEG로 저장</td></tr>
+<tr><td><b>Ctrl+P</b></td><td>미리보기·프린터·범위·방향·역순·매수·단면/양면을 한 창에서 설정하고 인쇄</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>탭 닫기</td></tr>
 <tr><td>파일 → <b>미저장 작업 복구</b></td><td>비정상 종료 후 남은 사본 복구·삭제 (독립 실행본)</td></tr>
 </table>
@@ -113,6 +115,10 @@ HELP_HTML = """
 <h3>📑 페이지 조작</h3>
 <p><b>Ctrl+B</b>로 현재 쪽을 책갈피에 추가합니다. 왼쪽 책갈피에서 우클릭으로
 이름 변경·삭제, 드래그로 순서와 계층을 바꿀 수 있습니다. 변경은 저장해야 PDF에 남습니다.</p>
+<p>페이지 → <b>TXT에서 책갈피 불러오기</b>는 <code>1 | 소개</code>,
+<code>소개 | 1</code>, <code>1 소개</code> 형식을 지원합니다. 하위 항목은 앞에
+공백 두 칸 또는 탭 하나를 넣습니다. 페이지 → <b>워터마크 추가</b>에서는 글자·
+크기·투명도·각도와 적용할 쪽을 선택합니다.</p>
 <p>페이지 → <b>페이지 여백 자르기</b>에서 남길 영역을 드래그하고 현재 쪽·지정한 쪽·
 전체 쪽을 선택합니다. 내용은 삭제하지 않고 표시 영역만 바꾸며 Ctrl+Z로 되돌릴 수 있습니다.</p>
 <table cellpadding="4">
@@ -123,7 +129,7 @@ HELP_HTML = """
 <tr><td><b>← / ↑ / → / ↓</b></td><td>프레젠테이션 모드에서 이전·다음 페이지 이동</td></tr>
 <tr><td><b>Esc</b></td><td>프레젠테이션 모드 종료</td></tr>
 <tr><td><b>Ctrl+Delete</b></td><td>현재 페이지 삭제</td></tr>
-<tr><td>썸네일 <b>드래그</b></td><td>페이지 순서 변경</td></tr>
+<tr><td>페이지 → <b>페이지 구성</b></td><td>썸네일을 드래그해 페이지 순서 변경</td></tr>
 <tr><td>페이지 → <b>PDF 병합</b></td><td>여러 PDF를 선택해 현재 페이지 뒤에 순서대로 삽입</td></tr>
 <tr><td>페이지 → <b>PDF 분리</b></td><td><code>*</code> 또는 <code>1-3;4,6;7-9</code> 형식으로 별도 PDF 생성</td></tr>
 <tr><td>페이지 → 현재 페이지 추출</td><td>현재 한 페이지만 새 PDF로 저장</td></tr>
@@ -149,7 +155,8 @@ HELP_HTML_EN = """
 <tr><td><b>Ctrl+S</b></td><td>Save and create a <code>.bak</code> backup. Illustrator sources are exported to PDF instead of being overwritten</td></tr>
 <tr><td><b>Ctrl+Shift+S</b></td><td>Save as</td></tr>
 <tr><td>File → <b>Reduce PDF Size</b></td><td>Save a separate PDF using lossless, balanced, or strong compression</td></tr>
-<tr><td><b>Ctrl+P</b></td><td>Print</td></tr>
+<tr><td>File → <b>Images to PDF / PDF to Images</b></td><td>Combine images into one PDF or export PDF pages as PNG/JPEG</td></tr>
+<tr><td><b>Ctrl+P</b></td><td>Preview and choose printer, range, orientation, order, copies, and one-sided or duplex output in one window</td></tr>
 <tr><td><b>Ctrl+W</b></td><td>Close the current tab</td></tr>
 <tr><td>File → <b>Recover Unsaved Work</b></td><td>Restore or discard copies from an interrupted standalone session</td></tr>
 </table>
@@ -202,6 +209,10 @@ separate model. OCR language is independent of the interface language.</p>
 <h3>✏️ Editing and pages</h3>
 <p><b>Ctrl+B</b> bookmarks the current page. Right-click a bookmark to rename
 or delete it, or drag it to change its order and nesting. Save to keep changes.</p>
+<p>Page → <b>Import Bookmarks from TXT</b> accepts
+<code>1 | Introduction</code>, <code>Introduction | 1</code>, or
+<code>1 Introduction</code>; indent children with two spaces or one tab.
+Page → <b>Add Watermark</b> lets you choose text, size, opacity, angle, and pages.</p>
 <p>Page → <b>Crop Page Margins</b> lets you drag an area to keep and apply the
 relative margins to the current page, a range, or all pages. Cropping changes
 the visible area, not the underlying content. Ctrl+Z undoes it.</p>

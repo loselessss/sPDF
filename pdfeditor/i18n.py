@@ -13,12 +13,28 @@ DEFAULT_LANGUAGE = "en"
 SUPPORTED_LANGUAGES = ("en", "ko")
 _language = DEFAULT_LANGUAGE
 
+# Qt standard buttons use the Qt/Windows translation catalog rather than the
+# application's Korean source strings, so they otherwise remain English on a
+# Korean sPDF interface.
+QT_STANDARD_BUTTONS_KO = {
+    "Save": "저장",
+    "Discard": "저장 안 함",
+    "Don't Save": "저장 안 함",
+    "Cancel": "취소",
+    "Close": "닫기",
+    "OK": "확인",
+    "Yes": "예",
+    "No": "아니요",
+    "Apply": "적용",
+    "Retry": "다시 시도",
+}
+
 
 EN = {
     # Menus and commands
     "파일(&F)": "&File",
     "편집(&E)": "&Edit",
-    "페이지(&P)": "&Page",
+    "페이지 구성(&P)": "Page &Organization",
     "주석(&A)": "&Annotations",
     "보기(&V)": "&View",
     "도움말(&H)": "&Help",
@@ -28,9 +44,34 @@ EN = {
     "최근 파일": "Recent Files",
     "즐겨찾기": "Favorites",
     "저장": "Save",
+    "저장 안 함": "Don't Save",
     "다른 이름으로 저장...": "Save As...",
     "인쇄...": "Print...",
+    "인쇄 미리보기...": "Print Preview...",
+    "인쇄 미리보기": "Print Preview",
+    "인쇄 설정": "Print Settings",
+    "미리보기를 확인하면서 출력 옵션을 선택하세요.":
+        "Choose output options while checking the preview.",
+    "인쇄 방식": "Print Sides",
+    "인쇄 방식:": "Print Sides:",
+    "프린터:": "Printer:",
+    "기본 프린터": "Default Printer",
+    "인쇄 범위:": "Print Range:",
+    "쪽 지정:": "Pages:",
+    "역순 인쇄": "Reverse Order",
+    "용지 방향:": "Orientation:",
+    "자동 (문서 방향)": "Auto (Match Document)",
+    "세로": "Portrait",
+    "가로": "Landscape",
+    "매수:": "Copies:",
+    "단면 인쇄": "Print One Sided",
+    "양면 인쇄 (긴 쪽 넘김)": "Print on Both Sides (Flip on Long Edge)",
+    "양면 인쇄 (짧은 쪽 넘김)": "Print on Both Sides (Flip on Short Edge)",
     "PDF 용량 줄이기...": "Reduce PDF Size...",
+    "이미지를 PDF로...": "Images to PDF...",
+    "이미지를 PDF로": "Images to PDF",
+    "PDF를 이미지로...": "PDF to Images...",
+    "PDF를 이미지로": "PDF to Images",
     "PDF 용량 줄이기": "Reduce PDF Size",
     "압축한 PDF 저장": "Save Compressed PDF",
     "PDF 용량을 줄이는 중입니다...": "Reducing PDF size...",
@@ -90,6 +131,19 @@ EN = {
     "문서 변경 실패": "Document Change Failed",
     "페이지 여백 자르기...": "Crop Page Margins...",
     "페이지 여백 자르기": "Crop Page Margins",
+    "TXT 책갈피 가져오기...": "Import Bookmarks from TXT...",
+    "TXT 책갈피 가져오기": "Import Bookmarks from TXT",
+    "워터마크 추가...": "Add Watermark...",
+    "워터마크 추가": "Add Watermark",
+    "워터마크 문구:": "Watermark text:",
+    "글자 크기:": "Font size:",
+    "투명도:": "Opacity:",
+    "기울기:": "Angle:",
+    "적용 범위:": "Apply to:",
+    "이미지 형식:": "Image format:",
+    "해상도:": "Resolution:",
+    "이미지 저장 폴더": "Image Output Folder",
+    "파일 덮어쓰기": "Overwrite Files",
     "현재 페이지": "Current Page",
     "지정한 페이지": "Page Range",
     "전체 페이지": "All Pages",
@@ -531,6 +585,13 @@ def localize(english, korean):
     return korean if _language == "ko" else english
 
 
+def localize_qt_standard_button(text):
+    """Localize a button label created internally by Qt or Windows."""
+    if _language == "ko":
+        return QT_STANDARD_BUTTONS_KO.get(text, text)
+    return text
+
+
 def install(app, language_code=None):
     """Install automatic translation for widgets created by Qt and the app."""
     if language_code is None:
@@ -554,7 +615,7 @@ def install(app, language_code=None):
             if callable(get) and callable(put):
                 try:
                     old = get()
-                    new = tr(old)
+                    new = localize_qt_standard_button(tr(old))
                     if new != old:
                         put(new)
                 except (RuntimeError, TypeError):

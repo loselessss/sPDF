@@ -17,6 +17,8 @@ UI_LANGUAGES = ("en", "ko")
 DEFAULT_UI_LANGUAGE = "en"
 SIDEBAR_MODES = ("none", "thumbnails", "bookmarks")
 DEFAULT_SIDEBAR_MODE = "thumbnails"
+PRINT_DUPLEX_MODES = ("simplex", "long", "short")
+DEFAULT_PRINT_DUPLEX_MODE = "simplex"
 
 
 def _load():
@@ -142,6 +144,24 @@ def set_sidebar_mode(mode):
     d = _load()
     d["sidebar_mode"] = normalized
     _save(d)
+    return True
+
+
+# --- 인쇄 --------------------------------------------------------------
+
+def print_duplex_mode():
+    mode = str(_load().get(
+        "print_duplex_mode", DEFAULT_PRINT_DUPLEX_MODE)).lower()
+    return mode if mode in PRINT_DUPLEX_MODES else DEFAULT_PRINT_DUPLEX_MODE
+
+
+def set_print_duplex_mode(mode):
+    normalized = str(mode).lower()
+    if normalized not in PRINT_DUPLEX_MODES:
+        return False
+    data = _load()
+    data["print_duplex_mode"] = normalized
+    _save(data)
     return True
 
 

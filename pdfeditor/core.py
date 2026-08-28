@@ -43,6 +43,7 @@ class Document:
         # 비밀번호를 들고 있어야 한다.
         self._password = password
         self._doc = self._open(path, password)
+        self._display_cache = {}
 
     @classmethod
     def from_snapshot(cls, path, data):
@@ -51,6 +52,7 @@ class Document:
         document.path = path
         document._password = None
         document._doc = fitz.open("pdf", data)
+        document._display_cache = {}
         return document
 
     @staticmethod
@@ -69,6 +71,7 @@ class Document:
 
     def close(self):
         if self._doc is not None:
+            self._display_cache.clear()
             self._doc.close()
             self._doc = None
 
@@ -99,9 +102,20 @@ class Document:
         Qt 타입(QImage)을 여기서 만들지 않는 건 이 모듈을 Qt 비의존으로
         유지하기 위해서다 — 조립은 widgets.py가 한다.
         """
-        page = self._doc[index]
-        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        display = self._display_cache.get(index)
+        if display is None:
+            display = self._doc[index].get_displaylist()
+            if len(self._display_cache) >= 5:
+                self._display_cache.pop(next(iter(self._display_cache)))
+            self._display_cache[index] = display
+        pix = display.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
         return pix.width, pix.height, pix.stride, pix.samples
+
+    def invalidate_render(self, index=None):
+        if index is None:
+            self._display_cache.clear()
+        else:
+            self._display_cache.pop(index, None)
 
     def page_size(self, index):
         r = self._doc[index].rect
@@ -187,6 +201,21 @@ class Document:
             previous = level
         self._doc.set_toc(result)
 
+    def replace_bookmarks(self, entries):
+        self.ensure_editable()
+        toc = []
+        previous = 0
+        for level, title, page in entries:
+            level, page = int(level), int(page)
+            if (not str(title).strip() or not 1 <= page <= self.page_count or
+                    not 1 <= level <= previous + 1):
+                raise ValueError("Invalid bookmark outline.")
+            toc.append([level, str(title).strip(), page])
+            previous = level
+        if not toc:
+            raise ValueError("The bookmark outline is empty.")
+        self._doc.set_toc(toc)
+
     def crop_pages(self, indices, fractions):
         """Crop visible margins by relative DISPLAY coordinates, not redaction."""
         self.ensure_editable()
@@ -210,6 +239,45 @@ class Document:
             crops.append((index, rect))
         for index, rect in crops:
             self._doc[index].set_cropbox(rect)
+        self.invalidate_render()
+
+    def add_watermark(self, indices, text, fontsize=42, opacity=0.2,
+                      angle=-35):
+        """Place a centered text watermark over selected pages."""
+        self.ensure_editable()
+        text = str(text).strip()
+        indices = sorted(set(int(index) for index in indices))
+        fontsize, opacity, angle = float(fontsize), float(opacity), float(angle)
+        if not text or not indices or indices[0] < 0 or \
+                indices[-1] >= self.page_count:
+            raise ValueError("Invalid watermark selection.")
+        if not 4 <= fontsize <= 240 or not 0.01 <= opacity <= 1:
+            raise ValueError("Invalid watermark appearance.")
+        fontname = "helv" if text.isascii() else "korea"
+        for index in indices:
+            page = self._doc[index]
+            center = fitz.Point(
+                page.rect.x0 + page.rect.width / 2,
+                page.rect.y0 + page.rect.height / 2)
+            width = self._render_width(text, fontsize, fontname)
+            origin = fitz.Point(center.x - width / 2,
+                                center.y + fontsize * 0.35)
+            page.insert_text(
+                origin, text, fontsize=fontsize, fontname=fontname,
+                color=(0.45, 0.45, 0.45), fill_opacity=opacity,
+                overlay=True, morph=(center, fitz.Matrix(angle)))
+            self.invalidate_render(index)
+
+    def page_image_bytes(self, index, image_format="png", dpi=150):
+        image_format = str(image_format).lower()
+        if image_format not in ("png", "jpeg"):
+            raise ValueError("Unsupported image format.")
+        dpi = int(dpi)
+        if not 72 <= dpi <= 600 or not 0 <= index < self.page_count:
+            raise ValueError("Invalid image export options.")
+        pixmap = self._doc[index].get_pixmap(
+            matrix=fitz.Matrix(dpi / 72.0, dpi / 72.0), alpha=False)
+        return pixmap.tobytes("jpg" if image_format == "jpeg" else "png")
 
     # --- 텍스트 -----------------------------------------------------
 
@@ -575,6 +643,7 @@ class Document:
         """스냅샷으로 되돌린다 — 내부 문서를 통째로 교체."""
         self._doc.close()
         self._doc = fitz.open("pdf", data)
+        self._display_cache = {}
 
     # --- 저장 -------------------------------------------------------
 
@@ -595,6 +664,7 @@ class Document:
         same_path = os.path.normcase(os.path.abspath(out_path)) == \
             os.path.normcase(os.path.abspath(self.path))
         if same_path:
+            self._display_cache.clear()
             self._doc.close()
             self._doc = None
         if backup and os.path.exists(out_path):
@@ -603,4 +673,5 @@ class Document:
         if same_path:
             # 방금 저장한 파일을 다시 연다 — 이후 편집/렌더가 계속 가능하도록.
             self._doc = self._open(out_path, self._password)
+            self._display_cache = {}
             self.path = out_path

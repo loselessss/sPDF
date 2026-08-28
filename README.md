@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.15.0** · English and Korean interface · Windows
+**Current version: 1.16.7** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -17,6 +17,8 @@ computer unless you explicitly use an external link or optional model download.
   on long documents.
 - Switch the left panel between page thumbnails, PDF bookmarks, and a hidden
   view.
+- Click a precise point in a sidebar thumbnail to center that part of a zoomed
+  page. Page reordering is kept in the dedicated page organizer.
 - Use two-page view, full screen, or presentation mode, and return to earlier
   page/zoom/scroll positions with Alt+Left and Alt+Right.
 - Reopen a document where you stopped reading and Ctrl+click document or web
@@ -28,9 +30,14 @@ computer unless you explicitly use an external link or optional model download.
 - Correct text in ordinary or OCR-processed PDFs with undo and redo.
 - Rotate, delete, reorder, insert, merge, split, and extract pages.
 - Add, rename, delete, reorder, and nest PDF bookmarks.
+- Import a bookmark outline from a plain-text file, including nested entries.
 - Crop visible page margins by dragging a preview, for one page, a range, or the
   whole document.
-- Print all pages, the current page, or a page range, including reverse order.
+- Add text watermarks to selected pages and convert images to PDF or PDF pages
+  to PNG/JPEG.
+- Use one print window for preview, printer selection, portrait/landscape/auto
+  orientation, copies, all/current/range pages, reverse order, and one-sided or
+  two-sided output.
 - Reduce file size with lossless, balanced, or strong compression presets.
 
 ### Work with scanned documents
@@ -90,6 +97,11 @@ Press **F1** in the application for the complete localized guide.
   full text-reflow editor, and replacement fonts can look different.
 - Margin cropping changes the visible page area; it does not erase the hidden
   content. Crop and bookmark changes support undo/redo.
+- TXT bookmark import accepts `1 | Introduction`, `Introduction | 1`, or
+  `1 Introduction`; indent a child entry with two spaces or one tab.
+- Two-sided output still requires a duplex-capable printer and driver. Zoom
+  rendering reuses page display data and reduces excess high-resolution work;
+  PyMuPDF itself remains CPU-rendered rather than using a direct GPU backend.
 - Recovery copies refresh every 30 seconds while edits are pending. Protected
   PDFs and copies over 512 MB are excluded, and recovered documents use
   **Save As** first. Recovery complements normal saving; it does not replace it.

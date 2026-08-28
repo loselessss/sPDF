@@ -604,12 +604,11 @@ class ThumbList(QListWidget):
     """썸네일 사이드바. 렌더는 하지 않고 자리만 잡아둔다 — 실제 그림은
     ViewerMixin이 화면에 보이는 항목만 채운다(레이지 렌더, 설계 §3.1).
 
-    드래그로 순서 변경 가능 — 실제 문서 반영은 page_moved 시그널을 받은
-    PagesMixin이 한다."""
+    일반 문서 화면에서는 탐색만 담당한다. 페이지 순서 변경은 선택·삽입 위치를
+    명확히 확인할 수 있는 페이지 구성 화면에서만 제공한다."""
 
     page_selected = pyqtSignal(int)
     page_position_requested = pyqtSignal(int, QPointF)
-    page_moved = pyqtSignal(int, int)  # (원래 행, 옮긴 행)
     thumbnail_width_changed = pyqtSignal(int)
 
     # 뷰포트 크기를 모를 때(레이아웃 전) 렌더할 최대 항목 수 — 여기서
@@ -625,9 +624,11 @@ class ThumbList(QListWidget):
         self.setUniformItemSizes(True)
         self.setItemDelegate(ThumbnailDelegate(self))
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.setDragDropMode(QListWidget.InternalMove)
+        self.setDragDropMode(QAbstractItemView.NoDragDrop)
+        self.setDragEnabled(False)
+        self.setAcceptDrops(False)
+        self.setDropIndicatorShown(False)
         self.currentRowChanged.connect(self._on_row)
-        self._drag_src = None
         self._navigation_press = None
         self._viewport_page = -1
         self._viewport_rect = None
@@ -663,19 +664,6 @@ class ThumbList(QListWidget):
         if target is not None:
             row, point = target
             self.page_position_requested.emit(row, point)
-
-    def dropEvent(self, ev):
-        # 드롭 전 현재 행을 기억했다가, Qt가 항목을 옮긴 뒤 새 위치를 읽어
-        # page_moved를 쏜다. 실제 재정렬은 문서를 바꾼 뒤 reset_pages로
-        # 다시 그리므로, 여기서 Qt가 만든 시각적 이동은 임시로만 쓴다.
-        # 시그널 방출은 이 dropEvent가 끝난 다음으로 미룬다 — 핸들러가
-        # reset_pages로 이 위젯을 재구성하는데 그걸 드롭 처리 도중에 하면
-        # Qt 내부 상태와 충돌한다.
-        src = self.currentRow()
-        super().dropEvent(ev)
-        dst = self.currentRow()
-        if src >= 0 and dst >= 0 and src != dst:
-            QTimer.singleShot(0, lambda: self.page_moved.emit(src, dst))
 
     def reset_pages(self, count):
         """페이지 수만큼 빈 항목 생성 — 아이콘은 나중에 채워진다."""

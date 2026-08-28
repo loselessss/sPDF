@@ -377,7 +377,6 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         self.thumbs.page_selected.connect(self.show_page)
         self.thumbs.page_position_requested.connect(
             self.navigate_from_thumbnail)
-        self.thumbs.page_moved.connect(self.on_thumb_moved)
         self.bookmarks.page_selected.connect(self.show_page)
         self.bookmarks.add_requested.connect(self.add_current_bookmark)
         self.bookmarks.rename_requested.connect(self.rename_bookmark)
@@ -491,6 +490,10 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
                   self.save_as_dialog, "save_as")
         self._act(m, "PDF 용량 줄이기...", None,
                   self.compress_pdf, "download")
+        self._act(m, "이미지를 PDF로...", None,
+                  self._shell.images_to_pdf_dialog, "pages")
+        self._act(m, "PDF를 이미지로...", None,
+                  self.export_pdf_images, "extract")
         if self._shell._recovery_store is not None:
             self._act(m, "미저장 작업 복구...", None,
                       self._shell.show_recovery, "undo")
@@ -524,7 +527,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         self._act(e, "다음 찾기", "F3", self.search_next, "chevron_down")
         self._act(e, "이전 찾기", "Shift+F3", self.search_prev, "chevron_up")
 
-        p = self.menuBar().addMenu("페이지(&P)")
+        p = self.menuBar().addMenu("페이지 구성(&P)")
         self._pages_act = self._act(
             p, "페이지 구성...", "Ctrl+Shift+P",
             self.show_page_organizer, "pages")
@@ -547,6 +550,10 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
                   self.crop_page_margins, "edit")
         self._act(p, "현재 페이지 책갈피 추가", "Ctrl+B",
                   self.add_current_bookmark, "notes")
+        self._act(p, "TXT 책갈피 가져오기...", None,
+                  self.import_outline_text, "notes")
+        self._act(p, "워터마크 추가...", None,
+                  self.add_watermark_dialog, "edit")
 
         a = self.menuBar().addMenu("주석(&A)")
         self._act(a, "선택 영역 형광펜", "Ctrl+H",
@@ -948,6 +955,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         self._closing_doc = True
         self.save_reading_position()
         self._position_timer.stop()
+        self._zoom_render_timer.stop()
         self._recovery.clear()
         self._thumb_timer.stop()
         self._thumbnail_width_timer.stop()
@@ -1225,11 +1233,6 @@ def show_licenses(parent):
 class AppWindow(QMainWindow):
     def __init__(self, updates_enabled=False):
         super().__init__()
-        self.setStatusBar(_TranslatedStatusBar(self))
-        # DocumentTab already has the visible document status bar. The shell's
-        # status bar is retained for update messages, but its own QSizeGrip
-        # would draw a second resize handle at the very bottom-right.
-        self.statusBar().setSizeGripEnabled(False)
         application = QApplication.instance()
         if application is not None:
             install_i18n(application)
@@ -1402,6 +1405,9 @@ class AppWindow(QMainWindow):
         m.addAction(_make_action(
             self, "새 창", "Ctrl+Shift+N", lambda: new_window(force_new=True),
             "new_window"))
+        m.addAction(_make_action(
+            self, "이미지를 PDF로...", None,
+            self.images_to_pdf_dialog, "pages"))
         m.addSeparator()
         if self._recovery_store is not None:
             m.addAction(_make_action(
@@ -1471,12 +1477,10 @@ class AppWindow(QMainWindow):
             return False
         if self._update_worker is not None and self._update_worker.isRunning():
             if manual:
-                self.statusBar().showMessage(
-                    "업데이트를 확인하고 있습니다…", 3000)
+                self._show_shell_status("업데이트를 확인하고 있습니다…", 3000)
             return
         if manual:
-            self.statusBar().showMessage(
-                "GitHub에서 최신 버전을 확인하는 중입니다…")
+            self._show_shell_status("GitHub에서 최신 버전을 확인하는 중입니다…")
         worker = UpdateCheckWorker(self._update_service, self)
         worker.completed.connect(
             lambda update: self._update_check_completed(update, manual))
@@ -1488,7 +1492,7 @@ class AppWindow(QMainWindow):
         return True
 
     def _update_check_completed(self, update, manual):
-        self.statusBar().clearMessage()
+        self._clear_shell_status()
         if update is None:
             if manual:
                 QMessageBox.information(
@@ -1507,7 +1511,7 @@ class AppWindow(QMainWindow):
                 self._show_available_update()
 
     def _update_check_failed(self, message, manual):
-        self.statusBar().clearMessage()
+        self._clear_shell_status()
         if manual:
             QMessageBox.warning(self, "업데이트 확인 실패", message)
 
@@ -1562,6 +1566,46 @@ class AppWindow(QMainWindow):
 
     def refresh_start_page(self):
         self._start_page.refresh()
+
+    def _document_status_bar(self):
+        """Return the active document bar without creating an outer empty bar."""
+        if not hasattr(self, "_tabs"):
+            return None
+        tab = self._tabs.currentWidget()
+        return tab.statusBar() if isinstance(tab, DocumentTab) else None
+
+    def _show_shell_status(self, message, timeout=0):
+        bar = self._document_status_bar()
+        if bar is not None:
+            bar.showMessage(message, timeout)
+
+    def _clear_shell_status(self):
+        bar = self._document_status_bar()
+        if bar is not None:
+            bar.clearMessage()
+
+    def images_to_pdf_dialog(self):
+        from .conversions import IMAGE_OPEN_FILTER, images_to_pdf
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, tr("이미지를 PDF로"), "", tr(IMAGE_OPEN_FILTER))
+        if not paths:
+            return
+        first = os.path.splitext(paths[0])[0] + ".pdf"
+        output, _ = QFileDialog.getSaveFileName(
+            self, tr("이미지를 PDF로"), first, "PDF files (*.pdf)")
+        if not output:
+            return
+        if not output.lower().endswith(".pdf"):
+            output += ".pdf"
+        try:
+            count = images_to_pdf(paths, output)
+        except Exception as error:
+            QMessageBox.critical(self, tr("이미지를 PDF로"), str(error))
+            return
+        self.open_in_tab(output)
+        self._show_shell_status(localize(
+            "Created a %d-page PDF: %s" % (count, output),
+            "%d페이지 PDF 생성됨: %s" % (count, output)), 6000)
 
     # --- 파일 열기 (탭으로) --------------------------------------------
 

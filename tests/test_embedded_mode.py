@@ -22,7 +22,8 @@ class EmbeddedModeTests(unittest.TestCase):
         set_language("en")
 
     def test_internal_module_window_disables_all_update_entry_points(self):
-        from PyQt5.QtWidgets import QAction
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QAction, QStatusBar
         from pdfeditor.app import AppWindow
 
         with patch("pdfeditor.app.settings.ui_language", return_value="en"):
@@ -32,7 +33,9 @@ class EmbeddedModeTests(unittest.TestCase):
         self.assertFalse(window.updates_enabled)
         self.assertIsNone(window._update_service)
         self.assertIsNone(window._recovery_store)
-        self.assertFalse(window.statusBar().isSizeGripEnabled())
+        self.assertEqual(
+            window.findChildren(
+                QStatusBar, options=Qt.FindDirectChildrenOnly), [])
         self.assertFalse(window.check_for_updates(manual=True))
         self.assertNotIn("Check for Updates...", menu_texts)
         window.close()

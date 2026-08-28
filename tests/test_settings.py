@@ -77,6 +77,15 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
         self.assertEqual(settings.sidebar_mode(), "bookmarks")
         self.assertFalse(settings.set_sidebar_mode("invalid"))
 
+    def test_print_duplex_mode_defaults_to_simplex_and_can_be_saved(self):
+        self.assertEqual(settings.print_duplex_mode(), "simplex")
+        self.assertTrue(settings.set_print_duplex_mode("long"))
+        self.assertEqual(settings.print_duplex_mode(), "long")
+        self.assertTrue(settings.set_print_duplex_mode("short"))
+        self.assertEqual(settings.print_duplex_mode(), "short")
+        self.assertFalse(settings.set_print_duplex_mode("booklet"))
+        self.assertEqual(settings.print_duplex_mode(), "short")
+
 
 if __name__ == "__main__":
     unittest.main()

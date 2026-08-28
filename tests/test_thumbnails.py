@@ -207,6 +207,22 @@ class ThumbnailTests(unittest.TestCase):
         self.assertAlmostEqual(target[1].y(), 0.5, places=1)
         thumbs.close()
 
+    def test_sidebar_thumbnails_are_navigation_only(self):
+        from PyQt5.QtWidgets import QAbstractItemView
+        from pdfeditor.widgets import ThumbList
+
+        thumbs = ThumbList()
+        thumbs.reset_pages(3)
+
+        self.assertEqual(
+            thumbs.dragDropMode(), QAbstractItemView.NoDragDrop)
+        self.assertFalse(thumbs.dragEnabled())
+        self.assertFalse(thumbs.acceptDrops())
+        self.assertFalse(thumbs.showDropIndicator())
+        self.assertEqual([thumbs.item(row).text() for row in range(3)],
+                         ["1", "2", "3"])
+        thumbs.close()
+
 
 if __name__ == "__main__":
     unittest.main()

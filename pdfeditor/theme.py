@@ -26,6 +26,30 @@ QFrame#startCard {
     border-radius: 12px;
 }
 
+QFrame#printSettingsCard, QFrame#printPreviewCard {
+    background: #ffffff;
+    border: 1px solid #e1e1e1;
+    border-radius: 12px;
+}
+
+QFrame#printSettingsCard QLabel, QFrame#printPreviewCard QLabel {
+    border: none;
+    background: transparent;
+}
+
+QFrame#printSettingsCard QLabel[role="cardTitle"],
+QFrame#printPreviewCard QLabel[role="cardTitle"] {
+    color: #242424;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QPrintPreviewWidget#printPreviewWidget {
+    background: #f5f5f5;
+    border: 1px solid #ededed;
+    border-radius: 8px;
+}
+
 QFrame#startCard QLabel[role="cardTitle"] {
     color: #242424;
     font-size: 15px;

@@ -1,6 +1,9 @@
 import unittest
 
-from pdfeditor.i18n import SUPPORTED_LANGUAGES, localize, set_language, tr
+from pdfeditor.i18n import (
+    SUPPORTED_LANGUAGES, localize, localize_qt_standard_button,
+    set_language, tr,
+)
 
 
 class InternationalEditionTests(unittest.TestCase):
@@ -10,6 +13,8 @@ class InternationalEditionTests(unittest.TestCase):
     def test_first_international_language_is_english(self):
         self.assertEqual(SUPPORTED_LANGUAGES, ("en", "ko"))
         self.assertEqual(tr("파일(&F)"), "&File")
+        self.assertEqual(
+            tr("페이지 구성(&P)"), "Page &Organization")
         self.assertEqual(tr("페이지 구성..."), "Organize Pages...")
         self.assertEqual(
             tr("PDF/Illustrator 파일 열기..."),
@@ -51,6 +56,12 @@ class InternationalEditionTests(unittest.TestCase):
         self.assertEqual(tr("저장"), "저장")
         self.assertEqual(localize("English", "한국어"), "한국어")
 
+    def test_qt_standard_save_discard_buttons_follow_korean_ui(self):
+        set_language("ko")
+        self.assertEqual(localize_qt_standard_button("Save"), "저장")
+        self.assertEqual(
+            localize_qt_standard_button("Discard"), "저장 안 함")
+        self.assertEqual(localize_qt_standard_button("Cancel"), "취소")
 
 if __name__ == "__main__":
     unittest.main()

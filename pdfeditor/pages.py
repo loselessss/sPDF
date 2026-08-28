@@ -9,7 +9,7 @@ import os
 from PyQt5.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox
 
 from .filetypes import DOCUMENT_OPEN_FILTER
-from .i18n import tr
+from .i18n import localize, tr
 
 from .core import PasswordRequired
 from .page_ranges import page_group_label, parse_page_groups
@@ -39,6 +39,86 @@ class PagesMixin:
             return
         dialog = PageOrganizerDialog(self)
         dialog.exec_()
+
+    def import_outline_text(self):
+        if self.doc is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("TXT 책갈피 가져오기"), "", "Text files (*.txt)")
+        if not path:
+            return
+        try:
+            from .outline_import import parse_outline_text, read_outline_file
+            entries = parse_outline_text(
+                read_outline_file(path), self.doc.page_count)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr("TXT 책갈피 가져오기"), str(error))
+            return
+        if self.doc.bookmarks() and QMessageBox.question(
+                self, tr("TXT 책갈피 가져오기"), localize(
+                    "Replace the document's existing bookmarks?",
+                    "문서의 기존 책갈피를 바꿀까요?"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No) != QMessageBox.Yes:
+            return
+        if self.apply_document_change(
+                lambda: self.doc.replace_bookmarks(entries)):
+            self.set_sidebar_mode("bookmarks")
+            self.statusBar().showMessage(
+                tr("%d개 책갈피를 가져왔습니다." % len(entries)), 4000)
+
+    def add_watermark_dialog(self):
+        if self.doc is None:
+            return
+        from .tool_dialogs import WatermarkDialog
+        dialog = WatermarkDialog(
+            self.page_index, self.doc.page_count, self)
+        if dialog.exec_() != dialog.Accepted:
+            return
+        self.apply_document_change(
+            lambda: self.doc.add_watermark(
+                dialog.pages, dialog.text.text(), dialog.font_size.value(),
+                dialog.opacity.value() / 100.0, dialog.angle.value()),
+            structural=False)
+
+    def export_pdf_images(self):
+        if self.doc is None:
+            return
+        from .tool_dialogs import ExportImagesDialog
+        dialog = ExportImagesDialog(
+            self.page_index, self.doc.page_count, self)
+        if dialog.exec_() != dialog.Accepted:
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, tr("이미지 저장 폴더"), os.path.dirname(self.doc.path))
+        if not folder:
+            return
+        image_format = dialog.format.currentData()
+        extension = "jpg" if image_format == "jpeg" else "png"
+        base = os.path.splitext(os.path.basename(self.doc.path))[0]
+        outputs = [os.path.join(
+            folder, "%s_page_%04d.%s" % (base, page + 1, extension))
+            for page in dialog.pages]
+        existing = [path for path in outputs if os.path.exists(path)]
+        if existing and QMessageBox.question(
+                self, tr("파일 덮어쓰기"), localize(
+                    "%d image files already exist. Overwrite them?" % len(existing),
+                    "같은 이름의 이미지 %d개가 있습니다. 덮어쓸까요?" % len(existing)),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No) != QMessageBox.Yes:
+            return
+        try:
+            from .conversions import write_image_atomic
+            for page, output in zip(dialog.pages, outputs):
+                write_image_atomic(self.doc.page_image_bytes(
+                    page, image_format, dialog.dpi.value()), output)
+        except Exception as error:
+            QMessageBox.critical(
+                self, tr("PDF를 이미지로"), str(error))
+            return
+        self.statusBar().showMessage(localize(
+            "%d images saved to %s" % (len(outputs), folder),
+            "%d개 이미지 저장됨: %s" % (len(outputs), folder)), 6000)
 
     def organizer_move_pages(self, rows, at):
         if self.doc is None:
@@ -160,19 +240,6 @@ class PagesMixin:
         self.doc.delete_page(self.page_index)
         self._after_structure_changed(keep_page=self.page_index)
         self.mark_dirty()
-
-    # --- 순서 변경 (썸네일 드래그) ---------------------------------------
-
-    def on_thumb_moved(self, src, dst):
-        """썸네일을 드래그해 순서를 바꿨을 때 — 문서에 실제로 반영."""
-        if self.doc is None or src == dst:
-            return
-        self._push_undo(structural=True)
-        self.doc.move_page(src, dst)
-        self._after_structure_changed(keep_page=dst)
-        self.mark_dirty()
-        self.statusBar().showMessage(
-            "%d쪽 → %d쪽으로 이동" % (src + 1, dst + 1), 3000)
 
     # --- 병합 / 분리 / 추출 ----------------------------------------------
 
@@ -316,6 +383,7 @@ class PagesMixin:
         _after_page_content_changed(내용만 바뀜)와 달리 썸네일 목록 자체를
         새로 만들어야 한다.
         """
+        self.doc.invalidate_render()
         self.clear_navigation_history()
         self._cache.clear()
         self._words_cache.clear()

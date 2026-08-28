@@ -9,6 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleasePackagingTests(unittest.TestCase):
+    def test_standalone_entry_point_uses_native_file_dialogs(self):
+        entry = (ROOT / "pdfeditor" / "__main__.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn("AA_DontUseNativeDialogs", entry)
+
     def test_application_and_installer_versions_match(self):
         installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
         match = re.search(

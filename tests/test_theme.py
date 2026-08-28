@@ -18,6 +18,9 @@ class FluentThemeTests(unittest.TestCase):
     def test_theme_has_fluent_accent_and_cards(self):
         self.assertIn("#0f6cbd", FLUENT_STYLESHEET)
         self.assertIn("QFrame#startCard", FLUENT_STYLESHEET)
+        self.assertIn("QFrame#printSettingsCard", FLUENT_STYLESHEET)
+        self.assertIn("QFrame#printPreviewCard", FLUENT_STYLESHEET)
+        self.assertIn("QPrintPreviewWidget#printPreviewWidget", FLUENT_STYLESHEET)
         self.assertIn('QPushButton[accent="true"]', FLUENT_STYLESHEET)
 
     def test_theme_does_not_force_classic_fusion_style(self):
@@ -37,6 +40,15 @@ class FluentThemeTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("Qt.ScrollBarAlwaysOff", source)
         self.assertIn("Qt.ElideMiddle", source)
+
+    def test_outer_window_does_not_create_an_empty_status_bar(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
+        ).read_text(encoding="utf-8")
+        shell = source.split("class AppWindow(QMainWindow):", 1)[1]
+        shell_init = shell.split("    def show_recovery", 1)[0]
+        self.assertNotIn("self.setStatusBar", shell_init)
+        self.assertIn("def _document_status_bar", shell)
 
     def test_visible_fluent_controls_have_icons(self):
         expected = {

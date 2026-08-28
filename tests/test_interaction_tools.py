@@ -120,12 +120,16 @@ class InteractionToolTests(unittest.TestCase):
         ViewerMixin.prev_page(host)
         host.show_page.assert_called_once_with(0)
 
-    def test_render_pixel_ratio_always_supersamples_at_least_twice(self):
+    def test_render_pixel_ratio_reduces_extra_work_at_high_zoom(self):
         from PyQt5.QtWidgets import QWidget
         from pdfeditor.viewer import render_pixel_ratio
 
         widget = QWidget()
-        self.assertGreaterEqual(render_pixel_ratio(widget), 2.0)
+        low_zoom = render_pixel_ratio(widget, 1.0)
+        high_zoom = render_pixel_ratio(widget, 4.0)
+        self.assertGreaterEqual(low_zoom, 2.0)
+        self.assertGreaterEqual(high_zoom, widget.devicePixelRatioF())
+        self.assertLessEqual(high_zoom, low_zoom)
         widget.close()
 
     def test_visible_page_rect_tracks_scroll_position(self):

@@ -6,7 +6,7 @@ from .i18n import localize, tr
 
 
 class DocumentToolsMixin:
-    def apply_document_change(self, operation):
+    def apply_document_change(self, operation, structural=True):
         if self.doc is None:
             return False
         stacks = [list(getattr(self, name)) for name in
@@ -15,7 +15,7 @@ class DocumentToolsMixin:
         snapshot = None
         try:
             self.doc.ensure_editable()
-            self._push_undo(structural=True)
+            self._push_undo(structural=structural)
             snapshot = self._undo_stack[-1]
             operation()
         except Exception as error:
@@ -27,7 +27,10 @@ class DocumentToolsMixin:
             self.bookmarks.set_bookmarks(self.doc.bookmarks())
             QMessageBox.warning(self, tr("문서 변경 실패"), str(error))
             return False
-        self._after_structure_changed(keep_page=self.page_index)
+        if structural:
+            self._after_structure_changed(keep_page=self.page_index)
+        else:
+            self._after_page_content_changed()
         self.mark_dirty()
         return True
 

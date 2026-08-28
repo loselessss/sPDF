@@ -15,12 +15,16 @@ from .widgets import qimage_from_render
 from .navigation import NavigationMixin
 
 CACHE_RADIUS = 2  # 현재 페이지 기준 앞뒤로 유지할 페이지 수
-MIN_RENDER_PIXEL_RATIO = 2.0  # 일반 화면도 2배 슈퍼샘플링해 초기 확대 품질 보장
+MIN_RENDER_PIXEL_RATIO = 1.0
+MAX_RENDER_SUPERSAMPLE = 2.0
 
 
-def render_pixel_ratio(widget):
-    """레이아웃 전에도 실제 화면 DPR을 반영하고 최소 2배로 렌더한다."""
-    ratios = [MIN_RENDER_PIXEL_RATIO, float(widget.devicePixelRatioF())]
+def render_pixel_ratio(widget, zoom=1.0):
+    """Use display DPR plus adaptive supersampling at low zoom levels."""
+    supersample = max(
+        MIN_RENDER_PIXEL_RATIO,
+        min(MAX_RENDER_SUPERSAMPLE, MAX_RENDER_SUPERSAMPLE / max(1.0, zoom)))
+    ratios = [supersample, float(widget.devicePixelRatioF())]
     window = widget.window().windowHandle() if widget.window() else None
     if window is not None and window.screen() is not None:
         ratios.append(float(window.screen().devicePixelRatio()))
@@ -42,6 +46,13 @@ class ViewerMixin(NavigationMixin):
         self._thumb_timer.setSingleShot(True)
         self._thumb_timer.setInterval(80)
         self._thumb_timer.timeout.connect(self._render_visible_thumbs)
+        # Continuous wheel / fine zoom events used to synchronously rasterize
+        # the whole page for every step. Keep the old image briefly and render
+        # only the final requested scale.
+        self._zoom_render_timer = QTimer(self)
+        self._zoom_render_timer.setSingleShot(True)
+        self._zoom_render_timer.setInterval(90)
+        self._zoom_render_timer.timeout.connect(self._render_current)
         self._pending_thumbnail_width = None
         self._thumbnail_width_timer = QTimer(self)
         self._thumbnail_width_timer.setSingleShot(True)
@@ -70,7 +81,8 @@ class ViewerMixin(NavigationMixin):
         self.schedule_reading_position()
 
     def _render_current(self):
-        pixel_ratio = render_pixel_ratio(self.view)
+        self._zoom_render_timer.stop()
+        pixel_ratio = render_pixel_ratio(self.view, self.view.zoom)
         pages = self.visible_document_pages()
         images = []
         for page in pages:
@@ -108,7 +120,7 @@ class ViewerMixin(NavigationMixin):
             return
         # 줌이 바뀌면 이전 배율 캐시는 쓸모없다.
         self._cache.clear()
-        self._render_current()
+        self._zoom_render_timer.start()
         self._update_page_label()
 
     def set_zoom(self, zoom):
@@ -203,6 +215,7 @@ class ViewerMixin(NavigationMixin):
 
     def refresh_page(self, index):
         """페이지 내용이 바뀌었을 때(주석 등) 렌더 캐시와 썸네일을 무효화."""
+        self.doc.invalidate_render(index)
         for key in [k for k in self._cache if k[0] == index]:
             del self._cache[key]
         if index == self.page_index:
