@@ -10,7 +10,8 @@ from PyQt5.QtWidgets import (
     QFileDialog, QInputDialog, QListWidgetItem, QMenu, QMessageBox, QToolTip,
 )
 
-from .i18n import tr
+from .i18n import localize, tr
+from .access import annotation_command, saving_command
 
 from .filetypes import is_illustrator_document, suggested_pdf_path
 
@@ -64,6 +65,11 @@ class AnnotMixin:
         """저장 안 된 변경이 있으면 물어본다. False면 진행 중단(취소)."""
         if not self._dirty or self.doc is None:
             return True
+        annotation_mode = self.doc.annotation_mode
+        if annotation_mode:
+            self._annotation_timer.stop()
+            if self._shell.autosave_annotations and self._save_annotations(show_error=False):
+                return True
         dialog = QMessageBox(
             QMessageBox.Question,
             tr("저장되지 않은 변경"),
@@ -73,6 +79,11 @@ class AnnotMixin:
         )
         dialog.setDefaultButton(QMessageBox.Save)
         _set_unsaved_button_texts(dialog)
+        if annotation_mode:
+            dialog.setText(localize(
+                "Annotations have not been saved separately. Save them before closing?",
+                "아직 별도로 저장하지 못한 주석이 있습니다. 닫기 전에 저장할까요?"))
+            dialog.button(QMessageBox.Save).setText(localize("Save annotations", "주석 저장"))
         ret = dialog.exec_()
         if ret == QMessageBox.Save:
             return self.save()
@@ -80,9 +91,12 @@ class AnnotMixin:
 
     # --- 저장 -----------------------------------------------------------
 
+    @saving_command
     def save(self):
         if self.doc is None:
             return False
+        if self.doc.annotation_mode:
+            return self._save_annotations()
         if (is_illustrator_document(self.doc.path) or
                 getattr(self, "_recovered_unsaved", False)):
             return self.save_as_dialog()
@@ -97,9 +111,12 @@ class AnnotMixin:
         self.statusBar().showMessage("저장됨: %s" % self.doc.path, 3000)
         return True
 
+    @saving_command
     def save_as_dialog(self):
         if self.doc is None:
             return False
+        if self.doc.annotation_mode:
+            return self._export_annotations_dialog()
         path, _ = QFileDialog.getSaveFileName(
             self, "다른 이름으로 저장", suggested_pdf_path(self.doc.path),
             "PDF 파일 (*.pdf)")
@@ -123,6 +140,7 @@ class AnnotMixin:
 
     # --- 형광펜 ----------------------------------------------------------
 
+    @annotation_command
     def highlight_selection(self):
         """선택된 단어들에 형광펜 — 줄 단위로 합쳐서 띄엄띄엄해 보이지 않게."""
         if self.doc is None:
@@ -139,14 +157,16 @@ class AnnotMixin:
             else:
                 r[0] = min(r[0], w[0]); r[1] = min(r[1], w[1])
                 r[2] = max(r[2], w[2]); r[3] = max(r[3], w[3])
+        if not self.doc.annotation_mode:
+            self._push_undo()
         self.doc.add_highlight(self.page_index, [tuple(r) for r in lines.values()])
         self._clear_selection()
         self.refresh_page(self.page_index)
-        self.mark_dirty()
-        self._notes_changed()
+        self._annotation_changed()
 
     # --- 메모 ------------------------------------------------------------
 
+    @annotation_command
     def start_note_mode(self):
         if self.doc is None:
             return
@@ -187,14 +207,16 @@ class AnnotMixin:
             QToolTip.hideText()
             self.view.canvas.refresh_cursor()
 
+    @annotation_command
     def _add_note_at(self, pt):
         text, ok = QInputDialog.getMultiLineText(self, "메모 추가", "내용:")
         if not ok or not text.strip():
             return
+        if not self.doc.annotation_mode:
+            self._push_undo()
         self.doc.add_note(self.page_index, pt.x(), pt.y(), text)
         self.refresh_page(self.page_index)
-        self.mark_dirty()
-        self._notes_changed()
+        self._annotation_changed()
 
     def _annot_at(self, pt):
         """지점 위 주석 — 메모 아이콘이 작으므로 히트 판정을 약간 넉넉하게."""
@@ -207,19 +229,30 @@ class AnnotMixin:
 
     def edit_annot(self, a):
         if a["kind"] == "Text":
+            if not self.annotations_enabled:
+                dialog = QMessageBox(self)
+                dialog.setWindowTitle(tr("메모 모아보기"))
+                dialog.setTextFormat(Qt.PlainText)
+                dialog.setText(a["text"])
+                dialog.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                dialog.exec_()
+                return
             text, ok = QInputDialog.getMultiLineText(
                 self, "메모 편집", "내용:", a["text"])
             if ok:
+                if not self.doc.annotation_mode:
+                    self._push_undo()
                 self.doc.set_note_text(self.page_index, a["xref"], text)
                 self.refresh_page(self.page_index)
-                self.mark_dirty()
-                self._notes_changed()
+                self._annotation_changed()
 
+    @annotation_command
     def delete_annot(self, a):
+        if not self.doc.annotation_mode:
+            self._push_undo()
         self.doc.delete_annot(self.page_index, a["xref"])
         self.refresh_page(self.page_index)
-        self.mark_dirty()
-        self._notes_changed()
+        self._annotation_changed()
 
     # --- 메모 모아보기 패널 --------------------------------------------------
 
@@ -275,6 +308,16 @@ class AnnotMixin:
         if self.doc is None:
             return
         menu = QMenu(self)
+        if not self.annotations_enabled:
+            if self._selected:
+                menu.addAction(tr("복사"), self.copy_selection)
+            note = self._annot_at(pt)
+            if note is not None and note["kind"] == "Text":
+                menu.addAction(tr("메모 모아보기"),
+                               lambda: self.edit_annot(note))
+            if menu.actions():
+                menu.exec_(global_pos)
+            return
         if self._selected:
             action = menu.addAction(
                 "선택 영역 형광펜",

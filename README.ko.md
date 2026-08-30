@@ -7,7 +7,7 @@ sPDF는 일상적인 문서 작업을 위한 Windows 데스크톱 PDF 뷰어·�
 하나의 가벼운 프로그램에 담았습니다. 외부 링크나 선택형 모델 다운로드를 직접
 사용하지 않는 한 문서는 사용자 컴퓨터 안에서 처리됩니다.
 
-**현재 버전: 1.17.1** · 한국어·영어 인터페이스 · Windows
+**현재 버전: 1.17.2** · 한국어·영어 인터페이스 · Windows
 
 ## 이런 작업에 사용할 수 있습니다
 
@@ -115,6 +115,35 @@ python run.py 문서.pdf
 
 콘솔 없이 실행하려면 `run.pyw`를 사용합니다. Windows 설치본은 `build_exe.bat`을
 먼저 실행한 다음 `build_installer.bat`으로 만듭니다.
+
+### 외부 모듈에서 읽기 전용으로 사용
+
+호스트의 `QApplication`이 실행 중인 상태에서 창을 열 때 모드를 선택합니다.
+
+```python
+from pdfeditor.app import new_window
+
+viewer = new_window("document.pdf", read_only=True)   # 읽기 전용
+annotator = new_window("document.pdf", read_only=True,
+                       annotations_enabled=True, autosave_annotations=True)
+editor = new_window("document.pdf", read_only=False)  # 편집 허용 (기본값)
+```
+
+`AppWindow`도 같은 옵션을 받습니다. 읽기 전용에서는 확대·이동·검색·텍스트 선택/복사·
+기존 메모 보기·인쇄를 유지하고 본문 편집·OCR·페이지/책갈피 변경을 막습니다.
+`annotations_enabled=True`를 함께 지정하면 메모·형광펜과 실행 취소/다시 실행을 허용합니다.
+이 모드에서는 원본 대신 PDF 옆의 `document.pdf.spdf-annotations.json`에 주석을 저장합니다.
+`autosave_annotations=False`이면 Ctrl+S로 직접 저장합니다. Ctrl+Shift+S는 별도의
+주석 포함 PDF를 만듭니다. 원본 PDF를 옮길 때는 주석 파일도 함께 옮겨야 합니다.
+
+새 창에도 모든 옵션이 이어지며, 설정이 다른 창은 재사용하거나 서로 탭을 옮기지 않습니다.
+설정은 창마다 고정되며 외부 모듈에서는 sPDF 자체 업데이터가 켜지지 않습니다.
+호스트 쪽 ON/OFF 연결, 저장·충돌 처리, 보호된 PDF의 제한은
+[외부 연동 문서](docs/PAPER_ORGANIZER_INTEGRATION.md)에 정리했습니다.
+
+Qt와 독립적인 `Document(path, read_only=True)`도 본문 변경 메서드를 호출하면
+`PermissionError`를 발생시킵니다. 이는 기능 선택 옵션이며 DRM이나 파일 접근 권한
+제한은 아닙니다. 복사와 인쇄는 계속 사용할 수 있습니다.
 
 버전별 변경 내용은 [CHANGELOG.ko.md](CHANGELOG.ko.md), 설계 이력과 유지할 제약은
 [PLAN.md](PLAN.md), 오픈소스 고지는 [LICENSES.md](LICENSES.md)에서 확인할 수 있습니다.

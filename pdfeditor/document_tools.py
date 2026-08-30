@@ -3,9 +3,11 @@
 from PyQt5.QtWidgets import QDialog, QInputDialog, QMessageBox
 
 from .i18n import localize, tr
+from .access import editing_command
 
 
 class DocumentToolsMixin:
+    @editing_command
     def apply_document_change(self, operation, structural=True):
         if self.doc is None:
             return False
@@ -34,6 +36,7 @@ class DocumentToolsMixin:
         self.mark_dirty()
         return True
 
+    @editing_command
     def add_current_bookmark(self):
         if self.doc is None:
             return
@@ -45,11 +48,13 @@ class DocumentToolsMixin:
                     lambda: self.doc.add_bookmark(title, self.page_index)):
                 self.set_sidebar_mode("bookmarks")
 
+    @editing_command
     def rename_bookmark(self, index, title):
         if self.doc is not None:
             self.apply_document_change(
                 lambda: self.doc.rename_bookmark(index, title))
 
+    @editing_command
     def delete_bookmark(self, index):
         if self.doc is None:
             return
@@ -60,10 +65,12 @@ class DocumentToolsMixin:
                 ) == QMessageBox.Yes:
             self.apply_document_change(lambda: self.doc.delete_bookmark(index))
 
+    @editing_command
     def reorder_bookmarks(self, order):
         if self.doc is not None:
             self.apply_document_change(lambda: self.doc.reorder_bookmarks(order))
 
+    @editing_command
     def crop_page_margins(self):
         if self.doc is None:
             return

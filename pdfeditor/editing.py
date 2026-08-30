@@ -11,6 +11,7 @@ undo/redo: PyMuPDF 저널링이 텍스트 삽입과 함께 쓰면 깨져서(연�
 
 from PyQt5.QtCore import QRectF
 from PyQt5.QtWidgets import QInputDialog
+from .access import editing_command, history_command
 
 # 스냅샷 스택 상한 — 무한히 쌓으면 큰 문서에서 메모리를 먹으므로 제한한다.
 UNDO_LIMIT = 30
@@ -44,12 +45,15 @@ class EditMixin:
 
     # --- 편집 모드 ----------------------------------------------------
 
+    @editing_command
     def toggle_edit_mode(self):
         if self.doc is None:
             return
         self.set_edit_mode(not self._edit_mode)
 
     def set_edit_mode(self, on):
+        if on and getattr(self, "read_only", False):
+            return
         self._edit_mode = on
         self._edit_act.setChecked(on)
         if on:
@@ -76,6 +80,7 @@ class EditMixin:
 
     # --- 클릭 → 편집 ---------------------------------------------------
 
+    @editing_command
     def edit_span_at(self, pt):
         """편집 모드에서 canvas 클릭 시 호출(app.py 디스패처가 라우팅).
 
@@ -104,6 +109,7 @@ class EditMixin:
         self._after_page_content_changed()
         self.mark_dirty()
 
+    @editing_command
     def _add_text_box_at(self, pt):
         """빈 자리 클릭 — 새 글자를 얹는다. 스캔본이면 배경도 함께 깔아
         아래 내용을 가린다(OCR 없이도 쓸 수 있는 자유 편집)."""
@@ -140,7 +146,10 @@ class EditMixin:
         self._redo_structural.clear()
         self._update_edit_actions()
 
+    @history_command
     def undo(self):
+        if self.doc is not None and self.doc.annotation_mode:
+            return self._step_annotation_history()
         if not self._undo_stack:
             return
         self._redo_stack.append(self.doc.snapshot())
@@ -154,7 +163,10 @@ class EditMixin:
         self.mark_dirty()
         self._update_edit_actions()
 
+    @history_command
     def redo(self):
+        if self.doc is not None and self.doc.annotation_mode:
+            return self._step_annotation_history(forward=True)
         if not self._redo_stack:
             return
         self._undo_stack.append(self.doc.snapshot())
@@ -169,8 +181,13 @@ class EditMixin:
         self._update_edit_actions()
 
     def _update_edit_actions(self):
-        self._undo_act.setEnabled(bool(self._undo_stack))
-        self._redo_act.setEnabled(bool(self._redo_stack))
+        if self.doc is not None and self.doc.annotation_mode:
+            self._undo_act.setEnabled(self.doc.can_undo_annotation)
+            self._redo_act.setEnabled(self.doc.can_redo_annotation)
+            return
+        editable = not getattr(self, "read_only", False)
+        self._undo_act.setEnabled(editable and bool(self._undo_stack))
+        self._redo_act.setEnabled(editable and bool(self._redo_stack))
 
     # --- 편집 후 갱신 --------------------------------------------------
 

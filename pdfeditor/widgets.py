@@ -37,15 +37,19 @@ class BookmarkTree(QTreeWidget):
     delete_requested = pyqtSignal(int)
     reorder_requested = pyqtSignal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, read_only=False):
         super().__init__(parent)
+        self._read_only = bool(read_only)
         self.setObjectName("bookmarkTree")
         self.setHeaderHidden(True)
         self.setUniformRowHeights(True)
         self.itemActivated.connect(self._activate)
         self.itemClicked.connect(self._activate)
         self.itemChanged.connect(self._renamed)
-        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDragDropMode(QAbstractItemView.NoDragDrop if self._read_only
+                             else QAbstractItemView.InternalMove)
+        if self._read_only:
+            self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
@@ -60,7 +64,12 @@ class BookmarkTree(QTreeWidget):
             page_index = int(page) - 1
             item.setData(0, BOOKMARK_PAGE_ROLE, page_index)
             item.setData(0, BOOKMARK_INDEX_ROLE, index)
-            item.setFlags(item.flags() | Qt.ItemIsEditable)
+            if not self._read_only:
+                item.setFlags(item.flags() | Qt.ItemIsEditable)
+            else:
+                item.setFlags(item.flags() & ~(Qt.ItemIsEditable |
+                                               Qt.ItemIsDragEnabled |
+                                               Qt.ItemIsDropEnabled))
             if page_index >= 0:
                 item.setToolTip(0, tr("%d쪽" % (page_index + 1)))
             if level == 1 or not parents:
@@ -78,12 +87,16 @@ class BookmarkTree(QTreeWidget):
         self.blockSignals(False)
 
     def _renamed(self, item, column):
+        if self._read_only:
+            return
         index = item.data(0, BOOKMARK_INDEX_ROLE)
         if index is not None:
             title = item.text(0)
             QTimer.singleShot(0, lambda: self.rename_requested.emit(int(index), title))
 
     def _context_menu(self, position):
+        if self._read_only:
+            return
         from .icons import fluent_icon
         menu = QMenu(self)
         action = menu.addAction(fluent_icon("add_file"),
@@ -99,6 +112,9 @@ class BookmarkTree(QTreeWidget):
         menu.exec_(self.viewport().mapToGlobal(position))
 
     def dropEvent(self, event):
+        if self._read_only:
+            event.ignore()
+            return
         self.blockSignals(True)
         try:
             super().dropEvent(event)

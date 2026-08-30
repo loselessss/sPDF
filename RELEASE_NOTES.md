@@ -1,21 +1,16 @@
-# sPDF Release Notes
+# sPDF 1.17.2 Release Notes
 
 Release date: 2026-08-30
 
-## 1.17.1 Fixes
+## Embedded reading and annotations
 
-- Increased the update window size and spacing so release notes and actions have more room.
-- Long installer names wrap, and the release-page button sits on a separate row. Display scaling is unchanged.
+- Host programs can turn body editing, annotation editing and annotation autosave on or off separately.
+- Read-only viewing retains zoom, navigation, search, text selection/copy, existing annotations and printing.
+- With annotations enabled, notes and highlights are saved beside the PDF without changing the original. They are restored when the PDF is reopened in a reader window, even with annotation editing off.
+- Disable autosave to save annotations with Ctrl+S; use Ctrl+Shift+S to export a separate annotated PDF for other viewers.
+- Undo/redo, close-time saving, save-error warnings and concurrent-save checks help preserve annotations. Protected PDFs do not create unencrypted annotation sidecars.
+- New windows inherit the selected mode. Standalone editing and embedded self-update behavior remain unchanged.
 
-## 1.17.0 Highlights
+## Window stability
 
-- Return to earlier views with Alt+Left / Alt+Right and reopen documents at the last page, zoom, and scroll position.
-- Add, rename, delete, reorder, nest, and import bookmarks from TXT. Bookmark and page-margin crop changes can be undone.
-- Recover unsaved standalone work after an interrupted session from separate copies without overwriting the original.
-- Add adjustable text watermarks, combine images into a PDF, and export PDF pages to PNG or JPEG.
-- Use native Windows file dialogs while Explorer labels registered documents simply as PDF.
-- Click a thumbnail position or drag its blue viewport marker to move around a zoomed page. Page reordering remains in the dedicated organizer.
-- Preview and configure printer, range, order, copies, Auto/Portrait/Landscape orientation, and one-sided or duplex output in one Fluent print window.
-- Cached, adaptive rendering improves zoom responsiveness on large pages.
-- Clearer Page Organization naming, localized unsaved-change buttons, and removal of the duplicate bottom status strip improve the interface.
-- Temporary installer and interrupted-download files are removed after an update.
+- Fixed a UI translation timing issue that could crash newly created windows.

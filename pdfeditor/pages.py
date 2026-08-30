@@ -9,6 +9,7 @@ import os
 from PyQt5.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox
 
 from .filetypes import DOCUMENT_OPEN_FILTER
+from .access import editing_command
 from .i18n import localize, tr
 
 from .core import PasswordRequired
@@ -34,12 +35,14 @@ class _MergeCancelled(Exception):
 
 
 class PagesMixin:
+    @editing_command
     def show_page_organizer(self):
         if self.doc is None:
             return
         dialog = PageOrganizerDialog(self)
         dialog.exec_()
 
+    @editing_command
     def import_outline_text(self):
         if self.doc is None:
             return
@@ -67,6 +70,7 @@ class PagesMixin:
             self.statusBar().showMessage(
                 tr("%d개 책갈피를 가져왔습니다." % len(entries)), 4000)
 
+    @editing_command
     def add_watermark_dialog(self):
         if self.doc is None:
             return
@@ -81,6 +85,7 @@ class PagesMixin:
                 dialog.opacity.value() / 100.0, dialog.angle.value()),
             structural=False)
 
+    @editing_command
     def export_pdf_images(self):
         if self.doc is None:
             return
@@ -120,6 +125,7 @@ class PagesMixin:
             "%d images saved to %s" % (len(outputs), folder),
             "%d개 이미지 저장됨: %s" % (len(outputs), folder)), 6000)
 
+    @editing_command
     def organizer_move_pages(self, rows, at):
         if self.doc is None:
             return None
@@ -140,6 +146,7 @@ class PagesMixin:
             (len(new_rows), new_rows[0] + 1), 3000)
         return new_rows
 
+    @editing_command
     def organizer_delete_pages(self, rows):
         rows = sorted(set(rows))
         self._push_undo(structural=True)
@@ -151,6 +158,7 @@ class PagesMixin:
             "%d개 페이지 삭제" % len(rows), 3000)
         return keep
 
+    @editing_command
     def organizer_insert_pdfs(self, paths, at):
         if self.doc is None or not paths:
             return 0
@@ -205,12 +213,15 @@ class PagesMixin:
 
     # --- 회전 ----------------------------------------------------------
 
+    @editing_command
     def rotate_page_cw(self):
         self._rotate(90)
 
+    @editing_command
     def rotate_page_ccw(self):
         self._rotate(-90)
 
+    @editing_command
     def _rotate(self, deg):
         if self.doc is None:
             return
@@ -223,6 +234,7 @@ class PagesMixin:
 
     # --- 삭제 ----------------------------------------------------------
 
+    @editing_command
     def delete_current_page(self):
         if self.doc is None:
             return
@@ -243,6 +255,7 @@ class PagesMixin:
 
     # --- 병합 / 분리 / 추출 ----------------------------------------------
 
+    @editing_command
     def merge_pdf(self):
         if self.doc is None:
             return
@@ -305,6 +318,7 @@ class PagesMixin:
         self.statusBar().showMessage(
             "%d개 파일, %d페이지 병합됨" % (len(paths), total_pages), 5000)
 
+    @editing_command
     def split_pdf(self):
         """입력한 페이지 그룹을 각각 별도 PDF로 저장한다."""
         if self.doc is None:
@@ -356,6 +370,7 @@ class PagesMixin:
         self.statusBar().showMessage(
             "%d개 PDF로 분리됨: %s" % (len(outputs), folder), 7000)
 
+    @editing_command
     def extract_current_page(self):
         """현재 페이지만 새 PDF로 저장 — 원본은 그대로."""
         if self.doc is None:

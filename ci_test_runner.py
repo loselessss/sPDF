@@ -8,6 +8,15 @@ import sys
 import unittest
 
 
+if os.name == "nt":
+    import ctypes
+    # Affect this test process and its children only. Native failures still
+    # return a failing exit code and faulthandler trace, without a blocking
+    # Windows application-error dialog on the user's desktop.
+    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+    os.environ.setdefault("PYTHONFAULTHANDLER", "1")
+
+
 ROOT = Path(__file__).resolve().parent
 TESTS = ROOT / "tests"
 DOCUMENT_WORKFLOW = TESTS / "test_document_workflow.py"

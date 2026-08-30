@@ -23,6 +23,8 @@ from PyQt5.QtWidgets import (
 )
 
 from . import settings
+from .access import command_allowed, editing_command
+from .annotation_ui import AnnotationPersistenceMixin
 from .annots import AnnotMixin
 from .editing import EditMixin
 from .document_tools import DocumentToolsMixin
@@ -51,6 +53,12 @@ def _make_action(parent, text, shortcut, slot, icon_name=None):
     if shortcut:
         a.setShortcut(shortcut)
     a.triggered.connect(lambda _checked=False, s=slot: s())
+    kind = getattr(slot, "access_kind", None)
+    if kind:
+        a.setProperty("spdfAccessKind", kind)
+        allowed = command_allowed(parent, kind)
+        a.setEnabled(allowed)
+        a.setVisible(allowed)
     return a
 
 
@@ -227,6 +235,9 @@ class TransferTabBar(QTabBar):
             "token": token,
             "path": tab.doc.path,
             "dirty": bool(tab._dirty),
+            "read_only": shell.read_only,
+            "annotations_enabled": shell.annotations_enabled,
+            "autosave_annotations": shell.autosave_annotations,
             "snapshot": snapshot_path,
         }
         mime = QMimeData()
@@ -318,11 +329,15 @@ class TransferTabBar(QTabBar):
 
 # MRO 주의: TextSelectMixin이 ViewerMixin보다 앞이어야 show_page 훅
 # (페이지 전환 시 선택 초기화/검색 오버레이 재적용)이 동작한다.
-class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
+class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                   PrintMixin, TextSelectMixin, ViewerMixin):
 
     title_changed = pyqtSignal()  # 탭 라벨/창 제목 갱신 신호(셸이 받는다)
     selection_changed = pyqtSignal(object)
+
+    @property
+    def read_only(self):
+        return self._shell.read_only
 
     def __init__(self, shell):
         super().__init__()
@@ -331,6 +346,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         self._init_viewer_state()
         self._init_textsel_state()
         self._init_annot_state()
+        self._init_annotation_persistence()
         self._init_ocr_state()
         self._init_edit_state()
         from .recovery_ui import TabRecovery
@@ -348,7 +364,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         lay.setSpacing(0)
 
         self.thumbs = ThumbList()
-        self.bookmarks = BookmarkTree()
+        self.bookmarks = BookmarkTree(read_only=self.read_only)
         self._sidebar_stack = QStackedWidget()
         self._sidebar_stack.addWidget(self.thumbs)
         self._sidebar_stack.addWidget(self.bookmarks)
@@ -475,7 +491,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         self._act(m, "새 탭", "Ctrl+T", lambda: self._shell.open_dialog(),
                   "new_tab")
         self._act(m, "새 창", "Ctrl+Shift+N",
-                  lambda: new_window(force_new=True), "new_window")
+                  lambda: self._shell.new_window(), "new_window")
         self._recent_menu = m.addMenu("최근 파일")
         self._recent_menu.setIcon(fluent_icon("recent"))
         self._recent_menu.setToolTipsVisible(True)
@@ -485,8 +501,12 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         self._fav_menu.setToolTipsVisible(True)
         self._fav_menu.aboutToShow.connect(self._rebuild_fav_menu)
         m.addSeparator()
-        self._save_act = self._act(m, "저장", "Ctrl+S", self.save, "save")
-        self._act(m, "다른 이름으로 저장...", "Ctrl+Shift+S",
+        annotation_mode = self.read_only and self.annotations_enabled
+        save_label = localize("Save annotations", "주석 저장") if annotation_mode else "저장"
+        export_label = localize("Save PDF with annotations...", "주석 포함 PDF 저장...") \
+            if annotation_mode else "다른 이름으로 저장..."
+        self._save_act = self._act(m, save_label, "Ctrl+S", self.save, "save")
+        self._act(m, export_label, "Ctrl+Shift+S",
                   self.save_as_dialog, "save_as")
         self._act(m, "PDF 용량 줄이기...", None,
                   self.compress_pdf, "download")
@@ -572,6 +592,9 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         o.addSeparator()
         self._act(o, "AI 고품질 OCR 설정...", None,
                   self.show_ocr_engine_dialog, "ai")
+        if self.read_only:
+            p.menuAction().setVisible(False)
+            o.menuAction().setVisible(False)
 
         v = self.menuBar().addMenu("보기(&V)")
         self._back_view_act = self._act(
@@ -707,6 +730,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
 
     # --- 페이지 넘김/클릭 ---------------------------------------------
 
+    @editing_command
     def compress_pdf(self):
         if self.doc is None:
             return
@@ -883,7 +907,8 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         password = None
         while True:
             try:
-                doc = Document(path, password)
+                doc = Document(path, password, read_only=self.read_only,
+                               annotations_enabled=self._shell.annotations_enabled)
                 break
             except PasswordRequired:
                 password, ok = QInputDialog.getText(
@@ -906,6 +931,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
 
         self._set_document(doc, path)
 
+    @editing_command
     def open_snapshot(self, data, original_path):
         """다른 실행 창의 미저장 스냅샷을 원래 파일의 dirty 탭으로 연다."""
         from .core import Document
@@ -944,7 +970,18 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         QTimer.singleShot(0, lambda d=doc: self.finish_initial_layout(d))
         self._schedule_thumbs()
         self._notes_changed()
-        if not doc.has_text(0):
+        self._sync_annotation_access()
+        if self.read_only:
+            self.statusBar().showMessage(localize(
+                "Read-only mode — document editing is disabled.",
+                "읽기 전용 모드 — 문서 편집을 사용할 수 없습니다."), 6000)
+            if doc.annotation_mode and doc.annotations_enabled:
+                self.statusBar().showMessage(localize(
+                    "Annotations enabled; autosave is " +
+                    ("ON." if self._shell.autosave_annotations else "OFF (Ctrl+S to save)."),
+                    "주석 사용 가능 · 자동저장 " +
+                    ("켜짐" if self._shell.autosave_annotations else "꺼짐 (Ctrl+S로 저장)")), 6000)
+        elif not doc.has_text(0):
             self.statusBar().showMessage(
                 "텍스트 레이어가 없는 문서입니다 (스캔본) — 복사/검색은 OCR 후 가능", 6000)
 
@@ -953,6 +990,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
         if getattr(self, "_closing_doc", False):
             return
         self._closing_doc = True
+        self._annotation_timer.stop()
         self.save_reading_position()
         self._position_timer.stop()
         self._zoom_render_timer.stop()
@@ -998,7 +1036,10 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
     def tab_title(self):
         if self.doc is None:
             return "(빈 탭)"
-        return ("*" if self._dirty else "") + os.path.basename(self.doc.path)
+        name = ("*" if self._dirty else "") + os.path.basename(self.doc.path)
+        if self.read_only:
+            name += localize(" [Read-only]", " [읽기 전용]")
+        return name
 
     def _update_title(self):
         # 탭은 자식 창이라 setWindowTitle은 안 보이지만, 셸이 라벨/제목을
@@ -1052,6 +1093,7 @@ class DocumentTab(QMainWindow, DocumentToolsMixin, EditMixin, PagesMixin, OcrMix
     def show_licenses(self):
         show_licenses(self)
 
+    @editing_command
     def show_ocr_engine_dialog(self):
         from . import settings, vl
         _kind, desc = vl.runtime_summary()
@@ -1231,8 +1273,31 @@ def show_licenses(parent):
 # ======================================================================
 
 class AppWindow(QMainWindow):
-    def __init__(self, updates_enabled=False):
+    """Embeddable window; read_only is fixed for this window's lifetime."""
+
+    @property
+    def read_only(self):
+        return self._read_only
+
+    @property
+    def annotations_enabled(self):
+        return self._annotations_enabled
+
+    @property
+    def autosave_annotations(self):
+        return self._autosave_annotations
+
+    @property
+    def access_policy(self):
+        return (self.read_only, self.annotations_enabled, self.autosave_annotations)
+
+    def __init__(self, updates_enabled=False, *, read_only=False,
+                 annotations_enabled=None, autosave_annotations=True):
         super().__init__()
+        self._read_only = bool(read_only)
+        self._annotations_enabled = (not read_only if annotations_enabled is None
+                                     else bool(annotations_enabled))
+        self._autosave_annotations = bool(autosave_annotations)
         application = QApplication.instance()
         if application is not None:
             install_i18n(application)
@@ -1242,7 +1307,7 @@ class AppWindow(QMainWindow):
         self.updates_enabled = bool(updates_enabled)
         self._recovery_store = (
             getattr(application, "_spdf_recovery_store", None)
-            if self.updates_enabled else None)
+            if self.updates_enabled and not self.read_only else None)
         self.setWindowTitle(APP_NAME)
         self.resize(1100, 800)
         self.setAcceptDrops(True)
@@ -1303,6 +1368,8 @@ class AppWindow(QMainWindow):
             QTimer.singleShot(400, lambda: self.show_recovery(automatic=True))
 
     def show_recovery(self, automatic=False):
+        if self.read_only:
+            return
         if self.isHidden():
             return
         from .recovery_ui import show_recovery_dialog
@@ -1395,6 +1462,13 @@ class AppWindow(QMainWindow):
             return
         super().keyPressEvent(event)
 
+    def new_window(self):
+        """Keep this window's embedding policy when opening another window."""
+        return new_window(force_new=True, updates_enabled=self.updates_enabled,
+                          read_only=self.read_only,
+                          annotations_enabled=self.annotations_enabled,
+                          autosave_annotations=self.autosave_annotations)
+
     def _build_shell_menu(self):
         mb = QMenuBar(self)
         m = mb.addMenu("파일(&F)")
@@ -1403,7 +1477,7 @@ class AppWindow(QMainWindow):
         m.addAction(_make_action(
             self, "새 탭", "Ctrl+T", self.open_dialog, "new_tab"))
         m.addAction(_make_action(
-            self, "새 창", "Ctrl+Shift+N", lambda: new_window(force_new=True),
+            self, "새 창", "Ctrl+Shift+N", self.new_window,
             "new_window"))
         m.addAction(_make_action(
             self, "이미지를 PDF로...", None,
@@ -1584,6 +1658,7 @@ class AppWindow(QMainWindow):
         if bar is not None:
             bar.clearMessage()
 
+    @editing_command
     def images_to_pdf_dialog(self):
         from .conversions import IMAGE_OPEN_FILTER, images_to_pdf
         paths, _ = QFileDialog.getOpenFileNames(
@@ -1649,6 +1724,7 @@ class AppWindow(QMainWindow):
                 return tab
         return None
 
+    @editing_command
     def open_snapshot_in_tab(self, snapshot_path, original_path):
         """별도 sPDF 프로세스가 넘긴 미저장 PDF를 읽고 임시 파일을 회수한다."""
         if self._find_open_tab(original_path) is not None:
@@ -1697,6 +1773,8 @@ class AppWindow(QMainWindow):
 
     def _adopt_tab(self, source, tab, index):
         """같은 프로세스의 다른 창에서 문서 위젯과 편집 상태를 그대로 받는다."""
+        if source.access_policy != self.access_policy:
+            return False
         source_index = source._tabs.indexOf(tab)
         if source_index < 0:
             return
@@ -1714,10 +1792,16 @@ class AppWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         source._close_if_empty_after_move()
+        return True
 
     def _receive_tab_drop(self, payload, index):
         """탭 막대와 빈 창 시작 화면이 함께 쓰는 창 간 이동 처리."""
         if not payload or not payload.get("path"):
+            return False
+        read_only = bool(payload.get("read_only", False))
+        policy = (read_only, bool(payload.get("annotations_enabled", not read_only)),
+                  bool(payload.get("autosave_annotations", True)))
+        if policy != self.access_policy:
             return False
         entry = _dragged_tabs.get(payload.get("token")) \
             if payload.get("pid") == os.getpid() else None
@@ -1725,8 +1809,7 @@ class AppWindow(QMainWindow):
             source, tab = entry
             if source is self:
                 return False
-            self._adopt_tab(source, tab, index)
-            return True
+            return self._adopt_tab(source, tab, index)
         if payload.get("dirty"):
             # 프로세스 경계를 넘으면 QWidget 대신 현재 PDF 스냅샷을 복원한다.
             return self.open_snapshot_in_tab(
@@ -1874,21 +1957,31 @@ class AppWindow(QMainWindow):
 _app_windows = []
 
 
-def new_window(path=None, force_new=False, updates_enabled=None):
-    """창을 만든다. 내부 모듈 호출은 기본적으로 자체 업데이트를 끈다.
+def new_window(path=None, force_new=False, updates_enabled=None, *,
+               read_only=False, annotations_enabled=None, autosave_annotations=True):
+    """Open an embedded viewer/editor. ``read_only=True`` disables body edits.
 
-    공식 진입점은 ``updates_enabled=True``를 명시한다. 이미 열린 창에서 새
-    창을 만드는 경우에는 첫 창의 모드를 이어받는다.
+    Read-only mode retains viewing, search, selection, copy and printing.
+    The default remains an editor. Windows with a different access policy are
+    never reused. Set the policy when opening a window, not on an open document.
+    In read-only mode, annotations_enabled=True enables sidecar annotations;
+    autosave_annotations=False makes their saving manual (Ctrl+S).
     """
+    annotation_flag = not read_only if annotations_enabled is None else bool(annotations_enabled)
+    policy = (bool(read_only), annotation_flag, bool(autosave_annotations))
+    updates_enabled = bool(updates_enabled)
     application = QApplication.instance()
     if application is not None:
         # Embedded hosts use the same English UI without enabling sPDF updates.
         install_i18n(application)
-    if force_new or not _app_windows:
-        if updates_enabled is None:
-            updates_enabled = (
-                _app_windows[0].updates_enabled if _app_windows else False)
-        window = AppWindow(updates_enabled=updates_enabled)
+    window = next((candidate for candidate in _app_windows
+                   if candidate.access_policy == policy
+                   and candidate.updates_enabled == updates_enabled),
+                  None)
+    if force_new or window is None:
+        window = AppWindow(updates_enabled=updates_enabled, read_only=read_only,
+                           annotations_enabled=annotation_flag,
+                           autosave_annotations=autosave_annotations)
         if _app_windows:
             previous = _app_windows[-1]
             window.move(previous.x() + 30, previous.y() + 30)
@@ -1896,7 +1989,6 @@ def new_window(path=None, force_new=False, updates_enabled=None):
         translate_tree(window)
         window.show()
     else:
-        window = _app_windows[0]
         window.raise_()
         window.activateWindow()
     if path:

@@ -10,6 +10,7 @@ import tempfile
 import fitz
 
 from .filetypes import is_illustrator_document
+from .access import document_annotation, document_write
 
 
 ANTIALIAS_LEVEL = 8
@@ -37,18 +38,45 @@ class PasswordRequired(Exception):
 class Document:
     """열린 PDF 한 건. 페이지 렌더와 텍스트 추출의 단일 창구."""
 
-    def __init__(self, path, password=None):
+    def __init__(self, path, password=None, *, read_only=False,
+                 annotations_enabled=None):
+        self._read_only = bool(read_only)
+        self._annotations_enabled = (not read_only if annotations_enabled is None
+                                     else bool(annotations_enabled))
+        self._annotation_store = None
+        self.annotation_error = None
         self.path = path
         # 같은 경로로 저장할 때 핸들을 닫았다가 다시 열어야 해서(save_as 참고)
         # 비밀번호를 들고 있어야 한다.
         self._password = password
         self._doc = self._open(path, password)
         self._display_cache = {}
+        sidecar_exists = os.path.exists(os.path.realpath(path) + ".spdf-annotations.json")
+        if self.read_only and (self.annotation_mode or sidecar_exists):
+            try:
+                if self.annotation_mode:
+                    self.ensure_annotatable(require_store=False)
+                if self.password_protected:
+                    raise PermissionError("Protected PDFs cannot use unencrypted annotation sidecars.")
+                from .annotation_store import AnnotationStore
+                store = AnnotationStore(path)
+                annotated = store.rebuild(lambda: self._open(path, password))
+                self._doc.close()
+                self._doc = annotated
+                self._annotation_store = store
+            except Exception as error:
+                # A corrupt/mismatched sidecar must not stop PDF viewing or be
+                # silently replaced by an empty annotation history.
+                self.annotation_error = str(error)
 
     @classmethod
-    def from_snapshot(cls, path, data):
+    def from_snapshot(cls, path, data, *, read_only=False):
         """다른 프로세스에서 받은 현재 편집 상태를 원래 경로의 문서로 연다."""
         document = cls.__new__(cls)
+        document._read_only = bool(read_only)
+        document._annotations_enabled = not read_only
+        document._annotation_store = None
+        document.annotation_error = None
         document.path = path
         document._password = None
         document._doc = fitz.open("pdf", data)
@@ -154,10 +182,88 @@ class Document:
             }
         return None
 
+    @property
+    def read_only(self):
+        return self._read_only
+
+    @property
+    def annotation_mode(self):
+        return self.read_only and self._annotations_enabled
+
+    @property
+    def annotations_enabled(self):
+        return (self._annotations_enabled and not self.annotation_error and
+                bool(self._doc.permissions & fitz.PDF_PERM_ANNOTATE))
+
+    def ensure_annotatable(self, require_store=True):
+        if not self.annotations_enabled:
+            raise PermissionError(self.annotation_error or "Annotation editing is disabled.")
+        if require_store and self.annotation_mode and self._annotation_store is None:
+            raise PermissionError("The annotation store is unavailable.")
+
+    @property
+    def annotations_dirty(self):
+        return bool(self._annotation_store and self._annotation_store.dirty)
+
+    @property
+    def can_undo_annotation(self):
+        return bool(self._annotation_store and self._annotation_store.cursor > 0)
+
+    @property
+    def can_redo_annotation(self):
+        store = self._annotation_store
+        return bool(store and store.cursor < len(store.operations))
+
+    def step_annotation_history(self, forward=False):
+        self.ensure_annotatable()
+        store = self._annotation_store
+        if store is None or not (self.can_redo_annotation if forward else self.can_undo_annotation):
+            return False
+        restored = store.rebuild(lambda: self._open(self.path, self._password),
+                                 store.cursor + (1 if forward else -1))
+        self._doc.close()
+        self._doc = restored
+        self.invalidate_render()
+        return True
+
+    def save_annotations(self):
+        self.ensure_annotatable()
+        if self._annotation_store is None:
+            raise ValueError("Separate annotation saving requires a read-only annotation window.")
+        self._annotation_store.save()
+
+    def export_annotated_pdf(self, out_path):
+        """Export a separate PDF without switching the source or sidecar."""
+        self.ensure_annotatable()
+        out_path = os.path.abspath(os.fspath(out_path))
+        same_path = os.path.normcase(os.path.realpath(out_path)) == os.path.normcase(
+            os.path.realpath(self.path))
+        if same_path or (os.path.exists(out_path) and os.path.samefile(out_path, self.path)):
+            raise ValueError("Choose a different file; the original PDF must be preserved.")
+        if self._annotation_store:
+            sidecar = str(self._annotation_store.path)
+            if (os.path.normcase(os.path.realpath(out_path)) == os.path.normcase(sidecar) or
+                    (os.path.exists(out_path) and os.path.exists(sidecar) and
+                     os.path.samefile(out_path, sidecar))):
+                raise ValueError("Cannot replace the annotation sidecar with a PDF.")
+        fd, temporary = tempfile.mkstemp(prefix=".spdf-export-", suffix=".pdf",
+                                          dir=os.path.dirname(out_path))
+        os.close(fd)
+        try:
+            self._doc.save(temporary, garbage=3, deflate=True,
+                           encryption=fitz.PDF_ENCRYPT_KEEP)
+            os.replace(temporary, out_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
     def ensure_editable(self):
+        if self.read_only:
+            raise PermissionError("This document is open in read-only mode.")
         if not self._doc.permissions & fitz.PDF_PERM_MODIFY:
             raise PermissionError("This PDF does not permit document changes.")
 
+    @document_write
     def add_bookmark(self, title, page):
         self.ensure_editable()
         if not title.strip() or not 0 <= page < self.page_count:
@@ -166,6 +272,7 @@ class Document:
         toc.append([1, title.strip(), page + 1])
         self._doc.set_toc(toc)
 
+    @document_write
     def rename_bookmark(self, index, title):
         self.ensure_editable()
         toc = self._doc.get_toc(False)
@@ -175,6 +282,7 @@ class Document:
             raise ValueError("A bookmark needs a title.")
         self._doc.set_toc_item(index, title=title.strip())
 
+    @document_write
     def delete_bookmark(self, index):
         self.ensure_editable()
         toc = self._doc.get_toc(False)
@@ -187,6 +295,7 @@ class Document:
         del toc[index:end]
         self._doc.set_toc(toc)
 
+    @document_write
     def reorder_bookmarks(self, order):
         self.ensure_editable()
         toc = self._doc.get_toc(False)
@@ -201,6 +310,7 @@ class Document:
             previous = level
         self._doc.set_toc(result)
 
+    @document_write
     def replace_bookmarks(self, entries):
         self.ensure_editable()
         toc = []
@@ -216,6 +326,7 @@ class Document:
             raise ValueError("The bookmark outline is empty.")
         self._doc.set_toc(toc)
 
+    @document_write
     def crop_pages(self, indices, fractions):
         """Crop visible margins by relative DISPLAY coordinates, not redaction."""
         self.ensure_editable()
@@ -241,6 +352,7 @@ class Document:
             self._doc[index].set_cropbox(rect)
         self.invalidate_render()
 
+    @document_write
     def add_watermark(self, indices, text, fontsize=42, opacity=0.2,
                       angle=-35):
         """Place a centered text watermark over selected pages."""
@@ -333,6 +445,7 @@ class Document:
     # self._doc[index].add_...() 처럼 임시로 쓰면 그 줄이 끝날 때 page가
     # GC되면서 annot이 "not bound to any page"로 죽는다(PyMuPDF 특성).
 
+    @document_annotation
     def add_highlight(self, index, rects):
         """형광펜 — rects는 (x0,y0,x1,y1) 목록(줄 단위 권장)."""
         page = self._doc[index]
@@ -340,6 +453,7 @@ class Document:
         annot.update()
         return annot.xref
 
+    @document_annotation
     def add_note(self, index, x, y, text):
         """스티키 노트 — 아이콘이 (x, y)에 붙는다."""
         page = self._doc[index]
@@ -358,6 +472,7 @@ class Document:
                         "text": a.info.get("content", "")})
         return out
 
+    @document_annotation
     def set_note_text(self, index, xref, text):
         page = self._doc[index]
         for a in page.annots():
@@ -366,6 +481,7 @@ class Document:
                 a.update()
                 return
 
+    @document_annotation
     def delete_annot(self, index, xref):
         page = self._doc[index]
         for a in page.annots():
@@ -375,6 +491,7 @@ class Document:
 
     # --- OCR --------------------------------------------------------
 
+    @document_write
     def insert_ocr_text(self, index, items):
         """OCR 결과를 보이지 않는 텍스트 레이어로 삽입(설계 §3.3).
 
@@ -441,6 +558,7 @@ class Document:
 
     # --- 텍스트 편집 (설계 §3.4) --------------------------------------
 
+    @document_write
     def replace_span(self, index, bbox, origin, new_text, size, rgb):
         """한 span의 글자를 지우고(redaction) 같은 baseline에 다시 쓴다.
 
@@ -524,6 +642,7 @@ class Document:
             fg = (0, 0, 0)
         return bg, fg
 
+    @document_write
     def replace_scanned_text(self, index, bbox, origin, new_text, size,
                              bg=None, fg=None):
         """스캔본 글자 교체 — 배경색으로 덮고 그 자리에 새 글자를 쓴다.
@@ -551,6 +670,7 @@ class Document:
             page.insert_text(origin, new_text, fontsize=size,
                              fontname="korea", color=fg)
 
+    @document_write
     def add_text_box(self, index, point, text, size=11, bg=None, fg=(0, 0, 0)):
         """임의 위치에 텍스트 박스 — OCR 없이도 스캔본에 글자를 얹는 자유 편집.
 
@@ -566,14 +686,17 @@ class Document:
 
     # --- 페이지 조작 ---------------------------------------------------
 
+    @document_write
     def rotate_page(self, index, degrees):
         """페이지 회전 — 기존 각도에 상대적으로 더한다(0/90/180/270로 정규화)."""
         page = self._doc[index]
         page.set_rotation((page.rotation + degrees) % 360)
 
+    @document_write
     def delete_page(self, index):
         self._doc.delete_page(index)
 
+    @document_write
     def move_page(self, src, dst):
         """src 페이지를 dst 위치로 이동."""
         if src == dst:
@@ -582,6 +705,7 @@ class Document:
         # 옮길 때 한 칸 밀린다 — 사용자가 기대하는 최종 인덱스로 맞춘다.
         self._doc.move_page(src, dst + 1 if dst > src else dst)
 
+    @document_write
     def reorder_pages(self, order):
         """현재 페이지를 ``order`` 순서로 재배열한다."""
         order = list(order)
@@ -589,6 +713,7 @@ class Document:
             raise ValueError("페이지 순서는 모든 페이지를 정확히 한 번 포함해야 합니다.")
         self._doc.select(order)
 
+    @document_write
     def delete_pages(self, indices):
         """여러 페이지를 원래 인덱스 기준으로 한 번에 삭제한다."""
         indices = sorted(set(indices), reverse=True)
@@ -597,6 +722,7 @@ class Document:
         for index in indices:
             self._doc.delete_page(index)
 
+    @document_write
     def insert_pdf(self, path, at=None, password=None):
         """다른 PDF를 통째로 끼워넣는다(병합). at=None이면 맨 뒤.
 
@@ -610,6 +736,7 @@ class Document:
         finally:
             other.close()
 
+    @document_write
     def extract_pages(self, indices, out_path):
         """선택한 페이지만 새 PDF로 저장(분할). 원본은 그대로 둔다."""
         if not indices:
@@ -639,6 +766,7 @@ class Document:
         """
         return self._doc.tobytes(garbage=0, deflate=True)
 
+    @document_write
     def restore(self, data):
         """스냅샷으로 되돌린다 — 내부 문서를 통째로 교체."""
         self._doc.close()
@@ -647,6 +775,7 @@ class Document:
 
     # --- 저장 -------------------------------------------------------
 
+    @document_write
     def save_as(self, out_path, backup=True):
         """항상 새 파일로 쓴 뒤 교체한다(설계 §4) — 저장 중 죽어도 원본이 남는다.
 

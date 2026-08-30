@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.17.1** · English and Korean interface · Windows
+**Current version: 1.17.2** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -123,6 +123,36 @@ python run.py document.pdf
 
 Use `run.pyw` to launch without a console. Windows packages are built with
 `build_exe.bat` followed by `build_installer.bat`.
+
+### Embedding as a read-only viewer
+
+With the host's `QApplication` running, choose the mode when opening a window:
+
+```python
+from pdfeditor.app import new_window
+
+viewer = new_window("document.pdf", read_only=True)   # reading only
+annotator = new_window("document.pdf", read_only=True,
+                       annotations_enabled=True, autosave_annotations=True)
+editor = new_window("document.pdf", read_only=False)  # editing (default)
+```
+
+`AppWindow` accepts the same options. Read-only mode retains zoom, navigation,
+search, text selection/copy, existing notes and printing, while blocking body
+editing, OCR and page/bookmark changes. `annotations_enabled=True` additionally
+allows notes/highlights and their undo/redo. In this mode, annotations are saved
+beside the PDF in `document.pdf.spdf-annotations.json`, never into the original.
+Disable `autosave_annotations` to save explicitly with Ctrl+S. Ctrl+Shift+S exports
+a separate annotated PDF. Move the sidecar together with the source PDF.
+
+New windows inherit all options; windows with different options are not reused
+and cannot exchange tabs. Options are fixed for each window. Embedded windows
+do not enable sPDF's self-updater. See the [integration guide](docs/PAPER_ORGANIZER_INTEGRATION.md)
+for host-side switches, saving, conflict handling and protected-PDF limitations.
+
+The Qt-independent `Document(path, read_only=True)` also rejects body writes
+with `PermissionError`. This is an application feature switch, not DRM or a
+filesystem permission: copying and printing remain available.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history, [PLAN.md](PLAN.md) for
 design history and enduring constraints, and [LICENSES.md](LICENSES.md) for

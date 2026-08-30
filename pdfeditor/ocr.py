@@ -18,6 +18,7 @@ import sys
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QMessageBox, QProgressDialog
+from .access import editing_command
 
 # 렌더 배율은 자식 프로세스가 페이지 크기에 맞춰 자동 결정한다
 # (ocr_subprocess.TARGET_LONG_PX 참고). None이면 자동.
@@ -188,6 +189,7 @@ class OcrMixin:
             return False
         return True
 
+    @editing_command
     def ocr_current_page(self):
         if self.doc is None or not self._ocr_available():
             return
@@ -205,6 +207,7 @@ class OcrMixin:
                 return
         self._start_ocr([self.page_index])
 
+    @editing_command
     def ocr_document(self):
         """전체 문서 — 이미 텍스트가 있는 페이지는 건너뛴다(이중 삽입 방지)."""
         if self.doc is None or not self._ocr_available():
@@ -216,6 +219,7 @@ class OcrMixin:
             return
         self._start_ocr(pages)
 
+    @editing_command
     def _start_ocr(self, pages):
         if self._ocr_worker is not None:
             return  # 이미 진행 중
@@ -247,6 +251,7 @@ class OcrMixin:
         dlg.canceled.connect(w.cancel)
         w.start()
 
+    @editing_command
     def _on_ocr_page(self, page, items):
         if self._closing_doc or self.doc is None:
             return  # OCR 도중 문서를 닫은 경우

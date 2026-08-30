@@ -601,10 +601,14 @@ def install(app, language_code=None):
     if getattr(app, "_spdf_i18n_filter", None) is not None:
         return app._spdf_i18n_filter
 
+    import weakref
+    from PyQt5 import sip
     from PyQt5.QtCore import QEvent, QObject, QTimer
     from PyQt5.QtWidgets import QComboBox, QListWidget, QTabWidget
 
     def translate_object(obj):
+        if sip.isdeleted(obj):
+            return
         for getter, setter in (
                 ("text", "setText"), ("title", "setTitle"),
                 ("windowTitle", "setWindowTitle"),
@@ -650,12 +654,30 @@ def install(app, language_code=None):
             translate_object(child)
 
     class TranslationFilter(QObject):
+        def __init__(self, parent):
+            super().__init__(parent)
+            self.pending = {}
+
+        def schedule(self, root):
+            key = id(root)
+            if key in self.pending:
+                return
+            self.pending[key] = weakref.ref(root)
+            QTimer.singleShot(0, lambda: self.flush(key))
+
+        def flush(self, key):
+            reference = self.pending.pop(key, None)
+            root = reference() if reference is not None else None
+            if root is not None and not sip.isdeleted(root):
+                translate_tree(root)
+
         def eventFilter(self, watched, event):
-            if event.type() in (QEvent.Show, QEvent.Polish):
-                translate_tree(watched)
-            elif event.type() == QEvent.ChildAdded:
-                child = event.child()
-                QTimer.singleShot(0, lambda c=child: translate_tree(c))
+            # Qt can emit Polish/ChildAdded from inside a widget constructor.
+            # Calling getters on that half-built C++ object can access invalid
+            # memory (not a catchable Python exception). Defer every traversal;
+            # for ChildAdded inspect the completed parent, not event.child().
+            if event.type() in (QEvent.Show, QEvent.Polish, QEvent.ChildAdded):
+                self.schedule(watched)
             return False
 
     event_filter = TranslationFilter(app)
