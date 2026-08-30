@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.17.0** · English and Korean interface · Windows
+**Current version: 1.17.1** · English and Korean interface · Windows
 
 ## What sPDF is for
 

@@ -3,7 +3,7 @@
 from pathlib import Path
 from threading import Event
 
-from PyQt5.QtCore import QThread, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QMessageBox,
@@ -64,21 +64,32 @@ class UpdateDialog(QDialog):
         self._update = update
         self._worker = None
         self.setWindowTitle(tr("sPDF 업데이트"))
-        self.setMinimumSize(600, 450)
+        self.setMinimumSize(680, 540)
+        self.resize(780, 640)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(localize(
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(14)
+        title = QLabel(localize(
             "<h3>sPDF %s is available.</h3>" % update.version,
-            "<h3>sPDF %s 업데이트가 있습니다.</h3>" % update.version)))
+            "<h3>sPDF %s 업데이트가 있습니다.</h3>" % update.version))
+        title.setWordWrap(True)
+        layout.addWidget(title)
         form = QFormLayout()
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(10)
         form.addRow(tr("현재 버전"), QLabel(service.current_version))
         form.addRow(tr("새 버전"), QLabel(update.version))
-        form.addRow(tr("설치 파일"), QLabel(
+        asset_label = QLabel(
             "%s (%s)" % (update.asset.name, _size_text(update.asset.size))
-            if update.asset else tr("등록 대기 중")))
+            if update.asset else tr("등록 대기 중"))
+        asset_label.setWordWrap(True)
+        form.addRow(tr("설치 파일"), asset_label)
         layout.addLayout(form)
         layout.addWidget(QLabel(tr("변경 내용")))
         self.notes = QTextBrowser()
+        self.notes.setMinimumHeight(220)
+        self.notes.document().setDocumentMargin(14)
         self.notes.setPlainText(update.release_notes or tr("변경 기록이 없습니다."))
         layout.addWidget(self.notes, 1)
         self.progress = QProgressBar()
@@ -96,12 +107,16 @@ class UpdateDialog(QDialog):
         self.release_button.setIcon(fluent_icon("external"))
         self.release_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(update.release_url)))
-        buttons.addButton(self.release_button, QDialogButtonBox.ActionRole)
+        layout.addWidget(self.release_button, 0, Qt.AlignLeft)
         self.install_button = QPushButton(tr("다운로드 후 설치"))
         self.install_button.setProperty("accent", True)
         self.install_button.setIcon(fluent_icon("download", "#ffffff"))
         self.install_button.clicked.connect(self._start_download)
         buttons.addButton(self.install_button, QDialogButtonBox.AcceptRole)
+        for button in (*buttons.buttons(), self.release_button):
+            button.setMinimumHeight(36)
+            button.setStyleSheet("padding: 6px 14px;")
+        layout.addSpacing(4)
         layout.addWidget(buttons)
 
         if update.asset is None:

@@ -1,6 +1,11 @@
 # sPDF Release Notes
 
-Release date: 2026-08-28
+Release date: 2026-08-30
+
+## 1.17.1 Fixes
+
+- Increased the update window size and spacing so release notes and actions have more room.
+- Long installer names wrap, and the release-page button sits on a separate row. Display scaling is unchanged.
 
 ## 1.17.0 Highlights
 
