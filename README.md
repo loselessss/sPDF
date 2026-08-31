@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.19.2** · English and Korean interface · Windows
+**Current version: 1.20.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -33,9 +33,27 @@ computer unless you explicitly use an external link or optional model download.
 ### Edit and organize documents
 
 - Standalone sPDF opens in a read-only reader. Use the large blue **Edit mode**
-  button at the left of the ribbon or Ctrl+E to open a separate editor with the
+  button at the left of the ribbon or Ctrl+E to open an editor in a **separate OS process** with the
   current page selected in a thumbnail grid. Saving refreshes matching reader
-  windows in the same running sPDF session without moving their view.
+  windows connected to that sPDF session without moving their view.
+- Choose **Help → Startup workspace → Reader first** (default) or **Editor first**
+  for the next launch. The editor's **File → Open reader** opens an independent reader.
+- Closing, crashing, or hanging an editor leaves the reader on its last good copy.
+  Open Edit mode again to relaunch a closed editor. After 15 seconds without a
+  response, opening Edit mode can start a new process; the old one is never killed automatically.
+- Each workspace reads a private disk copy. Saves complete and validate a temporary
+  PDF before backing up and replacing the destination. Only a completed-save
+  notification refreshes readers. Failed refreshes, timeouts, or an editor stopping
+  just after replacement but before notification leave the last good reader copy open.
+- If another editor saved the source first, Save As preserves both versions instead
+  of overwriting the newer file. Another application's file lock may prevent saving,
+  but pending edits and reader copies stay intact. Closing the reader does not close
+  the editor or its independent recovery session.
+- Each workspace needs temporary disk space roughly equal to the input size. A
+  forced exit can leave temporary copies for OS temp cleanup; these are separate
+  from recovery checkpoints. The small `.spdf-save.lock` file may remain normally;
+  its OS lock is released when the writer exits. Automatic refresh covers connected
+  workspaces; reopen the document after reconnecting or starting a new reader session.
 - Drag grid thumbnails to reorder pages. Double-click a page or press Enter to
   edit it in the same window. **Page overview** or Ctrl+Shift+P returns to the
   grid; unsaved changes and undo/redo history stay intact. Only visible and

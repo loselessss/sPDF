@@ -13,7 +13,10 @@ from PyQt5.QtCore import QRectF
 from PyQt5.QtWidgets import QDialog, QMessageBox
 from .access import editing_command, history_command
 from .i18n import localize
-from .text_edit_dialog import TextEditDialog
+
+def TextEditDialog(*args, **kwargs):
+    from .text_edit_dialog import TextEditDialog as Dialog
+    return Dialog(*args, **kwargs)
 
 # 스냅샷 스택 상한 — 무한히 쌓으면 큰 문서에서 메모리를 먹으므로 제한한다.
 UNDO_LIMIT = 30

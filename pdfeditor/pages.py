@@ -14,7 +14,11 @@ from .i18n import localize, tr
 
 from .core import PasswordRequired
 from .page_ranges import page_group_label, parse_page_groups
-from .page_organizer import PageOrganizerDialog
+
+
+def PageOrganizerDialog(*args, **kwargs):
+    from .page_organizer import PageOrganizerDialog as Dialog
+    return Dialog(*args, **kwargs)
 
 
 def page_order_after_move(page_count, selected, insertion_index):

@@ -114,6 +114,20 @@ def set_ui_language(language):
     return True
 
 
+def startup_workspace():
+    mode = _load().get("startup_workspace", "reader")
+    return mode if mode in ("reader", "editor") else "reader"
+
+
+def set_startup_workspace(mode):
+    if mode not in ("reader", "editor"):
+        return False
+    data = _load()
+    data["startup_workspace"] = mode
+    _save(data)
+    return True
+
+
 # --- 문서 보기 ----------------------------------------------------------
 
 def thumbnail_width():

@@ -267,47 +267,28 @@ class EmbeddedModeTests(unittest.TestCase):
                 self.assertIsNone(embedded._update_service)
 
     def settle(self):
+        from PyQt5.QtTest import QTest
+        QTest.qWait(40)
         for _ in range(6):
             self.app.processEvents()
 
-    def test_reader_opens_independent_editor_and_reuses_pending_tab(self):
+    def test_reader_dispatches_editor_process_with_source_and_update_policy(self):
         from pdfeditor.reader_view import ReaderPageView
-        from pdfeditor.widgets import PageView
         with self.document_windows() as (module, source):
             reader = module.new_window(workspace_mode="reader")
             tab = reader.open_in_tab(str(source))
             self.settle()
-            tab.show_page(1)
-            tab.set_zoom(2)
-            tab._render_current()
-            editor = reader.open_editor(tab)
-            self.assertIs(reader.open_editor(tab), editor)
-            self.assertEqual(editor._tabs.count(), 1)
-            self.settle()
-            editing = editor._tabs.currentWidget()
+            with patch("pdfeditor.process_workspace.application_bridge") as bridge:
+                child = reader.open_editor(tab)
+                self.assertIs(child, bridge.return_value.launch.return_value)
+                bridge.return_value.launch.assert_called_once_with(reader, tab, recovery=False)
             self.assertIsInstance(tab.view, ReaderPageView)
-            self.assertIsInstance(editing.view, PageView)
-            self.assertEqual(editor.workspace_mode, "editor")
-            self.assertFalse(editor.read_only)
-            self.assertTrue(editing.is_editor_overview())
-            self.assertFalse(editing._edit_mode)
-            self.assertTrue(editing._edit_act.isVisible())
-            self.assertIn(editing._edit_act, editing._interaction_toolbar.actions())
-            self.assertIsNot(editing.doc, tab.doc)
-            self.assertIsNone(editing._ocr_worker)
-            self.assertEqual(editing.page_index, 1)
-            self.assertEqual(editing.view.zoom, 2)
+            self.assertFalse(reader.updates_enabled)
             self.assertTrue(tab._open_editor_act.isVisible())
             self.assertFalse(tab._edit_act.isVisible())
-            editing.mark_dirty()
-            self.assertIs(reader.open_editor(tab), editor)
-            self.assertTrue(editing._dirty)
-            self.assertFalse(editor._adopt_tab(reader, tab, 0))
             child = reader.new_window()
             self.assertEqual(child.workspace_mode, "reader")
             self.assertFalse(child.updates_enabled)
-            reader.close()
-            self.assertIsNotNone(editing.doc)
 
     def test_embedded_reader_has_no_editor_escape_hatch(self):
         from pdfeditor.widgets import PageView
@@ -332,6 +313,32 @@ class EmbeddedModeTests(unittest.TestCase):
             with patch.object(reader, "open_editor") as open_editor:
                 reader.show_recovery(automatic=True)
             open_editor.assert_not_called()
+
+    def test_recovery_prompt_is_not_reentered_by_startup_timer(self):
+        with self.document_windows() as (module, source):
+            editor = module.new_window(workspace_mode="editor")
+            with patch("pdfeditor.recovery_ui.show_recovery_dialog",
+                       side_effect=lambda *args, **kwargs: editor.show_recovery(automatic=True)) as prompt:
+                editor.show_recovery()
+                editor.show_recovery(automatic=True)
+            prompt.assert_called_once_with(editor, automatic=False)
+
+    def test_repeated_workspace_close_and_collection_keeps_save_usable(self):
+        import gc
+        with self.document_windows() as (module, source):
+            for _ in range(6):
+                window = module.new_window(str(source), workspace_mode="editor")
+                self.settle()
+                self.assertTrue(window._tabs.currentWidget().save())
+                window.close()
+                self.settle()
+                gc.collect()
+                reader = module.new_window(str(source), workspace_mode="reader")
+                self.settle()
+                self.assertTrue(reader._tabs.currentWidget().doc.render(0, .2)[3])
+                reader.close()
+                self.settle()
+                gc.collect()
 
     def test_reader_and_embedded_windows_keep_view_modes(self):
         from pdfeditor.i18n import set_language
@@ -383,7 +390,7 @@ class EmbeddedModeTests(unittest.TestCase):
             self.assertEqual(source.read_bytes(), original)
             tab._rotate_ccw_act.trigger()
             self.assertEqual(tab.view.page_rotation(0), 0)
-            editor = reader.open_editor(tab)
+            editor = module.new_window(str(source), workspace_mode="editor")
             self.settle()
             editing = editor._tabs.currentWidget()
             editing._rotate_cw_act.trigger()
@@ -424,7 +431,7 @@ class EmbeddedModeTests(unittest.TestCase):
             self.settle()
             tab.view.verticalScrollBar().setValue(250)
             state = tab.capture_view_state()
-            editor = reader.open_editor(tab)
+            editor = module.new_window(str(source), workspace_mode="editor")
             self.settle()
             editing = editor._tabs.currentWidget()
             editing.doc.add_text_box(1, (72, 100), "Saved change")
@@ -447,7 +454,7 @@ class EmbeddedModeTests(unittest.TestCase):
             reader = module.new_window(workspace_mode="reader")
             tab = reader.open_in_tab(str(source))
             self.settle()
-            editor = reader.open_editor(tab)
+            editor = module.new_window(str(source), workspace_mode="editor")
             self.settle()
             editing = editor._tabs.currentWidget()
             editing.doc.add_text_box(1, (72, 100), "Keep unsaved")
@@ -471,7 +478,7 @@ class EmbeddedModeTests(unittest.TestCase):
             reader = module.new_window(workspace_mode="reader")
             tab = reader.open_in_tab(str(source))
             self.settle()
-            editor = reader.open_editor(tab)
+            editor = module.new_window(str(source), workspace_mode="editor")
             self.settle()
             editing = editor._tabs.currentWidget()
             editing.doc.add_text_box(1, (72, 100), "New copy")
@@ -499,7 +506,7 @@ class EmbeddedModeTests(unittest.TestCase):
                 tab = reader.open_in_tab(str(protected))
                 self.settle()
                 with patch("pdfeditor.app.QMessageBox.critical") as error:
-                    editor = reader.open_editor(tab)
+                    editor = module.new_window(str(protected), workspace_mode="editor")
                     self.settle()
             self.assertEqual(editor._tabs.count(), 0)
             error.assert_called_once()

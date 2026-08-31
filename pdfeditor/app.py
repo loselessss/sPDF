@@ -44,6 +44,11 @@ from .update_service import GitHubUpdateService, UpdateError
 from .viewer import ViewerMixin
 from .widgets import BookmarkTree, PageView, ThumbList
 from .workspaces import WindowWorkspaceMixin, workspace_policy
+# Initialize QtNetwork's SIP types before constructing any window. Importing
+# them for the first time during a save can trigger cyclic Qt-widget collection
+# in the middle of extension initialization on Windows. This loads only the
+# lightweight transport; it does not start a server or an editor process.
+from .process_workspace import application_bridge
 
 
 def _make_action(parent, text, shortcut, slot, icon_name=None):
@@ -336,6 +341,7 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
                   PrintMixin, TextSelectMixin, ViewerMixin):
 
     title_changed = pyqtSignal()  # 탭 라벨/창 제목 갱신 신호(셸이 받는다)
+    load_finished = pyqtSignal(bool)
     selection_changed = pyqtSignal(object)
 
     @property
@@ -503,6 +509,9 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
                   "new_tab")
         self._act(m, "새 창", "Ctrl+Shift+N",
                   lambda: self._shell.new_window(), "new_window")
+        if self._shell.workspace_mode == "editor":
+            self._act(m, localize("Open reader", "읽기 창 열기"), None,
+                      self._shell.open_reader, "open")
         self._recent_menu = m.addMenu("최근 파일")
         self._recent_menu.setIcon(fluent_icon("recent"))
         self._recent_menu.setToolTipsVisible(True)
@@ -952,7 +961,8 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         while True:
             try:
                 doc = Document(path, password, read_only=self.read_only,
-                               annotations_enabled=self._shell.annotations_enabled)
+                               annotations_enabled=self._shell.annotations_enabled,
+                               isolated=self._shell.workspace_mode is not None)
                 if self._shell.workspace_mode == "editor":
                     try:
                         doc.ensure_editable()
@@ -1008,7 +1018,10 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         self.thumbs.reset_pages(doc.page_count)
         self.bookmarks.set_bookmarks(doc.bookmarks())
         self._update_title()
-        settings.push_recent(path)
+        try:
+            settings.push_recent(path)
+        except OSError:
+            pass  # Preferences must not invalidate an otherwise usable PDF.
         initial = self._initial_reading_state
         target = max(0, min(initial["page"], doc.page_count - 1)) if initial else 0
         if initial:
@@ -1350,7 +1363,7 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         self.updates_enabled = bool(updates_enabled)
         self._recovery_store = (
             getattr(application, "_spdf_recovery_store", None)
-            if self.updates_enabled and
+            if (self.updates_enabled or self.workspace_mode is not None) and
             (not self.read_only or self.workspace_mode == "reader") else None)
         self.setWindowTitle(self.workspace_title())
         self.resize(1100, 800)
@@ -1414,6 +1427,10 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
     def show_recovery(self, automatic=False):
         if self.isHidden():
             return
+        if getattr(self, "_recovery_dialog_open", False):
+            return
+        if automatic and getattr(self, "_recovery_prompt_handled", False):
+            return
         if self.workspace_mode == "reader":
             if self._recovery_store is None:
                 return
@@ -1428,14 +1445,23 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
                         "There are no recovery copies from interrupted sessions.",
                         "이전 실행에서 남은 복구용 사본이 없습니다."))
                 return
-            editor = self.open_editor()
-            return editor.show_recovery(automatic=automatic)
+            # Let the independent editor claim the abandoned recovery sessions.
+            for folder, lock in list(self._recovery_store._locks.items()):
+                if folder != self._recovery_store.session:
+                    lock.unlock()
+                    del self._recovery_store._locks[folder]
+            return self.open_editor(recovery=True)
         if self.read_only:
             return
         if self.isHidden():
             return
         from .recovery_ui import show_recovery_dialog
-        show_recovery_dialog(self, automatic=automatic)
+        self._recovery_dialog_open = True
+        self._recovery_prompt_handled = True
+        try:
+            show_recovery_dialog(self, automatic=automatic)
+        finally:
+            self._recovery_dialog_open = False
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1553,6 +1579,9 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             m.addAction(_make_action(
                 self, localize("Open editor", "편집 창 열기"), "Ctrl+E",
                 self.open_editor, "edit"))
+        elif self.workspace_mode == "editor":
+            m.addAction(_make_action(self, localize("Open reader", "읽기 창 열기"),
+                                     None, self.open_reader, "open"))
         m.addSeparator()
         if self._recovery_store is not None:
             m.addAction(_make_action(
@@ -1577,6 +1606,17 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         return mb
 
     def _add_language_menu(self, parent_menu):
+        if self.workspace_mode is not None:
+            startup = parent_menu.addMenu(localize("Startup workspace", "시작 모드"))
+            modes = QActionGroup(startup)
+            modes.setExclusive(True)
+            for mode, label in (("reader", localize("Reader first", "리더 우선")),
+                                ("editor", localize("Editor first", "편집 우선"))):
+                action = startup.addAction(label)
+                action.setCheckable(True)
+                action.setChecked(settings.startup_workspace() == mode)
+                modes.addAction(action)
+                action.triggered.connect(lambda _checked, mode=mode: self._select_startup_workspace(mode))
         menu = parent_menu.addMenu(tr("언어"))
         menu.setIcon(fluent_icon("settings"))
         group = QActionGroup(menu)
@@ -1593,6 +1633,12 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             group.addAction(action)
             menu.addAction(action)
         return menu
+
+    def _select_startup_workspace(self, mode):
+        try:
+            settings.set_startup_workspace(mode)
+        except OSError as error:
+            self.statusBar().showMessage(str(error), 8000)
 
     def _select_ui_language(self, language_code):
         if language_code == settings.ui_language():
@@ -1826,6 +1872,7 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             return
         tab.open_path(path)
         tab._opening_path = None
+        tab.load_finished.emit(tab.doc is not None)
         if tab.doc is None:
             self._remove_tab(tab)  # 열기 실패/취소 → 빈 탭 제거
         else:

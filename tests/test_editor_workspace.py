@@ -255,10 +255,9 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.assertGreaterEqual(button.height(), 40)
         self.assertTrue(reading._interaction_toolbar.isAncestorOf(button))
         self.assertIsNone(reading._workspace_header)
-        button.click()
-        self.settle()
-        editor = next(window for window in self.module._app_windows if window.workspace_mode == "editor")
-        self.assertTrue(editor._tabs.currentWidget().is_editor_overview())
+        with patch.object(reader, "open_editor") as launch:
+            button.click()
+        launch.assert_called_once_with(reading)
         embedded = self.module.new_window(str(self.path))
         self.settle()
         tab = embedded._tabs.currentWidget()

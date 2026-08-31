@@ -50,12 +50,23 @@ def main():
     if os.path.exists(icon):
         app.setWindowIcon(QIcon(icon))
 
-    # 탐색기 연결 프로그램으로 열릴 때 파일 경로가 인자로 들어온다(설계 §8).
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    import argparse
+    from . import settings
+    parser = argparse.ArgumentParser(prog="sPDF")
+    parser.add_argument("path", nargs="?")
+    parser.add_argument("--workspace", choices=("reader", "editor"))
+    parser.add_argument("--peer")
+    parser.add_argument("--peer-token")
+    parser.add_argument("--no-updates", action="store_true")
+    args = parser.parse_args()
     # 공식 실행 진입점에서만 자체 업데이트를 켠다. 다른 프로그램이
     # pdfeditor를 내부 모듈로 불러 new_window/AppWindow를 만들면 기본값은 꺼짐이다.
-    new_window(args[0] if args else None, updates_enabled=True,
-               workspace_mode="reader")
+    new_window(args.path, updates_enabled=not args.no_updates,
+               workspace_mode=args.workspace or settings.startup_workspace())
+    from .process_workspace import application_bridge
+    bridge = application_bridge()
+    if args.peer and args.peer_token:
+        bridge.connect_parent(args.peer, args.peer_token)
     sys.exit(app.exec_())
 
 

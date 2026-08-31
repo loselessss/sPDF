@@ -11,7 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 class ReleasePackagingTests(unittest.TestCase):
     def test_standalone_starts_in_reader_workspace(self):
         entry = (ROOT / "pdfeditor" / "__main__.py").read_text(encoding="utf-8")
-        self.assertIn('workspace_mode="reader"', entry)
+        self.assertIn('workspace_mode=args.workspace or settings.startup_workspace()', entry)
+        from pdfeditor import settings
+        from unittest.mock import patch
+        with patch.object(settings, "_load", return_value={}):
+            self.assertEqual(settings.startup_workspace(), "reader")
 
     def test_standalone_entry_point_uses_native_file_dialogs(self):
         entry = (ROOT / "pdfeditor" / "__main__.py").read_text(

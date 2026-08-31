@@ -39,7 +39,7 @@ class Document:
     """열린 PDF 한 건. 페이지 렌더와 텍스트 추출의 단일 창구."""
 
     def __init__(self, path, password=None, *, read_only=False,
-                 annotations_enabled=None):
+                 annotations_enabled=None, isolated=False, snapshot=None):
         self._read_only = bool(read_only)
         self._annotations_enabled = (not read_only if annotations_enabled is None
                                      else bool(annotations_enabled))
@@ -49,7 +49,17 @@ class Document:
         # 같은 경로로 저장할 때 핸들을 닫았다가 다시 열어야 해서(save_as 참고)
         # 비밀번호를 들고 있어야 한다.
         self._password = password
-        self._doc = self._open(path, password)
+        self._snapshot = snapshot
+        if isolated and self._snapshot is None:
+            from .document_snapshot import DocumentSnapshot
+            self._snapshot = DocumentSnapshot(path)
+        try:
+            self._doc = self._open(self._snapshot.path if self._snapshot else path, password)
+        except Exception:
+            if self._snapshot:
+                self._snapshot.close()
+            raise
+        self._source_revision = self._snapshot.revision if self._snapshot else None
         self._display_cache = {}
         sidecar_exists = os.path.exists(os.path.realpath(path) + ".spdf-annotations.json")
         if self.read_only and (self.annotation_mode or sidecar_exists):
@@ -60,7 +70,8 @@ class Document:
                     raise PermissionError("Protected PDFs cannot use unencrypted annotation sidecars.")
                 from .annotation_store import AnnotationStore
                 store = AnnotationStore(path)
-                annotated = store.rebuild(lambda: self._open(path, password))
+                annotated = store.rebuild(lambda: self._open(
+                    self._snapshot.path if self._snapshot else path, password))
                 self._doc.close()
                 self._doc = annotated
                 self._annotation_store = store
@@ -102,6 +113,9 @@ class Document:
             self._display_cache.clear()
             self._doc.close()
             self._doc = None
+        if getattr(self, "_snapshot", None) is not None:
+            self._snapshot.close()
+            self._snapshot = None
 
     @property
     def page_count(self):
@@ -813,6 +827,8 @@ class Document:
         순서로 처리한다.
         """
         out_path = os.fspath(out_path)
+        if getattr(self, "_snapshot", None) is not None:
+            return self._save_isolated(out_path, backup)
         fd, tmp = tempfile.mkstemp(prefix=".spdf-save-", suffix=".pdf",
                                    dir=os.path.dirname(os.path.abspath(out_path)))
         os.close(fd)
@@ -844,3 +860,44 @@ class Document:
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
+
+    def _save_isolated(self, out_path, backup):
+        """No source handle release, no reader handshake, no in-place writes.
+
+        Cooperating writers use a nonblocking OS lock. A changed source is a
+        conflict, never silently overwritten by a stale editor. External locks
+        simply fail the save, leaving both the document and pending edits intact.
+        """
+        from .document_snapshot import file_revision
+        from .save_transaction import destination_lock, atomic_backup
+        same = os.path.normcase(os.path.realpath(out_path)) == os.path.normcase(os.path.realpath(self.path))
+        expected = self._source_revision if same else file_revision(out_path)
+        folder = os.path.dirname(os.path.abspath(out_path))
+        fd, temporary = tempfile.mkstemp(prefix=".spdf-save-", suffix=".pdf", dir=folder)
+        os.close(fd)
+        try:
+            self._doc.save(temporary, garbage=3, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+            # Validate and flush the completed file before touching the target.
+            probe = self._open(temporary, self._password)
+            try:
+                if probe.page_count != self.page_count or probe.page_count < 1:
+                    raise OSError("Saved PDF validation failed")
+            finally:
+                probe.close()
+            with open(temporary, "rb+") as stream:
+                os.fsync(stream.fileno())
+            with destination_lock(out_path):
+                if file_revision(out_path) != expected:
+                    raise OSError("The PDF was changed by another writer. Use Save As to preserve both versions.")
+                if backup and expected is not None:
+                    atomic_backup(out_path)
+                if file_revision(out_path) != expected:
+                    raise OSError("The PDF changed during backup. Use Save As.")
+                os.replace(temporary, out_path)
+                self._source_revision = file_revision(out_path)
+            # Keep editing the private copy; source handles are never reopened.
+            self.path = out_path
+            return self._source_revision
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)

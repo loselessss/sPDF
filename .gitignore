@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .venv/
+.test-runtime/
+test-*.log
 
 # 편집기 임시/백업
 *.bak

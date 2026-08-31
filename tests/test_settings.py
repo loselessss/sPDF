@@ -20,6 +20,15 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
     def test_first_automatic_check_is_due(self):
         self.assertTrue(settings.automatic_update_check_due(now=1000))
 
+    def test_startup_workspace_defaults_validates_and_persists(self):
+        self.assertEqual(settings.startup_workspace(), "reader")
+        self.assertTrue(settings.set_startup_workspace("editor"))
+        self.assertEqual(settings.startup_workspace(), "editor")
+        self.assertFalse(settings.set_startup_workspace("unknown"))
+        self.assertEqual(settings.startup_workspace(), "editor")
+        with patch.object(settings, "_load", return_value={"startup_workspace": "unknown"}):
+            self.assertEqual(settings.startup_workspace(), "reader")
+
     def test_automatic_check_is_limited_to_once_per_24_hours(self):
         settings.mark_automatic_update_check(now=1000)
 

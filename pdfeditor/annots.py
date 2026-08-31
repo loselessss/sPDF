@@ -139,9 +139,14 @@ class AnnotMixin:
         return True
 
     def _save_document_file(self, path):
-        from .workspaces import readers_released_for_save
-        with readers_released_for_save(self, path):
-            self.doc.save_as(path)
+        revision = self.doc.save_as(path)
+        if self._shell.workspace_mode == "editor":
+            from .document_snapshot import file_revision
+            from .process_workspace import application_bridge
+            try:
+                application_bridge().saved(path, revision or file_revision(path))
+            except OSError as error:
+                self.statusBar().showMessage(str(error), 8000)
 
     # --- 형광펜 ----------------------------------------------------------
 

@@ -5,7 +5,6 @@ from PyQt5.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStackedWidget, QV
 
 from .i18n import localize
 from .icons import fluent_icon
-from .page_organizer import PageOrganizerPanel
 
 
 class EditorWorkspaceMixin:
@@ -15,6 +14,7 @@ class EditorWorkspaceMixin:
         self._editor_overview = self._shell.workspace_mode == "editor"
         if not self._editor_overview:
             return viewer
+        from .page_organizer import PageOrganizerPanel
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)

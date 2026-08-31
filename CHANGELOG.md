@@ -2,10 +2,15 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.19.2 - 2026-08-31
+## 1.20.0 - 2026-08-31
 
-### Improvements
+### 새 기능
 
-- Clarified sPDF's GNU AGPL v3-only licensing and retained previous MIT and third-party notices.
-- Added offline license texts and a version-matched source-code link to the license dialog. The installer also includes the license texts and source guide.
-- Release downloads now provide matching application source and dependency-source directions alongside the installer.
+- Reader and editor workspaces now run in separate OS processes. Editor shutdowns, crashes, and hangs leave the reader available; opening Edit mode can launch a fresh editor.
+- Added Reader first (default) and Editor first startup settings, plus Open reader in the editor's File menu.
+
+### 개선
+
+- Workspaces use independent document copies. Completed saves refresh connected readers without moving the page, zoom, or scroll position; failed or timed-out refreshes preserve the last good copy.
+- Saves validate a temporary PDF before atomic replacement and preserve a backup. Conflicting editors cannot silently overwrite newer saves; failed saves retain pending edits.
+- Unsaved editor recovery continues independently when the reader exits. Embedded reader, annotation, and self-update policies remain unchanged.
