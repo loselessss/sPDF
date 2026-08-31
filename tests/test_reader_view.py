@@ -252,6 +252,91 @@ class ReaderViewTests(unittest.TestCase):
             with self.subTest(scale=scale, rect=rect), self.assertRaises(ValueError):
                 self.doc.render_region(0, scale, rect)
 
+    def test_view_rotation_keeps_pdf_unchanged_and_reuses_previews(self):
+        original = Path(self.doc.path).read_bytes()
+        with patch.object(self.doc, "render", wraps=self.doc.render) as render:
+            self.view.rotate_page_view(0, 90)
+            render.assert_not_called()
+            self.assertEqual(self.view.displayed_page_size(self.doc, 0), (840, 600))
+            self.assertEqual(self.view.sceneRect().width(), 840)
+            self.view.render_document(self.doc, [2], 2)
+            self.view.render_document(self.doc, [0], 0)
+        # Switching pages can make new previews; rotating alone does not.
+        self.assertEqual(render.call_count, 2)
+        self.assertEqual(self.view.page_rotation(0), 90)
+        self.view.rotate_page_view(0, -90)
+        self.assertEqual(self.view.page_rotation(0), 0)
+        self.assertFalse(self.view._rotations)
+        self.assertEqual(self.doc._doc[0].rotation, 0)
+        self.assertFalse(self.doc._doc.is_dirty)
+        self.assertEqual(Path(self.doc.path).read_bytes(), original)
+
+    def test_all_view_rotations_align_tiles_pointer_zoom_and_overlays(self):
+        from PyQt5.QtCore import QPointF, QRectF
+        self.view.preview_zoom(3)
+        point = QPointF(150, 200)
+        for angle in (0, 90, 180, 270):
+            self.view.rotate_page_view(0, angle - self.view.page_rotation(0))
+            self.view.center_on_document_point(point)
+            self.finish_tiles()
+            cursor = self.view.mapFromScene(self.view._page_transforms[0].map(point))
+            mapped = self.view.canvas._page_point(self.view.mapToScene(cursor))
+            self.assertLess((mapped[1] - point).manhattanLength(), 1)
+            before = self.view.viewport().grab().toImage().pixelColor(cursor)
+            self.assertLess(abs(before.red() - 51), 3)
+            self.assertLess(abs(before.green() - 153), 3)
+            self.assertLess(abs(before.blue() - 204), 3)
+            self.view.canvas.set_selection([QRectF(140, 190, 20, 20)])
+            after = self.view.viewport().grab().toImage().pixelColor(cursor)
+            self.assertNotEqual(before, after)
+            self.view.canvas.set_selection([])
+            self.view.preview_zoom(8, cursor)
+            mapped_after = self.view.canvas._page_point(self.view.mapToScene(cursor))
+            self.assertLess((mapped_after[1] - point).manhattanLength(), 1)
+            self.view.preview_zoom(3)
+
+    def test_rotated_two_page_selection_and_thumbnail_marker(self):
+        from PyQt5.QtCore import QPointF, QRectF, Qt
+        from PyQt5.QtTest import QTest
+        self.view.render_document(self.doc, [0, 2], 2)
+        self.view.rotate_page_view(2, 90)
+        self.view.preview_zoom(0.4)
+        first, second = [rect for _page, _pix, rect in self.view.canvas._pages]
+        self.assertAlmostEqual(second.left(), first.right() + 16)
+        self.assertEqual(second.width(), 840 * .4)
+        point = QPointF(150, 200)
+        cursor = self.view.mapFromScene(self.view._page_transforms[2].map(point))
+        clicked = []
+        self.view.canvas.ctrl_clicked.connect(clicked.append)
+        QTest.mouseClick(self.view.viewport(), Qt.LeftButton, Qt.ControlModifier, cursor)
+        self.assertEqual(len(clicked), 1)
+        self.assertLess((clicked[0] - point).manhattanLength(), 1)
+        self.view.preview_zoom(8)
+        self.view.center_on_page_fraction(QPointF(.6, .7))
+        marker = self.view.visible_page_rect()
+        self.assertAlmostEqual(marker.center().x(), .6, delta=.001)
+        self.assertAlmostEqual(marker.center().y(), .7, delta=.001)
+        self.view.ensure_rect_visible(QRectF(100, 100, 10, 10))
+        self.assertTrue(self.view._visible_scene_rect().contains(
+            self.view._page_transforms[2].mapRect(QRectF(100, 100, 10, 10))))
+
+    def test_view_rotation_retained_on_save_refresh_but_not_new_file(self):
+        from pdfeditor.core import Document
+        self.view.rotate_page_view(0, 90)
+        refreshed = Document(self.doc.path, read_only=True)
+        other_path = Path(self.directory.name) / "other.pdf"
+        other_path.write_bytes(Path(self.doc.path).read_bytes())
+        other = Document(str(other_path), read_only=True)
+        try:
+            self.view.render_document(refreshed, [0], 0)
+            self.assertEqual(self.view.page_rotation(0), 90)
+            self.view.render_document(other, [0], 0)
+            self.assertEqual(self.view.page_rotation(0), 0)
+        finally:
+            self.view.clear()
+            refreshed.close()
+            other.close()
+
 
 if __name__ == "__main__":
     unittest.main()

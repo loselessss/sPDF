@@ -10,7 +10,7 @@ import math
 import os
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QMouseEvent, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QMouseEvent, QPainter, QPixmap, QTransform
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QOpenGLWidget, QWidget
 
 from .widgets import PageCanvas, qimage_from_render
@@ -43,6 +43,16 @@ class _ReaderCanvas(PageCanvas):
         super().setCursor(cursor)
         self.owner.viewport().setCursor(cursor)
 
+    def _page_point(self, pos):
+        point = QPointF(pos)
+        for page, _pixmap, rect in self._pages:
+            if rect.contains(point):
+                inverse, valid = self.owner._page_transforms[page].inverted()
+                if valid:
+                    return page, inverse.map(point)
+        return None
+
+
 class ReaderPageView(QGraphicsView):
     zoom_changed = pyqtSignal(float)
     page_flip = pyqtSignal(int)
@@ -64,6 +74,8 @@ class ReaderPageView(QGraphicsView):
         self._flip_accum = 0
         self._document = None
         self._page_sizes = {}
+        self._page_transforms = {}
+        self._rotations = {}
         self._previews = {}
         self._tiles = OrderedDict()
         self._tile_bytes = 0
@@ -111,6 +123,10 @@ class ReaderPageView(QGraphicsView):
         self.stop_rendering()
         changed = document is not self._document
         if changed:
+            if (self._document is None or
+                    os.path.normcase(os.path.abspath(self._document.path)) !=
+                    os.path.normcase(os.path.abspath(document.path))):
+                self._rotations.clear()
             self._previews.clear()
             self._clear_tiles()
         self._document = document
@@ -127,14 +143,44 @@ class ReaderPageView(QGraphicsView):
         self._layout_pages()
         self._schedule_refine()
 
+    def page_rotation(self, page):
+        return self._rotations.get(page, 0)
+
+    def displayed_page_size(self, document, page):
+        w, h = document.page_size(page)
+        return (h, w) if self.page_rotation(page) % 180 else (w, h)
+
+    def rotate_page_view(self, page, degrees):
+        """Rotate display geometry only; never mutate the PDF or its history."""
+        if self._document is None or page not in self._page_sizes:
+            return
+        if degrees % 90:
+            raise ValueError("View rotation must be a multiple of 90 degrees")
+        angle = (self.page_rotation(page) + degrees) % 360
+        if angle:
+            self._rotations[page] = angle
+        else:
+            self._rotations.pop(page, None)
+        self.stop_rendering()
+        self._layout_pages()
+        self._schedule_refine()
+
     def _layout_pages(self):
         self._updating = True
         try:
             left, height = 0.0, 0.0
             self.canvas.zoom = self.zoom
             self.canvas._pages = []
+            self._page_transforms = {}
             for page, (w, h) in self._page_sizes.items():
-                rect = QRectF(left, 0, w * self.zoom, h * self.zoom)
+                angle = self.page_rotation(page)
+                transform = QTransform().translate(left, 0)
+                offset = {0: (0, 0), 90: (h, 0), 180: (w, h), 270: (0, w)}[angle]
+                transform.translate(offset[0] * self.zoom, offset[1] * self.zoom)
+                transform.rotate(angle)
+                transform.scale(self.zoom, self.zoom)
+                self._page_transforms[page] = transform
+                rect = transform.mapRect(QRectF(0, 0, w, h))
                 self.canvas._pages.append((page, self._previews[page], rect))
                 left = rect.right() + 16
                 height = max(height, rect.height())
@@ -156,7 +202,7 @@ class ReaderPageView(QGraphicsView):
             page, point = anchor
             for index, _pix, rect in self.canvas._pages:
                 if index == page:
-                    target = rect.topLeft() + point * self.zoom
+                    target = self._page_transforms[page].map(point)
                     actual = self.mapToScene(position)
                     self.horizontalScrollBar().setValue(
                         self.horizontalScrollBar().value() + round(target.x() - actual.x()))
@@ -199,9 +245,10 @@ class ReaderPageView(QGraphicsView):
             visible = rect.intersected(exposed)
             if visible.isEmpty():
                 continue
-            local = QRectF((visible.left() - rect.left()) * ratio,
-                           (visible.top() - rect.top()) * ratio,
-                           visible.width() * ratio, visible.height() * ratio)
+            inverse, _valid = self._page_transforms[page].inverted()
+            region = inverse.mapRect(visible)
+            local = QRectF(region.x() * scale, region.y() * scale,
+                           region.width() * scale, region.height() * scale)
             for y in range(max(0, math.floor(local.top() / TILE_PIXELS)),
                            math.ceil(local.bottom() / TILE_PIXELS)):
                 for x in range(max(0, math.floor(local.left() / TILE_PIXELS)),
@@ -255,19 +302,21 @@ class ReaderPageView(QGraphicsView):
         for page, preview, rect in self.canvas._pages:
             if not rect.intersects(exposed):
                 continue
-            painter.drawPixmap(rect, preview, QRectF(preview.rect()))
+            transform = self._page_transforms[page]
+            w, h = self._page_sizes[page]
+            page_rect = QRectF(0, 0, w, h)
+            painter.save()
+            painter.setTransform(transform, True)
+            painter.setClipRect(page_rect, Qt.IntersectClip)
+            painter.drawPixmap(page_rect, preview, QRectF(preview.rect()))
             for key, (pixmap, region) in self._tiles.items():
                 if key not in self._wanted or key[0] != page:
                     continue
-                target = QRectF(rect.left() + region.x() * self.zoom,
-                                 region.y() * self.zoom,
-                                 region.width() * self.zoom, region.height() * self.zoom)
-                if target.intersects(exposed):
-                    painter.save()
-                    painter.setClipRect(rect, Qt.IntersectClip)
-                    painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
-                    painter.restore()
-        self.canvas.paint_overlays(painter)
+                if transform.mapRect(region).intersects(exposed):
+                    painter.drawPixmap(region, pixmap, QRectF(pixmap.rect()))
+            if page == self.canvas._active_page:
+                self.canvas.paint_overlays(painter, zoom=1, origin=QPointF())
+            painter.restore()
 
     def _clear_tiles(self):
         self._tiles.clear()
@@ -284,6 +333,8 @@ class ReaderPageView(QGraphicsView):
         self._document = None
         self._previews.clear()
         self._page_sizes.clear()
+        self._page_transforms.clear()
+        self._rotations.clear()
         self._clear_tiles()
         self.canvas.clear()
         self.setSceneRect(QRectF())
@@ -313,10 +364,14 @@ class ReaderPageView(QGraphicsView):
             self.viewport_changed.emit()
 
     def ensure_rect_visible(self, rect):
-        page = self.canvas.active_page_rect()
-        self.ensureVisible(QRectF(page.left() + rect.x() * self.zoom,
-                                  page.top() + rect.y() * self.zoom,
-                                  rect.width() * self.zoom, rect.height() * self.zoom), 40, 40)
+        transform = self._page_transforms.get(self.canvas._active_page)
+        if transform is not None:
+            self.ensureVisible(transform.mapRect(rect), 40, 40)
+
+    def center_on_document_point(self, point):
+        transform = self._page_transforms.get(self.canvas._active_page)
+        if transform is not None:
+            self.centerOn(transform.map(point))
 
     def _forward_mouse(self, name, event):
         point = self.mapToScene(event.pos())

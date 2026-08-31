@@ -289,7 +289,8 @@ class EmbeddedModeTests(unittest.TestCase):
             self.assertIsInstance(editing.view, PageView)
             self.assertEqual(editor.workspace_mode, "editor")
             self.assertFalse(editor.read_only)
-            self.assertTrue(editing._edit_mode)
+            self.assertTrue(editing.is_editor_overview())
+            self.assertFalse(editing._edit_mode)
             self.assertTrue(editing._edit_act.isVisible())
             self.assertIn(editing._edit_act, editing._interaction_toolbar.actions())
             self.assertIsNot(editing.doc, tab.doc)
@@ -331,6 +332,41 @@ class EmbeddedModeTests(unittest.TestCase):
             with patch.object(reader, "open_editor") as open_editor:
                 reader.show_recovery(automatic=True)
             open_editor.assert_not_called()
+
+    def test_reader_rotation_actions_are_view_only_and_thumbnails_follow(self):
+        from PyQt5.QtCore import Qt
+        with self.document_windows() as (module, source):
+            original = source.read_bytes()
+            reader = module.new_window(workspace_mode="reader")
+            tab = reader.open_in_tab(str(source))
+            self.settle()
+            for action in (tab._rotate_cw_act, tab._rotate_ccw_act):
+                self.assertTrue(action.isVisible())
+                self.assertTrue(action.isEnabled())
+                self.assertIn(action, tab._interaction_toolbar.actions())
+            self.assertEqual(tab._rotate_cw_act.shortcut().toString(), "Ctrl+]")
+            self.assertEqual(tab._rotate_ccw_act.shortcut().toString(), "Ctrl+[")
+            tab._rotate_cw_act.trigger()
+            self.settle()
+            tab._render_visible_thumbs()
+            self.assertEqual(tab.view.page_rotation(0), 90)
+            self.assertGreater(tab.thumbs.item(0).data(Qt.UserRole + 1), 1)
+            self.assertEqual(tab.doc._doc[0].rotation, 0)
+            self.assertFalse(tab.doc._doc.is_dirty)
+            self.assertFalse(tab._dirty)
+            self.assertEqual(tab._undo_stack, [])
+            self.assertFalse(tab._save_act.isEnabled())
+            self.assertEqual(source.read_bytes(), original)
+            tab._rotate_ccw_act.trigger()
+            self.assertEqual(tab.view.page_rotation(0), 0)
+            editor = reader.open_editor(tab)
+            self.settle()
+            editing = editor._tabs.currentWidget()
+            editing._rotate_cw_act.trigger()
+            self.assertEqual(editing.doc._doc[0].rotation, 90)
+            self.assertTrue(editing._dirty)
+            editing.undo()
+            self.assertEqual(editing.doc._doc[0].rotation, 0)
 
     def test_switching_and_closing_tabs_keeps_menu_bars_alive(self):
         from PyQt5 import sip

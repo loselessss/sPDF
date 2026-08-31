@@ -2,26 +2,18 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.18.0 - 2026-08-31
+## 1.19.0 - 2026-08-31
 
 ### New features
 
-- Standalone sPDF starts in a read-only reader. The edit icon or Ctrl+E opens a separate editor at the current page and zoom.
-- Text editing now includes font-size and color controls, with a dedicated toolbar button.
-- Reader windows use OpenGL image composition when available, with automatic CPU display fallback.
+- Added a large blue **Edit mode** button at the left of the reader ribbon. The editor opens with a grid of page previews and the current page selected.
+- Drag one or several pages to change their order. Double-click a page or press Enter to edit it in the same window; **Page overview** or Ctrl+Shift+P returns to the grid without losing unsaved edits or undo/redo history.
 
-### Performance
+### Performance improvements
 
-- Zoom responds immediately using existing images, then sharpens only visible page regions. The point under the pointer stays in place during wheel zoom, up to 800%.
-- Reader rendering uses small tiles with a bounded cache, including in two-page view. Hidden or closed tabs cancel pending tile work.
+- The editor overview renders only visible and nearby thumbnails, releases off-screen previews, and stops pending thumbnail work when hidden or closed.
 
 ### Improvements
 
-- Saving refreshes matching readers in the same sPDF session while preserving their page, zoom, and scroll position. Save As leaves the original reader on its original file.
-- An already-open editor is reused without losing its unsaved changes. Embedded hosts retain their existing access and update settings.
-
-### Fixes
-
-- A failed file replacement keeps pending edits available for another save attempt and reopens the reader.
-- Failed text edits restore the previous document content without adding an undo step.
-- Switching or closing document tabs no longer deletes menu bars that are still needed.
+- Reader windows now offer left/right rotation through toolbar icons, the View menu, and Ctrl+[ / Ctrl+]. Only the current page's view rotates; the PDF file is unchanged.
+- Thumbnails, text selection, search highlights, links, and zoom positioning follow the rotated view, including in two-page mode. Editor rotation still supports saving and undo.

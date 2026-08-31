@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.18.0** · English and Korean interface · Windows
+**Current version: 1.19.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -17,6 +17,9 @@ computer unless you explicitly use an external link or optional model download.
   on long documents.
 - Zoom up to 800% in the reader with immediate image scaling and progressive
   sharpening of visible regions. OpenGL handles image composition when available.
+- Rotate the current page view left or right using the toolbar, View menu, or
+  Ctrl+[ / Ctrl+]. Reader rotation is temporary and does not change the PDF;
+  rotate in the editor to save a page's orientation.
 - Switch the left panel between page thumbnails, PDF bookmarks, and a hidden
   view.
 - Click a precise point in a sidebar thumbnail or drag its blue viewport marker
@@ -29,9 +32,14 @@ computer unless you explicitly use an external link or optional model download.
 
 ### Edit and organize documents
 
-- Standalone sPDF opens in a read-only reader. Use the edit icon or Ctrl+E to
-  open a separate editor at the same page and zoom. Saving refreshes matching
-  reader windows in the same running sPDF session without moving their view.
+- Standalone sPDF opens in a read-only reader. Use the large blue **Edit mode**
+  button at the left of the ribbon or Ctrl+E to open a separate editor with the
+  current page selected in a thumbnail grid. Saving refreshes matching reader
+  windows in the same running sPDF session without moving their view.
+- Drag grid thumbnails to reorder pages. Double-click a page or press Enter to
+  edit it in the same window. **Page overview** or Ctrl+Shift+P returns to the
+  grid; unsaved changes and undo/redo history stay intact. Only visible and
+  nearby thumbnails are rendered, even in long documents.
 - Change text content, font size, and color in the editor. Page organization,
   annotations, and manual OCR are available there; text editing has its own
   toolbar button.
@@ -93,6 +101,7 @@ their release version and SHA-256 digest match.
 | Ctrl+O / Ctrl+S / Ctrl+P | Open, save, or print |
 | Ctrl+F | Find text |
 | Ctrl+E | Open the editor from a reader; toggle text editing in an editor |
+| Ctrl+Shift+P | Page overview; return from detailed editing |
 | Ctrl+Z / Ctrl+Y | Undo or redo |
 | Ctrl+B | Bookmark the current page |
 | Alt+Left / Alt+Right | Previous or next view |

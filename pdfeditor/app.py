@@ -27,6 +27,7 @@ from .access import command_allowed, editing_command
 from .annotation_ui import AnnotationPersistenceMixin
 from .annots import AnnotMixin
 from .editing import EditMixin
+from .editor_workspace import EditorWorkspaceMixin
 from .document_tools import DocumentToolsMixin
 from .icons import fluent_icon
 from .filetypes import (
@@ -331,7 +332,7 @@ class TransferTabBar(QTabBar):
 
 # MRO 주의: TextSelectMixin이 ViewerMixin보다 앞이어야 show_page 훅
 # (페이지 전환 시 선택 초기화/검색 오버레이 재적용)이 동작한다.
-class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
+class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin, DocumentToolsMixin, EditMixin, PagesMixin, OcrMixin, AnnotMixin,
                   PrintMixin, TextSelectMixin, ViewerMixin):
 
     title_changed = pyqtSignal()  # 탭 라벨/창 제목 갱신 신호(셸이 받는다)
@@ -396,7 +397,7 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         splitter.splitterMoved.connect(self.on_thumbnail_splitter_moved)
         lay.addWidget(splitter)
         self._viewer_splitter = splitter
-        self.setCentralWidget(viewer)
+        self.setCentralWidget(self._init_editor_workspace(viewer))
 
         self.thumbs.page_selected.connect(self.show_page)
         self.thumbs.page_position_requested.connect(
@@ -479,6 +480,8 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         return bar
 
     def show_search(self):
+        if self.is_editor_overview():
+            self.open_page_editor(edit_text=False)
         self._search_bar.show()
         self._search_edit.setFocus()
         self._search_edit.selectAll()
@@ -566,12 +569,20 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
             p, "페이지 구성...", "Ctrl+Shift+P",
             self.show_page_organizer, "pages")
         p.addSeparator()
+        reader = self._shell.workspace_mode == "reader"
         self._rotate_cw_act = self._act(
-            p, "오른쪽으로 회전", "Ctrl+]", self.rotate_page_cw,
+            p, "오른쪽으로 회전", "Ctrl+]",
+            self.rotate_reader_cw if reader else self.rotate_page_cw,
             "rotate_cw")
         self._rotate_ccw_act = self._act(
-            p, "왼쪽으로 회전", "Ctrl+[", self.rotate_page_ccw,
+            p, "왼쪽으로 회전", "Ctrl+[",
+            self.rotate_reader_ccw if reader else self.rotate_page_ccw,
             "rotate_ccw")
+        if reader:
+            for action in (self._rotate_cw_act, self._rotate_ccw_act):
+                action.setToolTip(localize(
+                    "Rotate the current page view only (does not modify the PDF)",
+                    "현재 쪽 화면만 회전 (PDF 파일은 변경하지 않음)"))
         self._act(p, "현재 페이지 삭제", "Ctrl+Delete",
                   self.delete_current_page, "delete")
         p.addSeparator()
@@ -611,6 +622,10 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
             o.menuAction().setVisible(False)
 
         v = self.menuBar().addMenu("보기(&V)")
+        if reader:
+            v.addAction(self._rotate_ccw_act)
+            v.addAction(self._rotate_cw_act)
+            v.addSeparator()
         self._back_view_act = self._act(
             v, "이전 보기", "Alt+Left", self.navigate_history, "back")
         self._forward_view_act = self._act(
@@ -689,6 +704,8 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         tool_bar.setFloatable(False)
         tool_bar.setIconSize(QSize(20, 20))
         tool_bar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        if self._open_editor_act is not None:
+            self.add_editor_mode_button(tool_bar)
         tool_bar.addAction(self._open_act)
         tool_bar.addAction(self._back_view_act)
         tool_bar.addAction(self._forward_view_act)
@@ -700,9 +717,7 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         tool_bar.addSeparator()
         tool_bar.addAction(self._hand_tool_act)
         tool_bar.addAction(self._select_tool_act)
-        if self._open_editor_act is not None:
-            tool_bar.addAction(self._open_editor_act)
-        else:
+        if self._open_editor_act is None:
             tool_bar.addAction(self._edit_act)
         tool_bar.addSeparator()
         tool_bar.addAction(self._pages_act)
@@ -788,6 +803,7 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
             if hasattr(self, "_presentation_ui_state"):
                 return
             self._presentation_ui_state = {
+                "workspace_header": self._workspace_header is not None and not self._workspace_header.isHidden(),
                 "sidebar": not self._sidebar_stack.isHidden(),
                 "toolbar": not self._interaction_toolbar.isHidden(),
                 "status": not self.statusBar().isHidden(),
@@ -799,6 +815,8 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
             self.statusBar().hide()
             self._search_bar.hide()
             self._notes_dock.hide()
+            if self._workspace_header is not None:
+                self._workspace_header.hide()
             if self.doc is not None:
                 QTimer.singleShot(0, self.zoom_page_fit)
         else:
@@ -810,6 +828,8 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
             self.statusBar().setVisible(state["status"])
             self._search_bar.setVisible(state["search"])
             self._notes_dock.setVisible(state["notes"])
+            if self._workspace_header is not None:
+                self._workspace_header.setVisible(state["workspace_header"])
             del self._presentation_ui_state
             if self.doc is not None:
                 QTimer.singleShot(0, self.zoom_fit)
@@ -1020,6 +1040,8 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         if getattr(self, "_closing_doc", False):
             return
         self._closing_doc = True
+        if self._page_grid is not None:
+            self._page_grid.stop_rendering()
         stop_rendering = getattr(self.view, "stop_rendering", None)
         if stop_rendering is not None:
             stop_rendering()
@@ -1475,6 +1497,8 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         tab = tab or self._tabs.currentWidget()
         if tab is None or tab.doc is None:
             return
+        if tab.is_editor_overview():
+            tab.open_page_editor(edit_text=False)
         self._presentation_window_state = {
             "fullscreen": self.isFullScreen(),
             "menubar": not self.menuBar().isHidden(),
@@ -1818,7 +1842,7 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         else:
             self._sync_tab_title(tab)
             if self.workspace_mode == "editor":
-                tab.set_edit_mode(True)
+                tab.show_editor_overview()
 
     # --- 탭 제목/전환/닫기 ---------------------------------------------
 

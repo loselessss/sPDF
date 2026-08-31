@@ -39,6 +39,9 @@ class PagesMixin:
     def show_page_organizer(self):
         if self.doc is None:
             return
+        if getattr(self, "_page_grid", None) is not None:
+            self.show_editor_overview()
+            return
         dialog = PageOrganizerDialog(self)
         dialog.exec_()
 
@@ -137,10 +140,9 @@ class PagesMixin:
             return None
         if order == list(range(self.doc.page_count)):
             return new_rows
-        self._push_undo(structural=True)
-        self.doc.reorder_pages(order)
-        self._after_structure_changed(keep_page=new_rows[0])
-        self.mark_dirty()
+        if not self.apply_document_change(lambda: self.doc.reorder_pages(order)):
+            return None
+        self.show_page(new_rows[0])
         self.statusBar().showMessage(
             "%d개 페이지를 %d페이지 위치로 이동" %
             (len(new_rows), new_rows[0] + 1), 3000)
@@ -418,5 +420,6 @@ class PagesMixin:
         finally:
             self._restoring_view = False
         self._schedule_thumbs()
+        self.refresh_editor_overview(reset=True)
         if hasattr(self, "_notes_dock") and self._notes_dock.isVisible():
             self._rebuild_notes_list()

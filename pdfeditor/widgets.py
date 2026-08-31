@@ -351,11 +351,11 @@ class PageCanvas(QWidget):
         self.paint_overlays(p)
         p.end()
 
-    def paint_overlays(self, p):
+    def paint_overlays(self, p, *, zoom=None, origin=None):
         """Paint PDF-coordinate overlays on either the CPU or OpenGL surface."""
         p.setPen(Qt.NoPen)
-        z = self.zoom
-        origin = self.active_page_rect().topLeft()
+        z = self.zoom if zoom is None else zoom
+        origin = self.active_page_rect().topLeft() if origin is None else origin
         for rects, color in ((self._search_rects, SEARCH_COLOR),
                              (self._sel_rects, SEL_COLOR)):
             p.setBrush(color)

@@ -56,6 +56,9 @@ class EditMixin:
     def set_edit_mode(self, on):
         if on and getattr(self, "read_only", False):
             return
+        if on and self.is_editor_overview():
+            self.open_page_editor()
+            return
         self._edit_mode = on
         self._edit_act.setChecked(on)
         if on:
@@ -226,6 +229,7 @@ class EditMixin:
         self._words_cache.clear()
         if hasattr(self, "_annot_cache"):
             self._annot_cache.clear()
+        self.refresh_editor_overview(reset=True)
         self._render_current()
         self.thumbs.invalidate(self.page_index)
         self._schedule_thumbs()

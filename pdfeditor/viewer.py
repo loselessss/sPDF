@@ -5,7 +5,7 @@
 """
 
 from PyQt5.QtCore import QPointF, Qt, QTimer, QUrl
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtGui import QDesktopServices, QTransform
 from PyQt5.QtWidgets import QApplication, QMessageBox
 
 from . import settings
@@ -84,6 +84,9 @@ class ViewerMixin(NavigationMixin):
         self._zoom_render_timer.stop()
         if self.doc is None:
             return
+        if self.is_editor_overview():
+            self.refresh_editor_overview()
+            return
         render_reader = getattr(self.view, "render_document", None)
         if render_reader is not None:
             render_reader(self.doc, self.visible_document_pages(), self.page_index)
@@ -156,6 +159,28 @@ class ViewerMixin(NavigationMixin):
     def zoom_out_fine(self):
         self.set_zoom(self.view.zoom - 0.01)
 
+    def rotate_reader_cw(self):
+        return self._rotate_reader(90)
+
+    def rotate_reader_ccw(self):
+        return self._rotate_reader(-90)
+
+    def _rotate_reader(self, degrees):
+        if self.doc is None or self._shell.workspace_mode != "reader":
+            return False
+        self.view.rotate_page_view(self.page_index, degrees)
+        self.thumbs.invalidate(self.page_index)
+        self.zoom_fit()
+        self._schedule_thumbs()
+        self.statusBar().showMessage(localize(
+            "View rotated — the PDF file is unchanged.",
+            "화면만 회전했습니다 — PDF 파일은 변경되지 않습니다."), 3500)
+        return True
+
+    def _displayed_page_size(self, index):
+        size = getattr(self.view, "displayed_page_size", None)
+        return size(self.doc, index) if size is not None else self.doc.page_size(index)
+
     def _set_fit_zoom(self, index):
         """렌더 없이 줌 값만 창 너비에 맞춘다 — 문서를 열 때 이걸로 먼저
         배율을 정한 뒤 show_page를 부르면 첫 페이지를 한 번만 렌더한다
@@ -164,7 +189,7 @@ class ViewerMixin(NavigationMixin):
                  list(range(index - index % 2,
                             min(index - index % 2 + 2,
                                 self.doc.page_count))))
-        widths = [self.doc.page_size(page)[0] for page in pages]
+        widths = [self._displayed_page_size(page)[0] for page in pages]
         avail = self.view.viewport().width() - 24  # 여백/스크롤바 몫
         if len(widths) > 1:
             avail -= 16.0
@@ -185,7 +210,7 @@ class ViewerMixin(NavigationMixin):
         if self.doc is None:
             return
         pages = self.visible_document_pages()
-        sizes = [self.doc.page_size(page) for page in pages]
+        sizes = [self._displayed_page_size(page) for page in pages]
         page_width = sum(width for width, _height in sizes)
         page_height = max(height for _width, height in sizes)
         available_width = self.view.viewport().width() - 24
@@ -336,7 +361,10 @@ class ViewerMixin(NavigationMixin):
             if link["to"] is not None:
                 width, height = self.doc.page_size(target_page)
                 x, y = link["to"]
-                if width > 0 and height > 0:
+                center = getattr(self.view, "center_on_document_point", None)
+                if center is not None:
+                    QTimer.singleShot(0, lambda: center(QPointF(x, y)))
+                elif width > 0 and height > 0:
                     QTimer.singleShot(
                         0, lambda: self.view.center_on_page_fraction(
                             QPointF(x / width, y / height)))
@@ -367,22 +395,24 @@ class ViewerMixin(NavigationMixin):
 
     def _render_visible_thumbs(self):
         """보이는 항목 중 아직 안 그린 것만 렌더(레이지, 설계 §3.1)."""
-        if self.doc is None:
+        if self.doc is None or self.is_editor_overview():
             return
         width = self.thumbs.thumbnail_width()
         visible = self.thumbs.visible_rows()
         for row in visible:
             if self.thumbs.is_rendered(row, width):
                 continue
-            pw, _ = self.doc.page_size(row)
+            pw, _ = self._displayed_page_size(row)
             zoom = width / pw if pw else 0.2
             pixel_ratio = render_pixel_ratio(self.thumbs)
+            image = qimage_from_render(
+                *self.doc.render(row, zoom * pixel_ratio),
+                device_pixel_ratio=pixel_ratio)
+            rotation = getattr(self.view, "page_rotation", lambda _page: 0)(row)
+            if rotation:
+                image = image.transformed(QTransform().rotate(rotation))
             self.thumbs.set_thumb(
-                row,
-                qimage_from_render(
-                    *self.doc.render(row, zoom * pixel_ratio),
-                    device_pixel_ratio=pixel_ratio,
-                ),
+                row, image,
                 rendered_width=width,
             )
         if visible:

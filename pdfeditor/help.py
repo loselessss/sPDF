@@ -99,6 +99,14 @@ HELP_HTML = """
 반영됩니다.</p>
 
 <h3>✏️ 텍스트 편집</h3>
+<p>읽기 창 리본 왼쪽의 큰 <b>편집 모드</b> 버튼이나 Ctrl+E로 편집 창을 엽니다.
+처음에는 바둑판 미리보기에서 페이지를 드래그해 순서를 바꿀 수 있습니다.
+페이지를 두 번 누르거나 Enter를 누르면 같은 창에서 상세 편집합니다.
+<b>페이지 구성</b> 버튼이나 Ctrl+Shift+P로 돌아가도 미저장 변경과
+실행 취소·다시 실행 이력이 유지됩니다.</p>
+<p>읽기 창에서도 도구 모음·보기 메뉴 또는 <b>Ctrl+[ / Ctrl+]</b>로 현재 쪽을
+좌우로 돌려 볼 수 있습니다. 화면만 회전하며 PDF 파일은 변경하지 않습니다.
+방향을 저장하려면 편집 창에서 회전하세요.</p>
 <table cellpadding="4">
 <tr><td><b>Ctrl+E</b></td><td>읽기 창: 별도 편집 창 열기 / 편집 창: 텍스트 편집 켜기·끄기</td></tr>
 <tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>실행 취소 / 다시 실행</td></tr>
@@ -229,7 +237,14 @@ the visible area, not the underlying content. Ctrl+Z undoes it.</p>
 <p>PDF text is edited within its original line or box; it is not a full
 reflow editor. Replacement fonts may look different. Page rotation, deletion,
 reordering, and merging participate in undo/redo.</p>
-<p>Use the edit icon or Ctrl+E in a standalone reader to open a separate editor.
+<p>Use the large <b>Edit mode</b> button at the left of the reader ribbon or
+Ctrl+E to open a separate editor. It starts with a thumbnail grid: drag pages
+to reorder them, then double-click a page or press Enter for detailed editing.
+<b>Page overview</b> or Ctrl+Shift+P returns to the grid in the same window,
+keeping unsaved changes and undo/redo history.</p>
+<p>
+Reader toolbar/View menu rotation and Ctrl+[ / Ctrl+] rotate only the current
+page view without modifying the PDF. Use the editor to save its orientation.
 Text dialogs offer content, font-size and color controls. Saving refreshes
 readers in the same running sPDF session without moving their view.</p>
 
