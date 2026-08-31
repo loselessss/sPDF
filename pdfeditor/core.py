@@ -130,14 +130,39 @@ class Document:
         Qt 타입(QImage)을 여기서 만들지 않는 건 이 모듈을 Qt 비의존으로
         유지하기 위해서다 — 조립은 widgets.py가 한다.
         """
+        display = self._display_list(index)
+        pix = display.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        return pix.width, pix.height, pix.stride, pix.samples
+
+    def _display_list(self, index):
         display = self._display_cache.get(index)
         if display is None:
             display = self._doc[index].get_displaylist()
             if len(self._display_cache) >= 5:
                 self._display_cache.pop(next(iter(self._display_cache)))
             self._display_cache[index] = display
-        pix = display.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-        return pix.width, pix.height, pix.stride, pix.samples
+        return display
+
+    def render_region(self, index, zoom, rect):
+        """Rasterize a bounded PDF-coordinate clip; include pixel origin.
+
+        Returning MuPDF's rounded pixel origin avoids seams at fractional zoom
+        and keeps rotated/cropped pages aligned with their low-resolution image.
+        """
+        import math
+        if not math.isfinite(zoom) or zoom <= 0:
+            raise ValueError("Invalid render scale")
+        clip = fitz.Rect(rect)
+        if not all(math.isfinite(value) for value in clip):
+            raise ValueError("Invalid render region")
+        clip &= self._doc[index].rect
+        if clip.is_empty or clip.is_infinite:
+            raise ValueError("Empty render region")
+        if (math.ceil(clip.width * zoom) + 2) * (math.ceil(clip.height * zoom) + 2) > 4_000_000:
+            raise ValueError("Render region exceeds the tile pixel budget")
+        pix = self._display_list(index).get_pixmap(
+            matrix=fitz.Matrix(zoom, zoom), clip=clip, alpha=False)
+        return pix.x, pix.y, pix.width, pix.height, pix.stride, pix.samples
 
     def invalidate_render(self, index=None):
         if index is None:
@@ -787,20 +812,35 @@ class Document:
         임시 파일에 저장 → 원본 핸들 닫기 → 교체 → 결과를 다시 여는
         순서로 처리한다.
         """
-        tmp = out_path + ".tmp"
-        self._doc.save(tmp, garbage=3, deflate=True)
-
+        out_path = os.fspath(out_path)
+        fd, tmp = tempfile.mkstemp(prefix=".spdf-save-", suffix=".pdf",
+                                   dir=os.path.dirname(os.path.abspath(out_path)))
+        os.close(fd)
         same_path = os.path.normcase(os.path.abspath(out_path)) == \
             os.path.normcase(os.path.abspath(self.path))
-        if same_path:
-            self._display_cache.clear()
-            self._doc.close()
-            self._doc = None
-        if backup and os.path.exists(out_path):
-            shutil.copy2(out_path, out_path + ".bak")
-        os.replace(tmp, out_path)
-        if same_path:
-            # 방금 저장한 파일을 다시 연다 — 이후 편집/렌더가 계속 가능하도록.
-            self._doc = self._open(out_path, self._password)
-            self._display_cache = {}
-            self.path = out_path
+        try:
+            self._doc.save(tmp, garbage=3, deflate=True,
+                           encryption=fitz.PDF_ENCRYPT_KEEP)
+            if backup and os.path.exists(out_path):
+                shutil.copy2(out_path, out_path + ".bak")
+            if same_path:
+                self._display_cache.clear()
+                self._doc.close()
+                self._doc = None
+            try:
+                os.replace(tmp, out_path)
+            except OSError:
+                if same_path:
+                    # Preserve pending edits even when another process keeps the
+                    # destination locked. The extra memory is only used on error.
+                    with open(tmp, "rb") as stream:
+                        self._doc = fitz.open("pdf", stream.read())
+                    if self._doc.needs_pass:
+                        self._doc.authenticate(self._password or "")
+                raise
+            if same_path:
+                self._doc = self._open(out_path, self._password)
+                self.path = out_path
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)

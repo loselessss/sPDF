@@ -82,6 +82,12 @@ class ViewerMixin(NavigationMixin):
 
     def _render_current(self):
         self._zoom_render_timer.stop()
+        if self.doc is None:
+            return
+        render_reader = getattr(self.view, "render_document", None)
+        if render_reader is not None:
+            render_reader(self.doc, self.visible_document_pages(), self.page_index)
+            return
         pixel_ratio = render_pixel_ratio(self.view, self.view.zoom)
         pages = self.visible_document_pages()
         images = []
@@ -117,6 +123,12 @@ class ViewerMixin(NavigationMixin):
 
     def on_zoom_changed(self, _zoom):
         if self.doc is None:
+            return
+        preview_zoom = getattr(self.view, "preview_zoom", None)
+        if preview_zoom is not None:
+            if self.view.canvas.zoom != _zoom:
+                preview_zoom(_zoom)
+            self._update_page_label()
             return
         # 줌이 바뀌면 이전 배율 캐시는 쓸모없다.
         self._cache.clear()

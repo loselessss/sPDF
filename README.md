@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.17.2** · English and Korean interface · Windows
+**Current version: 1.18.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -15,6 +15,8 @@ computer unless you explicitly use an external link or optional model download.
 
 - Open regular and encrypted PDFs with nearby-page rendering that stays usable
   on long documents.
+- Zoom up to 800% in the reader with immediate image scaling and progressive
+  sharpening of visible regions. OpenGL handles image composition when available.
 - Switch the left panel between page thumbnails, PDF bookmarks, and a hidden
   view.
 - Click a precise point in a sidebar thumbnail or drag its blue viewport marker
@@ -27,6 +29,12 @@ computer unless you explicitly use an external link or optional model download.
 
 ### Edit and organize documents
 
+- Standalone sPDF opens in a read-only reader. Use the edit icon or Ctrl+E to
+  open a separate editor at the same page and zoom. Saving refreshes matching
+  reader windows in the same running sPDF session without moving their view.
+- Change text content, font size, and color in the editor. Page organization,
+  annotations, and manual OCR are available there; text editing has its own
+  toolbar button.
 - Select, search, and copy text; add highlights and notes.
 - Correct text in ordinary or OCR-processed PDFs with undo and redo.
 - Rotate, delete, reorder, insert, merge, split, and extract pages.
@@ -53,7 +61,7 @@ computer unless you explicitly use an external link or optional model download.
 ### Keep a practical desktop workflow
 
 - Open multiple documents in tabs and drag saved or unsaved tabs between sPDF
-  windows.
+  windows with the same mode. Reader and editor tabs stay separate.
 - Use favorites and recent files, thumbnail position markers, fit-page and
   fit-width controls, and hand/text-selection tools.
 - Recover unsaved edits after an interrupted standalone session from a separate
@@ -84,6 +92,7 @@ their release version and SHA-256 digest match.
 | --- | --- |
 | Ctrl+O / Ctrl+S / Ctrl+P | Open, save, or print |
 | Ctrl+F | Find text |
+| Ctrl+E | Open the editor from a reader; toggle text editing in an editor |
 | Ctrl+Z / Ctrl+Y | Undo or redo |
 | Ctrl+B | Bookmark the current page |
 | Alt+Left / Alt+Right | Previous or next view |
@@ -96,13 +105,16 @@ Press **F1** in the application for the complete localized guide.
 
 - Text editing replaces content within the original line or box. It is not a
   full text-reflow editor, and replacement fonts can look different.
+- The reader uses a viewport-sized OpenGL surface for image composition, with
+  CPU display fallback. PyMuPDF still interprets and rasterizes PDFs on the CPU;
+  this is not a GPU-only PDF engine. Editor and embedded display paths are unchanged.
+- Reader previews cover only the current one or two pages. Detailed tiles use
+  a 64 MiB cache per reader tab; this is not a limit on total application memory.
 - Margin cropping changes the visible page area; it does not erase the hidden
   content. Crop and bookmark changes support undo/redo.
 - TXT bookmark import accepts `1 | Introduction`, `Introduction | 1`, or
   `1 Introduction`; indent a child entry with two spaces or one tab.
-- Two-sided output still requires a duplex-capable printer and driver. Zoom
-  rendering reuses page display data and reduces excess high-resolution work;
-  PyMuPDF itself remains CPU-rendered rather than using a direct GPU backend.
+- Two-sided output still requires a duplex-capable printer and driver.
 - Recovery copies refresh every 30 seconds while edits are pending. Protected
   PDFs and copies over 512 MB are excluded, and recovered documents use
   **Save As** first. Recovery complements normal saving; it does not replace it.
@@ -114,6 +126,9 @@ Press **F1** in the application for the complete localized guide.
 
 sPDF is built with Python, PyQt5, and PyMuPDF. RapidOCR runs in a separate worker
 process so its runtime is loaded only when OCR is requested.
+
+Set `SPDF_DISABLE_GPU=1` before launching to troubleshoot using the CPU display
+path. Visible-region tile rendering and immediate zoom remain available.
 
 ```bash
 pip install PyQt5 PyMuPDF rapidocr onnxruntime

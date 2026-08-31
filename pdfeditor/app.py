@@ -42,6 +42,7 @@ from .update_dialog import UpdateCheckWorker, UpdateDialog
 from .update_service import GitHubUpdateService, UpdateError
 from .viewer import ViewerMixin
 from .widgets import BookmarkTree, PageView, ThumbList
+from .workspaces import WindowWorkspaceMixin, workspace_policy
 
 
 def _make_action(parent, text, shortcut, slot, icon_name=None):
@@ -238,6 +239,7 @@ class TransferTabBar(QTabBar):
             "read_only": shell.read_only,
             "annotations_enabled": shell.annotations_enabled,
             "autosave_annotations": shell.autosave_annotations,
+            "workspace_mode": shell.workspace_mode,
             "snapshot": snapshot_path,
         }
         mime = QMimeData()
@@ -368,7 +370,13 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         self._sidebar_stack = QStackedWidget()
         self._sidebar_stack.addWidget(self.thumbs)
         self._sidebar_stack.addWidget(self.bookmarks)
-        self.view = PageView()
+        if self._shell.workspace_mode == "reader":
+            from .reader_view import ReaderPageView
+            self.view = ReaderPageView()
+            self.view.render_failed.connect(lambda error: self.statusBar().showMessage(
+                localize("Detailed rendering failed: ", "선명한 화면 표시 실패: ") + error, 6000))
+        else:
+            self.view = PageView()
 
         right = QWidget()
         rlay = QVBoxLayout(right)
@@ -541,6 +549,12 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         self._edit_act = self._act(e, "텍스트 편집 모드", "Ctrl+E",
                                    self.toggle_edit_mode, "edit")
         self._edit_act.setCheckable(True)
+        self._open_editor_act = None
+        if self._shell.workspace_mode == "reader":
+            self._edit_act.setShortcut("")
+            self._open_editor_act = self._act(
+                e, localize("Open in editor", "편집 창에서 열기"), "Ctrl+E",
+                lambda: self._shell.open_editor(self), "edit")
         e.addSeparator()
         self._search_act = self._act(
             e, "찾기...", "Ctrl+F", self.show_search, "search")
@@ -686,6 +700,10 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         tool_bar.addSeparator()
         tool_bar.addAction(self._hand_tool_act)
         tool_bar.addAction(self._select_tool_act)
+        if self._open_editor_act is not None:
+            tool_bar.addAction(self._open_editor_act)
+        else:
+            tool_bar.addAction(self._edit_act)
         tool_bar.addSeparator()
         tool_bar.addAction(self._pages_act)
         tool_bar.addAction(self._rotate_ccw_act)
@@ -909,6 +927,12 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
             try:
                 doc = Document(path, password, read_only=self.read_only,
                                annotations_enabled=self._shell.annotations_enabled)
+                if self._shell.workspace_mode == "editor":
+                    try:
+                        doc.ensure_editable()
+                    except Exception:
+                        doc.close()
+                        raise
                 break
             except PasswordRequired:
                 password, ok = QInputDialog.getText(
@@ -950,7 +974,9 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         self.doc = doc
         self._view_ready = False
         self.clear_navigation_history()
-        self._initial_reading_state = settings.reading_position(path)
+        self._initial_reading_state = (getattr(self, "_pending_view_state", None)
+                                       or settings.reading_position(path))
+        self._pending_view_state = None
         self.page_index = 0
         self._sync_favorite_action()
         self.thumbs.reset_pages(doc.page_count)
@@ -975,6 +1001,10 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
             self.statusBar().showMessage(localize(
                 "Read-only mode — document editing is disabled.",
                 "읽기 전용 모드 — 문서 편집을 사용할 수 없습니다."), 6000)
+            if self._shell.workspace_mode == "reader":
+                self.statusBar().showMessage(localize(
+                    "Reader — Ctrl+E opens this document in a separate editor.",
+                    "읽기 모드 — Ctrl+E를 누르면 별도 편집 창에서 열립니다."), 6000)
             if doc.annotation_mode and doc.annotations_enabled:
                 self.statusBar().showMessage(localize(
                     "Annotations enabled; autosave is " +
@@ -990,6 +1020,9 @@ class DocumentTab(QMainWindow, AnnotationPersistenceMixin, DocumentToolsMixin, E
         if getattr(self, "_closing_doc", False):
             return
         self._closing_doc = True
+        stop_rendering = getattr(self.view, "stop_rendering", None)
+        if stop_rendering is not None:
+            stop_rendering()
         self._annotation_timer.stop()
         self.save_reading_position()
         self._position_timer.stop()
@@ -1272,7 +1305,7 @@ def show_licenses(parent):
 # AppWindow — 탭들을 담는 셸
 # ======================================================================
 
-class AppWindow(QMainWindow):
+class AppWindow(QMainWindow, WindowWorkspaceMixin):
     """Embeddable window; read_only is fixed for this window's lifetime."""
 
     @property
@@ -1292,11 +1325,12 @@ class AppWindow(QMainWindow):
         return (self.read_only, self.annotations_enabled, self.autosave_annotations)
 
     def __init__(self, updates_enabled=False, *, read_only=False,
-                 annotations_enabled=None, autosave_annotations=True):
+                 annotations_enabled=None, autosave_annotations=True,
+                 workspace_mode=None):
         super().__init__()
-        self._read_only = bool(read_only)
-        self._annotations_enabled = (not read_only if annotations_enabled is None
-                                     else bool(annotations_enabled))
+        self._workspace_mode = workspace_mode
+        self._read_only, self._annotations_enabled = workspace_policy(
+            workspace_mode, read_only, annotations_enabled)
         self._autosave_annotations = bool(autosave_annotations)
         application = QApplication.instance()
         if application is not None:
@@ -1307,8 +1341,9 @@ class AppWindow(QMainWindow):
         self.updates_enabled = bool(updates_enabled)
         self._recovery_store = (
             getattr(application, "_spdf_recovery_store", None)
-            if self.updates_enabled and not self.read_only else None)
-        self.setWindowTitle(APP_NAME)
+            if self.updates_enabled and
+            (not self.read_only or self.workspace_mode == "reader") else None)
+        self.setWindowTitle(self.workspace_title())
         self.resize(1100, 800)
         self.setAcceptDrops(True)
         self._update_service = (
@@ -1368,6 +1403,24 @@ class AppWindow(QMainWindow):
             QTimer.singleShot(400, lambda: self.show_recovery(automatic=True))
 
     def show_recovery(self, automatic=False):
+        if self.isHidden():
+            return
+        if self.workspace_mode == "reader":
+            if self._recovery_store is None:
+                return
+            try:
+                available = self._recovery_store.available()
+            except OSError as error:
+                QMessageBox.warning(self, tr("미저장 작업 복구"), str(error))
+                return
+            if not available:
+                if not automatic:
+                    QMessageBox.information(self, tr("미저장 작업 복구"), localize(
+                        "There are no recovery copies from interrupted sessions.",
+                        "이전 실행에서 남은 복구용 사본이 없습니다."))
+                return
+            editor = self.open_editor()
+            return editor.show_recovery(automatic=automatic)
         if self.read_only:
             return
         if self.isHidden():
@@ -1467,7 +1520,8 @@ class AppWindow(QMainWindow):
         return new_window(force_new=True, updates_enabled=self.updates_enabled,
                           read_only=self.read_only,
                           annotations_enabled=self.annotations_enabled,
-                          autosave_annotations=self.autosave_annotations)
+                          autosave_annotations=self.autosave_annotations,
+                          workspace_mode=self.workspace_mode)
 
     def _build_shell_menu(self):
         mb = QMenuBar(self)
@@ -1482,6 +1536,10 @@ class AppWindow(QMainWindow):
         m.addAction(_make_action(
             self, "이미지를 PDF로...", None,
             self.images_to_pdf_dialog, "pages"))
+        if self.workspace_mode == "reader":
+            m.addAction(_make_action(
+                self, localize("Open editor", "편집 창 열기"), "Ctrl+E",
+                self.open_editor, "edit"))
         m.addSeparator()
         if self._recovery_store is not None:
             m.addAction(_make_action(
@@ -1625,11 +1683,11 @@ class AppWindow(QMainWindow):
     # --- 화면 전환 -----------------------------------------------------
 
     def _show_start(self):
-        self.setMenuBar(self._shell_menubar)
+        self._switch_menubar(self._shell_menubar)
         self._start_page.refresh()
         self._start_page.set_current_doc(None)
         self._stack.setCurrentIndex(0)
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(self.workspace_title())
 
     def _show_tabs(self):
         self._stack.setCurrentIndex(1)
@@ -1707,6 +1765,7 @@ class AppWindow(QMainWindow):
             self._show_tabs()
             return existing
         tab = DocumentTab(self)
+        tab._opening_path = path
         self._connect_tab(tab)
         idx = self._tabs.addTab(tab, "불러오는 중...")
         self._tabs.setCurrentIndex(idx)
@@ -1719,8 +1778,8 @@ class AppWindow(QMainWindow):
         target = os.path.normcase(os.path.abspath(path))
         for i in range(self._tabs.count()):
             tab = self._tabs.widget(i)
-            if tab.doc is not None and \
-                    os.path.normcase(os.path.abspath(tab.doc.path)) == target:
+            tab_path = tab.doc.path if tab.doc else getattr(tab, "_opening_path", None)
+            if tab_path and os.path.normcase(os.path.abspath(tab_path)) == target:
                 return tab
         return None
 
@@ -1750,11 +1809,16 @@ class AppWindow(QMainWindow):
         return True
 
     def _load_into(self, tab, path):
+        if self._tabs.indexOf(tab) < 0 or getattr(tab, "_closing_doc", False):
+            return
         tab.open_path(path)
+        tab._opening_path = None
         if tab.doc is None:
             self._remove_tab(tab)  # 열기 실패/취소 → 빈 탭 제거
         else:
             self._sync_tab_title(tab)
+            if self.workspace_mode == "editor":
+                tab.set_edit_mode(True)
 
     # --- 탭 제목/전환/닫기 ---------------------------------------------
 
@@ -1773,7 +1837,9 @@ class AppWindow(QMainWindow):
 
     def _adopt_tab(self, source, tab, index):
         """같은 프로세스의 다른 창에서 문서 위젯과 편집 상태를 그대로 받는다."""
-        if source.access_policy != self.access_policy:
+        if (source.access_policy != self.access_policy or
+                source.workspace_mode != self.workspace_mode or
+                source.updates_enabled != self.updates_enabled):
             return False
         source_index = source._tabs.indexOf(tab)
         if source_index < 0:
@@ -1801,7 +1867,8 @@ class AppWindow(QMainWindow):
         read_only = bool(payload.get("read_only", False))
         policy = (read_only, bool(payload.get("annotations_enabled", not read_only)),
                   bool(payload.get("autosave_annotations", True)))
-        if policy != self.access_policy:
+        if (policy != self.access_policy or
+                payload.get("workspace_mode") != self.workspace_mode):
             return False
         entry = _dragged_tabs.get(payload.get("token")) \
             if payload.get("pid") == os.getpid() else None
@@ -1837,15 +1904,28 @@ class AppWindow(QMainWindow):
         self._tabs.setTabToolTip(i, tab.doc.path if tab.doc else "")
         if self._tabs.currentWidget() is tab:
             self.setWindowTitle(
-                "%s — %s" % (name, APP_NAME) if tab.doc else APP_NAME)
+                "%s — %s" % (name, self.workspace_title())
+                if tab.doc else self.workspace_title())
 
     def _on_tab_changed(self, i):
         if i < 0:
             self._show_start()
             return
         tab = self._tabs.widget(i)
-        self.setMenuBar(tab._menubar)  # 활성 탭 메뉴바를 셸에 붙인다
+        self._switch_menubar(tab._menubar)
         self._sync_tab_title(tab)
+
+    def _switch_menubar(self, menubar):
+        # QMainWindow deletes a replaced menu bar unless ownership is released.
+        # Inactive tabs still own their menus and must be able to reuse them.
+        previous = self.menuWidget()
+        if previous is menubar:
+            return
+        if previous is not None:
+            previous.hide()
+            previous.setParent(None)
+        self.setMenuBar(menubar)
+        menubar.show()
 
     def close_tab(self, tab):
         if tab is None or not tab.maybe_save():
@@ -1958,7 +2038,8 @@ _app_windows = []
 
 
 def new_window(path=None, force_new=False, updates_enabled=None, *,
-               read_only=False, annotations_enabled=None, autosave_annotations=True):
+               read_only=False, annotations_enabled=None, autosave_annotations=True,
+               workspace_mode=None):
     """Open an embedded viewer/editor. ``read_only=True`` disables body edits.
 
     Read-only mode retains viewing, search, selection, copy and printing.
@@ -1966,8 +2047,11 @@ def new_window(path=None, force_new=False, updates_enabled=None, *,
     never reused. Set the policy when opening a window, not on an open document.
     In read-only mode, annotations_enabled=True enables sidecar annotations;
     autosave_annotations=False makes their saving manual (Ctrl+S).
+    Standalone workspaces opt in with workspace_mode="reader" or "editor".
+    Omit it in embedded hosts to preserve their existing policy and menus.
     """
-    annotation_flag = not read_only if annotations_enabled is None else bool(annotations_enabled)
+    read_only, annotation_flag = workspace_policy(
+        workspace_mode, read_only, annotations_enabled)
     policy = (bool(read_only), annotation_flag, bool(autosave_annotations))
     updates_enabled = bool(updates_enabled)
     application = QApplication.instance()
@@ -1976,12 +2060,14 @@ def new_window(path=None, force_new=False, updates_enabled=None, *,
         install_i18n(application)
     window = next((candidate for candidate in _app_windows
                    if candidate.access_policy == policy
+                   and candidate.workspace_mode == workspace_mode
                    and candidate.updates_enabled == updates_enabled),
                   None)
     if force_new or window is None:
         window = AppWindow(updates_enabled=updates_enabled, read_only=read_only,
                            annotations_enabled=annotation_flag,
-                           autosave_annotations=autosave_annotations)
+                           autosave_annotations=autosave_annotations,
+                           workspace_mode=workspace_mode)
         if _app_windows:
             previous = _app_windows[-1]
             window.move(previous.x() + 30, previous.y() + 30)

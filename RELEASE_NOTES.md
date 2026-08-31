@@ -1,16 +1,17 @@
-# sPDF 1.17.2 Release Notes
+# sPDF 1.18.0 Release Notes
 
-Release date: 2026-08-30
+Release date: 2026-08-31
 
-## Embedded reading and annotations
+## 1.18.0 Highlights
 
-- Host programs can turn body editing, annotation editing and annotation autosave on or off separately.
-- Read-only viewing retains zoom, navigation, search, text selection/copy, existing annotations and printing.
-- With annotations enabled, notes and highlights are saved beside the PDF without changing the original. They are restored when the PDF is reopened in a reader window, even with annotation editing off.
-- Disable autosave to save annotations with Ctrl+S; use Ctrl+Shift+S to export a separate annotated PDF for other viewers.
-- Undo/redo, close-time saving, save-error warnings and concurrent-save checks help preserve annotations. Protected PDFs do not create unencrypted annotation sidecars.
-- New windows inherit the selected mode. Standalone editing and embedded self-update behavior remain unchanged.
+- Standalone sPDF opens in a reader. Use the edit icon or Ctrl+E to open the document in a separate editor at the same page and zoom.
+- Saving updates matching reader windows in the same sPDF session without moving their view. Save As preserves the original reader's file.
+- An already-open editor is reused with its unsaved edits intact. Reader and editor windows can be closed independently.
+- Text editing includes font-size and color controls and a dedicated toolbar button. Existing page tools, annotations, and manual OCR remain available in the editor.
+- Reader zoom updates immediately around the pointer, then sharpens the visible area. Small rendering tiles and a bounded cache avoid full-page high-resolution images at 800% zoom or in two-page view.
+- Reader windows use OpenGL image composition when available and fall back to CPU display otherwise. Hidden and closed tabs cancel pending rendering work.
+- Failed file replacement keeps your edits available for retry. Failed text edits restore the previous content.
+- Fixed a menu-bar lifetime issue when switching or closing tabs.
+- Embedded applications keep their existing editing, annotation, and self-update policies.
 
-## Window stability
-
-- Fixed a UI translation timing issue that could crash newly created windows.
+OpenGL accelerates image composition, not PDF interpretation or rasterization: those still use PyMuPDF on the CPU. Editor and embedded display paths are unchanged.

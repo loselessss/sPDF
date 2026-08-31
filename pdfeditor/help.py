@@ -100,11 +100,13 @@ HELP_HTML = """
 
 <h3>✏️ 텍스트 편집</h3>
 <table cellpadding="4">
-<tr><td><b>Ctrl+E</b></td><td>편집 모드 켜기/끄기</td></tr>
+<tr><td><b>Ctrl+E</b></td><td>읽기 창: 별도 편집 창 열기 / 편집 창: 텍스트 편집 켜기·끄기</td></tr>
 <tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>실행 취소 / 다시 실행</td></tr>
 </table>
 <p>편집 모드에서 <b>초록 테두리</b>로 표시된 글자 토막을 클릭해 내용을
-고칩니다. <b>빈 곳을 클릭</b>하면 그 자리에 새 글자를 얹습니다.</p>
+고칩니다. <b>빈 곳을 클릭</b>하면 그 자리에 새 글자를 얹습니다.
+내용과 함께 <b>글자 크기·색상</b>을 선택할 수 있습니다. 저장하면 같은 실행
+세션의 읽기 창도 읽던 위치를 유지한 채 갱신됩니다.</p>
 <p><b>스캔본도 편집됩니다</b> — 먼저 OCR(Ctrl+R)을 돌리면 글자를 클릭할 수
 있게 되고, 고치면 주변 종이색을 자동으로 떠서 원래 글자를 덮은 뒤 새 글자를
 씁니다. 배경이 깨끗한 문서는 티가 잘 안 나고, 얼룩·무늬가 있는 스캔은 덮은
@@ -219,7 +221,7 @@ Page → <b>Add Watermark</b> lets you choose text, size, opacity, angle, and pa
 relative margins to the current page, a range, or all pages. Cropping changes
 the visible area, not the underlying content. Ctrl+Z undoes it.</p>
 <table cellpadding="4">
-<tr><td><b>Ctrl+E</b></td><td>Toggle text editing</td></tr>
+<tr><td><b>Ctrl+E</b></td><td>Reader: open a separate editor / Editor: toggle text editing</td></tr>
 <tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>Undo / redo</td></tr>
 <tr><td><b>Ctrl+] / Ctrl+[</b></td><td>Rotate right / left</td></tr>
 <tr><td><b>Ctrl+Delete</b></td><td>Delete the current page</td></tr>
@@ -227,6 +229,9 @@ the visible area, not the underlying content. Ctrl+Z undoes it.</p>
 <p>PDF text is edited within its original line or box; it is not a full
 reflow editor. Replacement fonts may look different. Page rotation, deletion,
 reordering, and merging participate in undo/redo.</p>
+<p>Use the edit icon or Ctrl+E in a standalone reader to open a separate editor.
+Text dialogs offer content, font-size and color controls. Saving refreshes
+readers in the same running sPDF session without moving their view.</p>
 
 <p style="color:gray;">See Help → Open-source Licenses for third-party notices.</p>
 <p>Recovery copies refresh every 30 seconds while edits are pending. Protected

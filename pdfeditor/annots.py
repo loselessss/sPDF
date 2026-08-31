@@ -101,7 +101,7 @@ class AnnotMixin:
                 getattr(self, "_recovered_unsaved", False)):
             return self.save_as_dialog()
         try:
-            self.doc.save_as(self.doc.path)  # 원본은 .bak으로 백업된다
+            self._save_document_file(self.doc.path)
         except Exception as e:
             QMessageBox.critical(self, "저장 실패", "저장할 수 없습니다.\n\n%s" % e)
             return False
@@ -124,7 +124,7 @@ class AnnotMixin:
             return False
         path = suggested_pdf_path(path)
         try:
-            self.doc.save_as(path)
+            self._save_document_file(path)
         except Exception as e:
             QMessageBox.critical(self, "저장 실패", "저장할 수 없습니다.\n\n%s" % e)
             return False
@@ -137,6 +137,11 @@ class AnnotMixin:
         self._update_title()
         self.statusBar().showMessage("저장됨: %s" % path, 3000)
         return True
+
+    def _save_document_file(self, path):
+        from .workspaces import readers_released_for_save
+        with readers_released_for_save(self, path):
+            self.doc.save_as(path)
 
     # --- 형광펜 ----------------------------------------------------------
 

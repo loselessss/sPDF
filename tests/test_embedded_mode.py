@@ -4,7 +4,7 @@ import unittest
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 HAS_PYQT5 = importlib.util.find_spec("PyQt5") is not None
@@ -265,6 +265,227 @@ class EmbeddedModeTests(unittest.TestCase):
                 self.assertIsNot(embedded, standalone)
                 self.assertFalse(embedded.updates_enabled)
                 self.assertIsNone(embedded._update_service)
+
+    def settle(self):
+        for _ in range(6):
+            self.app.processEvents()
+
+    def test_reader_opens_independent_editor_and_reuses_pending_tab(self):
+        from pdfeditor.reader_view import ReaderPageView
+        from pdfeditor.widgets import PageView
+        with self.document_windows() as (module, source):
+            reader = module.new_window(workspace_mode="reader")
+            tab = reader.open_in_tab(str(source))
+            self.settle()
+            tab.show_page(1)
+            tab.set_zoom(2)
+            tab._render_current()
+            editor = reader.open_editor(tab)
+            self.assertIs(reader.open_editor(tab), editor)
+            self.assertEqual(editor._tabs.count(), 1)
+            self.settle()
+            editing = editor._tabs.currentWidget()
+            self.assertIsInstance(tab.view, ReaderPageView)
+            self.assertIsInstance(editing.view, PageView)
+            self.assertEqual(editor.workspace_mode, "editor")
+            self.assertFalse(editor.read_only)
+            self.assertTrue(editing._edit_mode)
+            self.assertTrue(editing._edit_act.isVisible())
+            self.assertIn(editing._edit_act, editing._interaction_toolbar.actions())
+            self.assertIsNot(editing.doc, tab.doc)
+            self.assertIsNone(editing._ocr_worker)
+            self.assertEqual(editing.page_index, 1)
+            self.assertEqual(editing.view.zoom, 2)
+            self.assertTrue(tab._open_editor_act.isVisible())
+            self.assertFalse(tab._edit_act.isVisible())
+            editing.mark_dirty()
+            self.assertIs(reader.open_editor(tab), editor)
+            self.assertTrue(editing._dirty)
+            self.assertFalse(editor._adopt_tab(reader, tab, 0))
+            child = reader.new_window()
+            self.assertEqual(child.workspace_mode, "reader")
+            self.assertFalse(child.updates_enabled)
+            reader.close()
+            self.assertIsNotNone(editing.doc)
+
+    def test_embedded_reader_has_no_editor_escape_hatch(self):
+        from pdfeditor.widgets import PageView
+        with self.document_windows() as (module, source):
+            embedded = module.new_window(read_only=True)
+            tab = embedded.open_in_tab(str(source))
+            self.settle()
+            self.assertIsInstance(tab.view, PageView)
+            self.assertIsNone(embedded.open_editor(tab))
+            self.assertIsNone(tab._open_editor_act)
+            standalone = module.new_window(workspace_mode="reader")
+            self.assertIsNot(standalone, embedded)
+            self.assertFalse(standalone._adopt_tab(embedded, tab, 0))
+            with self.assertRaises(ValueError):
+                module.new_window(read_only=True, workspace_mode="editor")
+
+    def test_empty_recovery_does_not_open_editor_at_reader_startup(self):
+        with self.document_windows() as (module, source):
+            reader = module.new_window(workspace_mode="reader")
+            reader._recovery_store = Mock()
+            reader._recovery_store.available.return_value = []
+            with patch.object(reader, "open_editor") as open_editor:
+                reader.show_recovery(automatic=True)
+            open_editor.assert_not_called()
+
+    def test_switching_and_closing_tabs_keeps_menu_bars_alive(self):
+        from PyQt5 import sip
+        from PyQt5.QtTest import QTest
+        with self.document_windows() as (module, source):
+            reader = module.new_window(workspace_mode="reader")
+            first = reader.open_in_tab(str(source))
+            other = source.with_name("second.pdf")
+            other.write_bytes(source.read_bytes())
+            second = reader.open_in_tab(str(other))
+            self.settle()
+            for tab in (first, second, first):
+                reader._tabs.setCurrentWidget(tab)
+                QTest.qWait(20)
+                self.assertFalse(sip.isdeleted(tab._menubar))
+                self.assertIs(reader.menuWidget(), tab._menubar)
+            reader.close_tab(first)
+            QTest.qWait(30)
+            self.assertFalse(sip.isdeleted(second._menubar))
+            self.assertIs(reader.menuWidget(), second._menubar)
+
+    def test_editor_saves_and_refreshes_reader_without_moving_view(self):
+        from PyQt5.QtWidgets import QMessageBox
+        with self.document_windows() as (module, source):
+            reader = module.new_window(workspace_mode="reader")
+            tab = reader.open_in_tab(str(source))
+            self.settle()
+            tab.show_page(1)
+            tab.set_zoom(2)
+            tab._render_current()
+            self.settle()
+            tab.view.verticalScrollBar().setValue(250)
+            state = tab.capture_view_state()
+            editor = reader.open_editor(tab)
+            self.settle()
+            editing = editor._tabs.currentWidget()
+            editing.doc.add_text_box(1, (72, 100), "Saved change")
+            editing.mark_dirty()
+            with patch.object(QMessageBox, "critical") as errors:
+                self.assertTrue(editing.save())
+            errors.assert_not_called()
+            self.settle()
+            self.assertIn("Saved change", tab.doc._doc[1].get_text())
+            self.assertEqual(tab.page_index, state["page"])
+            self.assertEqual(tab.view.zoom, state["zoom"])
+            self.assertAlmostEqual(tab.capture_view_state()["vertical"],
+                                   state["vertical"], places=2)
+            self.assertFalse(editing._dirty)
+            self.assertFalse(tab._dirty)
+
+    def test_failed_replace_preserves_edits_and_reopens_reader(self):
+        with self.document_windows() as (module, source):
+            original = source.read_bytes()
+            reader = module.new_window(workspace_mode="reader")
+            tab = reader.open_in_tab(str(source))
+            self.settle()
+            editor = reader.open_editor(tab)
+            self.settle()
+            editing = editor._tabs.currentWidget()
+            editing.doc.add_text_box(1, (72, 100), "Keep unsaved")
+            editing.mark_dirty()
+            with patch("pdfeditor.core.os.replace", side_effect=PermissionError("locked")), \
+                    patch("pdfeditor.annots.QMessageBox.critical"):
+                self.assertFalse(editing.save())
+            self.settle()
+            self.assertTrue(editing._dirty)
+            self.assertIn("Keep unsaved", editing.doc._doc[1].get_text())
+            self.assertNotIn("Keep unsaved", tab.doc._doc[1].get_text())
+            self.assertEqual(source.read_bytes(), original)
+            self.assertEqual(list(source.parent.glob(".spdf-save-*")), [])
+            self.assertTrue(editing.save())
+            self.settle()
+            self.assertIn("Keep unsaved", tab.doc._doc[1].get_text())
+
+    def test_save_as_does_not_redirect_original_reader(self):
+        with self.document_windows() as (module, source):
+            original = source.read_bytes()
+            reader = module.new_window(workspace_mode="reader")
+            tab = reader.open_in_tab(str(source))
+            self.settle()
+            editor = reader.open_editor(tab)
+            self.settle()
+            editing = editor._tabs.currentWidget()
+            editing.doc.add_text_box(1, (72, 100), "New copy")
+            editing.mark_dirty()
+            target = source.with_name("copy.pdf")
+            with patch("pdfeditor.annots.QFileDialog.getSaveFileName",
+                       return_value=(str(target), "PDF")):
+                self.assertTrue(editing.save_as_dialog())
+            self.settle()
+            self.assertEqual(editing.doc.path, str(target))
+            self.assertEqual(tab.doc.path, str(source))
+            self.assertEqual(source.read_bytes(), original)
+            self.assertTrue(target.exists())
+
+    def test_editor_respects_pdf_edit_permissions(self):
+        import fitz
+        with self.document_windows() as (module, source):
+            protected = source.with_name("protected.pdf")
+            with fitz.open(source) as pdf:
+                pdf.save(protected, encryption=fitz.PDF_ENCRYPT_AES_256,
+                         owner_pw="owner", user_pw="reader",
+                         permissions=fitz.PDF_PERM_COPY | fitz.PDF_PERM_PRINT)
+            reader = module.new_window(workspace_mode="reader")
+            with patch("pdfeditor.app.QInputDialog.getText", return_value=("reader", True)):
+                tab = reader.open_in_tab(str(protected))
+                self.settle()
+                with patch("pdfeditor.app.QMessageBox.critical") as error:
+                    editor = reader.open_editor(tab)
+                    self.settle()
+            self.assertEqual(editor._tabs.count(), 0)
+            error.assert_called_once()
+            self.assertTrue(tab.doc.read_only)
+
+    def test_text_edit_properties_undo_and_failed_operation_rollback(self):
+        from PyQt5.QtCore import QPointF
+        from PyQt5.QtWidgets import QDialog
+        with self.document_windows() as (module, source):
+            editor = module.new_window(workspace_mode="editor")
+            tab = editor.open_in_tab(str(source))
+            self.settle()
+            with patch("pdfeditor.editing.TextEditDialog") as dialog:
+                dialog.return_value.exec_.return_value = QDialog.Accepted
+                dialog.return_value.values.return_value = ("Blue text", 18, (0, 0, 1))
+                tab._add_text_box_at(QPointF(72, 180))
+            self.assertTrue(tab._dirty)
+            spans = tab.doc.spans(0)
+            added = next(span for span in spans if "Blue text" in span["text"])
+            self.assertAlmostEqual(added["size"], 18)
+            self.assertEqual(added["rgb"], (0, 0, 1))
+            tab.undo()
+            self.assertNotIn("Blue text", tab.doc._doc[0].get_text())
+            tab.redo()
+            self.assertIn("Blue text", tab.doc._doc[0].get_text())
+            history = len(tab._undo_stack)
+
+            def failing_edit():
+                tab.doc.delete_page(1)
+                raise ValueError("test failure after mutation")
+
+            with patch("pdfeditor.editing.QMessageBox.warning"):
+                self.assertFalse(tab._perform_text_edit(failing_edit))
+            self.assertEqual(tab.doc.page_count, 2)
+            self.assertEqual(len(tab._undo_stack), history)
+            self.assertIn("Blue text", tab.doc._doc[0].get_text())
+
+    def test_text_edit_dialog_defaults_and_cancelled_color(self):
+        from PyQt5.QtGui import QColor
+        from pdfeditor.text_edit_dialog import TextEditDialog
+        dialog = TextEditDialog(text="Sample", size=14, color=(1, 0, 0), replacing=True)
+        self.assertEqual(dialog.values(), ("Sample", 14, (1, 0, 0)))
+        with patch("pdfeditor.text_edit_dialog.QColorDialog.getColor", return_value=QColor()):
+            dialog.choose_color()
+        self.assertEqual(dialog.values()[2], (1, 0, 0))
+        dialog.close()
 
     def test_internal_module_window_disables_all_update_entry_points(self):
         from PyQt5.QtCore import Qt

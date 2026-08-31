@@ -10,8 +10,10 @@ undo/redo: PyMuPDF 저널링이 텍스트 삽입과 함께 쓰면 깨져서(연�
 """
 
 from PyQt5.QtCore import QRectF
-from PyQt5.QtWidgets import QInputDialog
+from PyQt5.QtWidgets import QDialog, QMessageBox
 from .access import editing_command, history_command
+from .i18n import localize
+from .text_edit_dialog import TextEditDialog
 
 # 스냅샷 스택 상한 — 무한히 쌓으면 큰 문서에서 메모리를 먹으므로 제한한다.
 UNDO_LIMIT = 30
@@ -57,6 +59,7 @@ class EditMixin:
         self._edit_mode = on
         self._edit_act.setChecked(on)
         if on:
+            self.cancel_note_mode()
             # 손 도구에서는 클릭을 이동으로 소비하므로 편집 지점을 찍을 수 없다.
             self.set_interaction_mode("select", announce=False)
             self._show_edit_boxes()
@@ -92,29 +95,35 @@ class EditMixin:
         if span is None:
             self._add_text_box_at(pt)
             return
-        new_text, ok = QInputDialog.getMultiLineText(
-            self, "텍스트 편집", "내용:", span["text"])
-        if not ok or new_text == span["text"]:
+        scanned = self.doc.is_scanned_area(self.page_index, span["bbox"])
+        color = (self.doc.sample_bg_fg(self.page_index, span["bbox"])[1]
+                 if scanned else span["rgb"])
+        dialog = TextEditDialog(self, text=span["text"], size=span["size"],
+                                color=color, replacing=True)
+        if dialog.exec_() != QDialog.Accepted:
             return
-        self._push_undo()
-        # 스캔본이면 글자가 이미지에 찍혀 있어 리댁션으로 안 지워진다 —
-        # 배경색으로 덮고 다시 쓰는 경로로 자동 분기(설계 §3.4).
-        if self.doc.is_scanned_area(self.page_index, span["bbox"]):
-            self.doc.replace_scanned_text(
+        new_text, size, rgb = dialog.values()
+        if (new_text == span["text"] and abs(size - span["size"]) < 0.05
+                and all(abs(a - b) < 1 / 255 for a, b in zip(rgb, color))):
+            return
+        if scanned:
+            operation = lambda: self.doc.replace_scanned_text(
                 self.page_index, span["bbox"], span["origin"],
-                new_text, span["size"])
+                new_text, size, fg=rgb)
         else:
-            self.doc.replace_span(self.page_index, span["bbox"], span["origin"],
-                                  new_text, span["size"], span["rgb"])
-        self._after_page_content_changed()
-        self.mark_dirty()
+            operation = lambda: self.doc.replace_span(
+                self.page_index, span["bbox"], span["origin"], new_text, size, rgb)
+        self._perform_text_edit(operation)
 
     @editing_command
     def _add_text_box_at(self, pt):
         """빈 자리 클릭 — 새 글자를 얹는다. 스캔본이면 배경도 함께 깔아
         아래 내용을 가린다(OCR 없이도 쓸 수 있는 자유 편집)."""
-        text, ok = QInputDialog.getMultiLineText(self, "텍스트 추가", "내용:")
-        if not ok or not text.strip():
+        dialog = TextEditDialog(self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        text, size, color = dialog.values()
+        if not text.strip():
             return
         point = (pt.x(), pt.y())
         bg = None
@@ -122,10 +131,25 @@ class EditMixin:
                                                       pt.x() + 60, pt.y() + 4)):
             bg, _fg = self.doc.sample_bg_fg(
                 self.page_index, (pt.x(), pt.y() - 10, pt.x() + 60, pt.y() + 4))
-        self._push_undo()
-        self.doc.add_text_box(self.page_index, point, text, bg=bg)
+        self._perform_text_edit(lambda: self.doc.add_text_box(
+            self.page_index, point, text, size=size, bg=bg, fg=color))
+
+    def _perform_text_edit(self, operation):
+        before = None
+        try:
+            self.doc.ensure_editable()
+            before = self.doc.snapshot()
+            operation()
+        except Exception as error:
+            if before is not None:
+                self.doc.restore(before)
+                self._after_page_content_changed()
+            QMessageBox.warning(self, localize("Edit failed", "편집 실패"), str(error))
+            return False
+        self._push_undo(snapshot=before)
         self._after_page_content_changed()
         self.mark_dirty()
+        return True
 
     def _span_at(self, pt):
         for s in getattr(self, "_page_spans", []):
@@ -136,8 +160,8 @@ class EditMixin:
 
     # --- undo / redo --------------------------------------------------
 
-    def _push_undo(self, structural=False):
-        self._undo_stack.append(self.doc.snapshot())
+    def _push_undo(self, structural=False, snapshot=None):
+        self._undo_stack.append(self.doc.snapshot() if snapshot is None else snapshot)
         self._undo_structural.append(structural)
         if len(self._undo_stack) > UNDO_LIMIT:
             self._undo_stack.pop(0)

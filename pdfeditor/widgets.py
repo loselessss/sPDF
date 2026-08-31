@@ -348,6 +348,11 @@ class PageCanvas(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         for _page, pixmap, rect in self._pages:
             p.drawPixmap(round(rect.left()), round(rect.top()), pixmap)
+        self.paint_overlays(p)
+        p.end()
+
+    def paint_overlays(self, p):
+        """Paint PDF-coordinate overlays on either the CPU or OpenGL surface."""
         p.setPen(Qt.NoPen)
         z = self.zoom
         origin = self.active_page_rect().topLeft()
@@ -372,7 +377,6 @@ class PageCanvas(QWidget):
                 p.drawRect(QRectF(origin.x() + r.x() * z,
                                   origin.y() + r.y() * z,
                                   r.width() * z, r.height() * z))
-        p.end()
 
     # --- 마우스 → PDF 좌표 --------------------------------------------
 

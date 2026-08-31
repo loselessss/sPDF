@@ -45,7 +45,7 @@ class FluentThemeTests(unittest.TestCase):
         source = (
             Path(__file__).resolve().parents[1] / "pdfeditor" / "app.py"
         ).read_text(encoding="utf-8")
-        shell = source.split("class AppWindow(QMainWindow):", 1)[1]
+        shell = source.split("class AppWindow(", 1)[1]
         shell_init = shell.split("    def show_recovery", 1)[0]
         self.assertNotIn("self.setStatusBar", shell_init)
         self.assertIn("def _document_status_bar", shell)

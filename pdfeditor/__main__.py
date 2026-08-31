@@ -26,6 +26,9 @@ def main():
     # Windows의 모든 Qt 대화상자 제목 표시줄에 자동으로 붙는 `?`
     # 컨텍스트 도움말 버튼을 앱 전체에서 제거한다.
     QApplication.setAttribute(Qt.AA_DisableWindowContextHelpButton, True)
+    # Reader tabs can move between top-level windows without recreating GL
+    # contexts. Embedded hosts retain full control of their own QApplication.
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
@@ -51,7 +54,8 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     # 공식 실행 진입점에서만 자체 업데이트를 켠다. 다른 프로그램이
     # pdfeditor를 내부 모듈로 불러 new_window/AppWindow를 만들면 기본값은 꺼짐이다.
-    new_window(args[0] if args else None, updates_enabled=True)
+    new_window(args[0] if args else None, updates_enabled=True,
+               workspace_mode="reader")
     sys.exit(app.exec_())
 
 
