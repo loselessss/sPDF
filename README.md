@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.19.1** · English and Korean interface · Windows
+**Current version: 1.19.2** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -135,6 +135,17 @@ Press **F1** in the application for the complete localized guide.
 
 ## For developers
 
+### License and source code
+
+sPDF is licensed under **GNU AGPL v3 only (AGPL-3.0-only)**, without warranty.
+Redistribution and modification are permitted under [LICENSE](LICENSE).
+[Third-party notices and licensing scope](LICENSES.md) preserve the earlier MIT
+notice and each dependency's terms; embedding sPDF is not a licensing exemption.
+Get version-matched application sources and dependency-source directions from
+the same release page as the installer. See [SOURCE_CODE.md](SOURCE_CODE.md)
+for details, including build instructions. License texts are also available
+offline in **Help → Open-source Licenses**.
+
 sPDF is built with Python, PyQt5, and PyMuPDF. RapidOCR runs in a separate worker
 process so its runtime is loaded only when OCR is requested.
 
@@ -160,7 +171,6 @@ from pdfeditor.app import new_window
 viewer = new_window("document.pdf", read_only=True)   # reading only
 annotator = new_window("document.pdf", read_only=True,
                        annotations_enabled=True, autosave_annotations=True)
-editor = new_window("document.pdf", read_only=False)  # editing (default)
 ```
 
 `AppWindow` accepts the same options. Read-only mode retains zoom, navigation,
@@ -173,8 +183,8 @@ a separate annotated PDF. Move the sidecar together with the source PDF.
 
 New windows inherit all options; windows with different options are not reused
 and cannot exchange tabs. Options are fixed for each window. Embedded windows
-do not enable sPDF's self-updater. See the [integration guide](docs/PAPER_ORGANIZER_INTEGRATION.md)
-for host-side switches, saving, conflict handling and protected-PDF limitations.
+do not enable sPDF's self-updater. See the [reader API guide](docs/READER_INTEGRATION.md)
+for reader options, saving, conflict handling and protected-PDF limitations.
 
 The Qt-independent `Document(path, read_only=True)` also rejects body writes
 with `PermissionError`. This is an application feature switch, not DRM or a

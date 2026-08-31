@@ -1307,29 +1307,8 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
 
 
 def show_licenses(parent):
-    QMessageBox.information(parent, tr("오픈소스 라이선스"), (
-        localize(
-            "%s uses the following open-source software:\n\n"
-            "• PyQt5 — GPL v3 (Riverbank Computing)\n"
-            "• PyMuPDF / MuPDF — AGPL 3.0 (Artifex Software)\n"
-            "• RapidOCR — Apache 2.0 (RapidAI)\n"
-            "• PaddleOCR recognition models — Apache 2.0 (PaddlePaddle)\n"
-            "• ONNX Runtime — MIT (Microsoft)\n"
-            "• NumPy — BSD 3-Clause\n\n"
-            "See LICENSES.md in the application folder for details. If you "
-            "redistribute this application, review the source-disclosure "
-            "requirements of PyQt5 (GPL) and PyMuPDF (AGPL).",
-            "%s는 아래 오픈소스 소프트웨어로 만들어졌습니다.\n\n"
-            "• PyQt5 — GPL v3 (Riverbank Computing)\n"
-            "• PyMuPDF / MuPDF — AGPL 3.0 (Artifex Software)\n"
-            "• RapidOCR — Apache 2.0 (RapidAI)\n"
-            "• PaddleOCR 인식 모델 — Apache 2.0 (PaddlePaddle)\n"
-            "• ONNX Runtime — MIT (Microsoft)\n"
-            "• NumPy — BSD 3-Clause\n\n"
-            "자세한 내용은 프로그램 폴더의 LICENSES.md를 참고하세요. 외부에 "
-            "배포할 때는 PyQt5(GPL)와 PyMuPDF(AGPL)의 소스 공개 조건을 확인하세요."
-        )) % APP_NAME)
-
+    from .license_dialog import show_licenses as show_license_dialog
+    show_license_dialog(parent)
 
 # ======================================================================
 # AppWindow — 탭들을 담는 셸

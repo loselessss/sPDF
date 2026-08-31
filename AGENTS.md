@@ -7,8 +7,8 @@
 - `run.py` is the console development entry point; `run.pyw` launches without a console.
 - Application code lives in `pdfeditor/`. Keep `app.py` focused on `MainWindow` composition and place feature behavior in the existing mixin/module that owns it.
 - OCR runs out of process. Preserve the separation between the GUI process, `ocr_worker_main.py`, and `pdfeditor/ocr_subprocess.py`.
-- Paper organization is a separate companion program launched through `paper_organizer.py`; do not import its UI, timers, or Ollama workflow into the sPDF application entry point.
-- Paper Organizer uses the separate `paperorganizer/` package. Its settings must remain separate from `~/.spdf.json` and its modules must not be imported by the sPDF application entry point.
+- sPDF is an independent project. Keep its feature plans, documentation and implementation focused on its own reader and editor; do not describe other applications as companion components of sPDF.
+- External applications may reuse the sPDF reader API. Document only the sPDF-side API contract; their features, settings, release plans and source changes are outside this repository's task scope. Do not import external application modules into the sPDF entry point or mix their settings with `~/.spdf.json`.
 
 ## Embedded-module integration
 

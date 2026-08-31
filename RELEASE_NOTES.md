@@ -1,4 +1,4 @@
-# sPDF 1.19.1 Release Notes
+# sPDF 1.19.2 Release Notes
 
 Release date: 2026-08-31
 
@@ -25,3 +25,9 @@ Release date: 2026-08-31
 
 - Editor document tabs and window titles now display **[Edit-only]** to distinguish them from reader windows.
 - Removed presentation and full-screen controls, including F5/F11 shortcuts, from standalone editor windows. Reader and embedded windows retain their existing view modes.
+
+## 1.19.2 Improvements
+
+- Clarified sPDF's GNU AGPL v3-only licensing, preserving previous MIT and third-party notices.
+- Read full license texts offline in Help → Open-source Licenses, or follow the source-code link for your installed version. License texts and the source guide are also included with the installer.
+- Matching application source and dependency-source directions are available alongside release installers. See [source access and rebuilding](https://github.com/loselessss/sPDF/blob/v1.19.2/SOURCE_CODE.md).

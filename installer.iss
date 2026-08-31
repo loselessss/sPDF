@@ -5,7 +5,7 @@
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.19.1"
+#define MyAppVersion "1.19.2"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"
@@ -29,6 +29,7 @@ SetupIconFile=assets\spdf.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 ShowLanguageDialog=yes
+LicenseFile=LICENSE
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -51,6 +52,12 @@ Source: "dist\sPDF\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cre
 ; OCR 워커는 Qt DLL과 격리하기 위해 별도 폴더에 (paths.ocr_command 참고)
 Source: "dist\sPDF-ocr\*"; DestDir: "{app}\ocr"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "assets\spdf_doc.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+; Keep legal documents accessible without starting sPDF.
+Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LICENSES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "SOURCE_CODE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "build\legal\*"; DestDir: "{app}\third-party"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelId}"

@@ -7,7 +7,7 @@ sPDF는 일상적인 문서 작업을 위한 Windows 데스크톱 PDF 뷰어·�
 하나의 가벼운 프로그램에 담았습니다. 외부 링크나 선택형 모델 다운로드를 직접
 사용하지 않는 한 문서는 사용자 컴퓨터 안에서 처리됩니다.
 
-**현재 버전: 1.19.1** · 한국어·영어 인터페이스 · Windows
+**현재 버전: 1.19.2** · 한국어·영어 인터페이스 · Windows
 
 ## 이런 작업에 사용할 수 있습니다
 
@@ -125,6 +125,16 @@ sPDF의 **도움말 → PDF 기본 프로그램 / 브라우저 설정**에서는
 
 ## 개발자용 정보
 
+### 라이선스와 소스 코드
+
+sPDF는 **GNU AGPL v3만 적용(AGPL-3.0-only)**하며 보증 없이 제공합니다.
+[LICENSE](LICENSE)의 조건에 따라 수정·재배포할 수 있습니다.
+[오픈소스 고지·적용 범위](LICENSES.md)에 기존 MIT 고지와 구성요소별 조건을
+보존하며, 내장 모드는 라이선스 예외가 아닙니다. 설치 파일과 같은 릴리스에서
+해당 버전의 앱 소스와 의존성 소스 안내를 받을 수 있습니다.
+빌드 방법 등은 [SOURCE_CODE.md](SOURCE_CODE.md)를 참고하세요.
+**도움말 → 오픈소스 라이선스**에서도 인터넷 없이 원문을 읽을 수 있습니다.
+
 sPDF는 Python, PyQt5, PyMuPDF로 개발되었습니다. RapidOCR은 별도 작업 프로세스에서
 실행되어 OCR을 요청할 때만 관련 런타임을 불러옵니다.
 
@@ -150,7 +160,6 @@ from pdfeditor.app import new_window
 viewer = new_window("document.pdf", read_only=True)   # 읽기 전용
 annotator = new_window("document.pdf", read_only=True,
                        annotations_enabled=True, autosave_annotations=True)
-editor = new_window("document.pdf", read_only=False)  # 편집 허용 (기본값)
 ```
 
 `AppWindow`도 같은 옵션을 받습니다. 읽기 전용에서는 확대·이동·검색·텍스트 선택/복사·
@@ -162,8 +171,8 @@ editor = new_window("document.pdf", read_only=False)  # 편집 허용 (기본값
 
 새 창에도 모든 옵션이 이어지며, 설정이 다른 창은 재사용하거나 서로 탭을 옮기지 않습니다.
 설정은 창마다 고정되며 외부 모듈에서는 sPDF 자체 업데이터가 켜지지 않습니다.
-호스트 쪽 ON/OFF 연결, 저장·충돌 처리, 보호된 PDF의 제한은
-[외부 연동 문서](docs/PAPER_ORGANIZER_INTEGRATION.md)에 정리했습니다.
+리더 옵션, 저장·충돌 처리, 보호된 PDF의 제한은
+[리더 API 연동 문서](docs/READER_INTEGRATION.md)에 정리했습니다.
 
 Qt와 독립적인 `Document(path, read_only=True)`도 본문 변경 메서드를 호출하면
 `PermissionError`를 발생시킵니다. 이는 기능 선택 옵션이며 DRM이나 파일 접근 권한

@@ -36,7 +36,16 @@ jobs:
       - name: Build Windows installer
         run: |
           cmd /c build_exe.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmd /c build_installer.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Prepare matching source and dependency directions
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          python create_source_bundle.py --version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create checksums and latest alias
         shell: pwsh
@@ -61,6 +70,9 @@ jobs:
           path: |
             Output/sPDF_Setup_*.exe
             Output/sPDF_Setup_*.exe.sha256
+            Output/sPDF_Source_*.zip
+            Output/sPDF_Source_*.zip.sha256
+            Output/sPDF_Dependency_Sources_*.md
           compression-level: 0
 
       - name: Publish GitHub release
@@ -72,16 +84,21 @@ jobs:
           $version = $tag.TrimStart("v")
           $installer = "Output\sPDF_Setup_$version.exe"
           $latestInstaller = "Output\sPDF_Setup_latest.exe"
+          $sourceArchive = "Output\sPDF_Source_$version.zip"
+          $dependencySources = "Output\sPDF_Dependency_Sources_$version.md"
           python release_notes.py --version $version --release-notes RELEASE_NOTES.md --release-notes-ko RELEASE_NOTES.ko.md --output release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release view $tag --json id 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release edit $tag --title "sPDF $version" `
               --notes-file release-notes.md
             gh release upload $tag $installer "$installer.sha256" `
-              $latestInstaller "$latestInstaller.sha256" --clobber
+              $latestInstaller "$latestInstaller.sha256" `
+              $sourceArchive "$sourceArchive.sha256" $dependencySources --clobber
           } else {
             gh release create $tag $installer "$installer.sha256" `
               $latestInstaller "$latestInstaller.sha256" `
+              $sourceArchive "$sourceArchive.sha256" $dependencySources `
               --verify-tag --title "sPDF $version" `
               --notes-file release-notes.md
           }

@@ -22,6 +22,7 @@ spec_root = Path(SPEC).resolve().parent
 sys.path.insert(0, str(spec_root))
 
 from build_version_info import write_version_info_files
+from build_legal import write_legal_bundle
 from pdfeditor.meta import APP_VERSION
 
 
@@ -29,6 +30,9 @@ from pdfeditor.meta import APP_VERSION
 # 두 EXE에 같은 제품/버전 정보와 역할별 파일 설명을 넣는다.
 gui_version_info, ocr_version_info = write_version_info_files(
     spec_root / "build" / "version-info", APP_VERSION)
+legal_bundle = write_legal_bundle(spec_root / "build" / "legal")
+legal_datas = [("LICENSE", "."), ("LICENSES.md", "."), ("SOURCE_CODE.md", "."),
+               ("licenses", "licenses"), (str(legal_bundle), "third-party")]
 
 # --- OCR 워커: onnxruntime/rapidocr/cv2, PyQt5 제외 ---
 ocr_datas, ocr_bins, ocr_hidden = [], [], []
@@ -63,7 +67,7 @@ ocr_bins = [e for e in ocr_bins if _keep(e)]
 a_ocr = Analysis(
     ["ocr_worker_main.py"],
     binaries=ocr_bins,
-    datas=ocr_datas,
+    datas=ocr_datas + legal_datas,
     hiddenimports=ocr_hidden,
     excludes=["PyQt5", "tkinter", "matplotlib", "onnx", "tensorrt", "paddle"],
 )
@@ -82,8 +86,7 @@ a_gui = Analysis(
     ["run.py"],
     binaries=[],
     datas=[("assets/spdf.ico", "assets"),
-           ("assets/spdf_doc.ico", "assets"),
-           ("LICENSES.md", ".")],
+           ("assets/spdf_doc.ico", "assets")] + legal_datas,
     hiddenimports=["pdfeditor", "fitz"],
     excludes=["rapidocr", "onnxruntime", "cv2", "onnx", "tensorrt", "paddle",
               "tkinter", "matplotlib"],
