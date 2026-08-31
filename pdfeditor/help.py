@@ -104,6 +104,9 @@ HELP_HTML = """
 페이지를 두 번 누르거나 Enter를 누르면 같은 창에서 상세 편집합니다.
 <b>페이지 구성</b> 버튼이나 Ctrl+Shift+P로 돌아가도 미저장 변경과
 실행 취소·다시 실행 이력이 유지됩니다.</p>
+<p>편집 문서의 탭과 창 제목에는 <b>[편집 전용]</b>을 표시합니다.
+독립 편집 창에는 프레젠테이션·전체화면 버튼과 메뉴, F5·F11 단축키가 없습니다.
+이 기능들은 읽기 창에서 사용하세요.</p>
 <p>읽기 창에서도 도구 모음·보기 메뉴 또는 <b>Ctrl+[ / Ctrl+]</b>로 현재 쪽을
 좌우로 돌려 볼 수 있습니다. 화면만 회전하며 PDF 파일은 변경하지 않습니다.
 방향을 저장하려면 편집 창에서 회전하세요.</p>
@@ -135,8 +138,8 @@ HELP_HTML = """
 <table cellpadding="4">
 <tr><td><b>Ctrl+] / Ctrl+[</b></td><td>오른쪽 / 왼쪽으로 회전</td></tr>
 <tr><td><b>Ctrl+Shift+2</b></td><td>한 장 보기 / 두 장 보기 전환</td></tr>
-<tr><td><b>F11</b></td><td>메뉴와 명령 모음을 유지한 전체화면 전환</td></tr>
-<tr><td><b>F5</b></td><td>문서만 표시하는 프레젠테이션 모드 시작</td></tr>
+<tr><td><b>F11</b></td><td>읽기 창에서 전체화면 전환</td></tr>
+<tr><td><b>F5</b></td><td>읽기 창에서 프레젠테이션 모드 시작</td></tr>
 <tr><td><b>← / ↑ / → / ↓</b></td><td>프레젠테이션 모드에서 이전·다음 페이지 이동</td></tr>
 <tr><td><b>Esc</b></td><td>프레젠테이션 모드 종료</td></tr>
 <tr><td><b>Ctrl+Delete</b></td><td>현재 페이지 삭제</td></tr>
@@ -190,8 +193,8 @@ PDF or PDF-compatible Illustrator files onto the window.</p>
 <tr><td><b>Hand tool</b></td><td>Click and drag to pan</td></tr>
 <tr><td><b>Text selection tool</b></td><td>Drag across text to select it</td></tr>
 <tr><td><b>Ctrl+Shift+2</b></td><td>Toggle two-page view</td></tr>
-<tr><td><b>F11</b></td><td>Toggle full screen</td></tr>
-<tr><td><b>F5 / Esc</b></td><td>Start / leave presentation mode</td></tr>
+<tr><td><b>F11</b></td><td>Toggle full screen in the reader</td></tr>
+<tr><td><b>F5 / Esc</b></td><td>Start / leave presentation mode in the reader</td></tr>
 <tr><td><b>Arrow keys</b></td><td>Move to the previous or next page in presentation mode</td></tr>
 </table>
 
@@ -242,6 +245,9 @@ Ctrl+E to open a separate editor. It starts with a thumbnail grid: drag pages
 to reorder them, then double-click a page or press Enter for detailed editing.
 <b>Page overview</b> or Ctrl+Shift+P returns to the grid in the same window,
 keeping unsaved changes and undo/redo history.</p>
+<p>Editor tabs and window titles display <b>[Edit-only]</b>. Standalone editors
+do not offer presentation or full-screen buttons, menus, or F5/F11 shortcuts.
+Use these view modes in the reader.</p>
 <p>
 Reader toolbar/View menu rotation and Ctrl+[ / Ctrl+] rotate only the current
 page view without modifying the PDF. Use the editor to save its orientation.

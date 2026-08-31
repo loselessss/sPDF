@@ -1,6 +1,15 @@
-# sPDF 1.19.0 Release Notes
+# sPDF 1.19.1 Release Notes
 
 Release date: 2026-08-31
+
+## Included 1.18.0 Highlights
+
+- Standalone sPDF now starts in a reader window. Open a separate editor at the same page and zoom level; existing editor tabs retain unsaved changes and are reused.
+- Saving refreshes reader windows in the same sPDF session without losing their reading position. Save As leaves the original reader file unchanged.
+- Text editing now offers font size and color controls and a dedicated toolbar icon. Page organization, annotations, and manual OCR are available in the editor.
+- Reader zoom responds immediately around the pointer, then sharpens the visible area. Bounded tile rendering avoids full-page high-resolution images, including at 800% zoom and in two-page view. Hidden or closed tabs cancel pending rendering.
+- Reader windows use OpenGL image composition when supported, with CPU display as a fallback. PDF interpretation and rasterization still run on the CPU; editor and embedded display paths remain unchanged.
+- Failed file replacement preserves edits for another save attempt, and failed text edits restore the previous content. Fixed menu bars being deleted incorrectly during tab switching or closing.
 
 ## 1.19.0 Highlights
 
@@ -11,3 +20,8 @@ Release date: 2026-08-31
 - Rotate the current reader page left/right using toolbar icons, the View menu, or Ctrl+[ / Ctrl+]. This rotates the view only and never changes the PDF file. Use the editor to save a rotated page.
 - Thumbnails, selection, search, links, and zoom follow the rotated view, including in two-page mode.
 - Embedded applications keep their existing editing, annotation, and self-update policies.
+
+## 1.19.1 Improvements
+
+- Editor document tabs and window titles now display **[Edit-only]** to distinguish them from reader windows.
+- Removed presentation and full-screen controls, including F5/F11 shortcuts, from standalone editor windows. Reader and embedded windows retain their existing view modes.

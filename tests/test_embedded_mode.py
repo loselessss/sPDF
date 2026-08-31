@@ -333,6 +333,30 @@ class EmbeddedModeTests(unittest.TestCase):
                 reader.show_recovery(automatic=True)
             open_editor.assert_not_called()
 
+    def test_reader_and_embedded_windows_keep_view_modes(self):
+        from pdfeditor.i18n import set_language
+        set_language("en")
+        with self.document_windows() as (module, source):
+            for options in ({"workspace_mode": "reader"}, {}, {"read_only": True}):
+                with self.subTest(options=options):
+                    window = module.new_window(str(source), **options)
+                    self.settle()
+                    tab = window._tabs.currentWidget()
+                    self.assertNotIn("[Edit-only]", tab.tab_title())
+                    for action, shortcut in ((tab._presentation_act, "F5"),
+                                             (tab._full_screen_act, "F11")):
+                        self.assertTrue(action.isVisible())
+                        self.assertTrue(action.isEnabled())
+                        self.assertEqual(action.shortcut().toString(), shortcut)
+                        self.assertIn(action, tab._interaction_toolbar.actions())
+                    window.toggle_full_screen()
+                    self.assertTrue(window.isFullScreen())
+                    window.toggle_full_screen()
+                    window.toggle_presentation()
+                    self.assertTrue(window.presentation_active)
+                    window.toggle_presentation()
+                    self.assertFalse(window.presentation_active)
+
     def test_reader_rotation_actions_are_view_only_and_thumbnails_follow(self):
         from PyQt5.QtCore import Qt
         with self.document_windows() as (module, source):

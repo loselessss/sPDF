@@ -677,6 +677,11 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
             v, "전체화면", "F11", self.toggle_full_screen,
             "fullscreen")
         self._full_screen_act.setCheckable(True)
+        if self._shell.workspace_mode == "editor":
+            for action in (self._presentation_act, self._full_screen_act):
+                action.setVisible(False)
+                action.setEnabled(False)
+                action.setShortcut("")
         v.addSeparator()
         self._act(v, "다음 페이지", "PgDown", self.next_page,
                   "chevron_down")
@@ -743,9 +748,10 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         tool_bar.addAction(self._fit_width_act)
         tool_bar.addAction(self._fit_page_act)
         tool_bar.addAction(self._two_page_act)
-        tool_bar.addSeparator()
-        tool_bar.addAction(self._presentation_act)
-        tool_bar.addAction(self._full_screen_act)
+        if self._shell.workspace_mode != "editor":
+            tool_bar.addSeparator()
+            tool_bar.addAction(self._presentation_act)
+            tool_bar.addAction(self._full_screen_act)
         self.addToolBar(Qt.TopToolBarArea, tool_bar)
         self._interaction_toolbar = tool_bar
 
@@ -1094,6 +1100,8 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         name = ("*" if self._dirty else "") + os.path.basename(self.doc.path)
         if self.read_only:
             name += localize(" [Read-only]", " [읽기 전용]")
+        elif self._shell.workspace_mode == "editor":
+            name += localize(" [Edit-only]", " [편집 전용]")
         return name
 
     def _update_title(self):
@@ -1470,6 +1478,8 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
                 self.isFullScreen() and not self.presentation_active)
 
     def toggle_full_screen(self):
+        if self.workspace_mode == "editor":
+            return
         if self.presentation_active:
             self.toggle_presentation(self._presentation_tab)
         if self.isFullScreen():
@@ -1479,6 +1489,8 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         self._sync_view_mode_actions()
 
     def toggle_presentation(self, tab=None):
+        if self.workspace_mode == "editor":
+            return
         if self.presentation_active:
             active = self._presentation_tab
             state = self._presentation_window_state or {}
@@ -1497,8 +1509,6 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         tab = tab or self._tabs.currentWidget()
         if tab is None or tab.doc is None:
             return
-        if tab.is_editor_overview():
-            tab.open_page_editor(edit_text=False)
         self._presentation_window_state = {
             "fullscreen": self.isFullScreen(),
             "menubar": not self.menuBar().isHidden(),

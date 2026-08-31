@@ -174,7 +174,7 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.window.hide()
         self.assertFalse(grid._thumbnail_timer.isActive())
 
-    def test_keyboard_edit_and_presentation_restore_controls(self):
+    def test_keyboard_edit_and_return_to_overview(self):
         from PyQt5.QtCore import Qt
         from PyQt5.QtTest import QTest
         tab = self.open_editor()
@@ -185,18 +185,52 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.assertEqual(tab.page_index, 12)
         tab._pages_act.trigger()
         self.assertTrue(tab.is_editor_overview())
-        self.window.toggle_presentation()
-        self.settle()
-        self.assertFalse(tab.is_editor_overview())
-        self.assertTrue(tab._workspace_header.isHidden())
-        self.assertTrue(tab._interaction_toolbar.isHidden())
-        self.window.toggle_presentation()
-        self.settle()
         self.assertFalse(tab._workspace_header.isHidden())
         self.assertFalse(tab._interaction_toolbar.isHidden())
-        tab._overview_button.click()
-        self.assertTrue(tab.is_editor_overview())
         self.assertEqual(pages.currentRow(), 12)
+
+    def test_editor_omits_view_modes_in_overview_and_detail(self):
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtTest import QTest
+        tab = self.open_editor()
+        for overview in (True, False):
+            if not overview:
+                tab.open_page_editor()
+            for action in (tab._presentation_act, tab._full_screen_act):
+                self.assertFalse(action.isVisible())
+                self.assertFalse(action.isEnabled())
+                self.assertTrue(action.shortcut().isEmpty())
+                self.assertNotIn(action, tab._interaction_toolbar.actions())
+                action.trigger()
+            for key in (Qt.Key_F5, Qt.Key_F11):
+                QTest.keyClick(tab, key)
+            tab.toggle_presentation_mode()
+            tab.toggle_full_screen()
+            self.window.toggle_presentation()
+            self.window.toggle_full_screen()
+            self.settle()
+            self.assertFalse(self.window.presentation_active)
+            self.assertFalse(self.window.isFullScreen())
+            self.assertEqual(tab.is_editor_overview(), overview)
+            self.assertTrue(tab._workspace_header.isVisible())
+            self.assertTrue(tab._interaction_toolbar.isVisible())
+
+    def test_editor_label_follows_language_and_dirty_title(self):
+        from pdfeditor.i18n import set_language
+        tab = self.open_editor()
+        try:
+            for language, suffix in (("ko", "[편집 전용]"), ("en", "[Edit-only]")):
+                set_language(language)
+                tab._dirty = False
+                tab._update_title()
+                self.assertEqual(tab.tab_title(), "pages.pdf " + suffix)
+                self.assertEqual(self.window._tabs.tabText(0), tab.tab_title())
+                self.assertIn(suffix, self.window.windowTitle())
+                tab.mark_dirty()
+                self.assertEqual(tab.tab_title(), "*pages.pdf " + suffix)
+                self.assertIn("*pages.pdf " + suffix, self.window.windowTitle())
+        finally:
+            set_language("en")
 
     def test_reorder_failure_restores_document_and_history(self):
         tab = self.open_editor()

@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one lightweight application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.19.0** · English and Korean interface · Windows
+**Current version: 1.19.1** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -40,6 +40,8 @@ computer unless you explicitly use an external link or optional model download.
   edit it in the same window. **Page overview** or Ctrl+Shift+P returns to the
   grid; unsaved changes and undo/redo history stay intact. Only visible and
   nearby thumbnails are rendered, even in long documents.
+- Editor tabs and window titles show **[Edit-only]**. Presentation and full-screen
+  controls stay in the reader; they are not offered in standalone editor windows.
 - Change text content, font size, and color in the editor. Page organization,
   annotations, and manual OCR are available there; text editing has its own
   toolbar button.
@@ -106,7 +108,7 @@ their release version and SHA-256 digest match.
 | Ctrl+B | Bookmark the current page |
 | Alt+Left / Alt+Right | Previous or next view |
 | Ctrl+R / Ctrl+Shift+R | OCR current page or whole document |
-| F5 / F11 | Presentation or full-screen mode |
+| F5 / F11 | Presentation or full-screen mode in the reader |
 
 Press **F1** in the application for the complete localized guide.
 
