@@ -69,10 +69,6 @@ class EditMixin:
             # 손 도구에서는 클릭을 이동으로 소비하므로 편집 지점을 찍을 수 없다.
             self.set_interaction_mode("select", announce=False)
             self._show_edit_boxes()
-            self.statusBar().showMessage(
-                "편집 모드 — 글자를 클릭하면 수정, 빈 곳을 클릭하면 새 글자 "
-                "추가 (원본 폰트 대신 기본 폰트로 써지므로 모양이 달라질 수 "
-                "있습니다)")
         else:
             self.view.canvas.set_edit_boxes([])
             self.statusBar().clearMessage()

@@ -32,6 +32,7 @@ class EditorWorkspaceTests(unittest.TestCase):
                 page.draw_rect((35, 90, 240, 330), fill=(.8, .9, 1))
             pdf.save(self.path)
         self.original = self.path.read_bytes()
+        self.dialogs = []
         self.patchers = [patch.object(settings, "PATH", str(root / "settings.json")),
                          patch.object(settings, "_OLD_PATH", str(root / "absent")),
                          patch.object(app, "_app_windows", [])]
@@ -39,6 +40,8 @@ class EditorWorkspaceTests(unittest.TestCase):
             patcher.start()
 
     def tearDown(self):
+        for dialog in self.dialogs:
+            dialog.close()
         for window in list(self.module._app_windows):
             for index in range(window._tabs.count()):
                 window._tabs.widget(index)._dirty = False
@@ -58,8 +61,15 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.settle()
         return self.window._tabs.currentWidget()
 
-    def render_grid(self, tab):
-        grid = tab._page_grid
+    def open_organizer(self, tab):
+        from pdfeditor.page_organizer import PageOrganizerDialog
+        dialog = PageOrganizerDialog(tab, grid=True)
+        self.dialogs.append(dialog)
+        dialog.show()
+        self.settle()
+        return dialog, dialog.panel
+
+    def render_grid(self, grid):
         grid.stop_rendering()
         for _ in range(40):
             grid._render_visible_thumbnails()
@@ -67,26 +77,80 @@ class EditorWorkspaceTests(unittest.TestCase):
             if all(grid.pages.item(row).data(256) for row in grid.pages.visible_rows()):
                 break
 
-    def test_editor_starts_with_wrapped_grid_without_full_page_raster(self):
+    def test_editor_starts_in_detail_without_inline_mode_header(self):
+        tab = self.open_editor()
+        self.assertFalse(tab.is_editor_overview())
+        self.assertTrue(tab._edit_mode)
+        self.assertIsNone(tab._page_grid)
+        self.assertIsNone(tab._workspace_header)
+        self.assertTrue(tab._zoom_input.isVisible())
+        self.assertTrue(tab._page_size_label.isVisible())
+        self.assertEqual(tab._page_size_label.text(), "98.8 × 141.1 mm")
+        self.assertEqual(tab.statusBar().currentMessage(), "")
+
+    def test_document_files_drop_anywhere_in_main_window(self):
+        from PyQt5.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+        from PyQt5.QtGui import QDragEnterEvent, QDropEvent
+        tab = self.open_editor()
+        targets = (self.window._tabs.tabBar(), tab.view.viewport(),
+                   tab._interaction_toolbar, tab.statusBar())
+        for index, target in enumerate(targets):
+            path = self.path.parent / ("dropped-%d.pdf" % index)
+            path.write_bytes(self.original)
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(str(path))])
+            enter = QDragEnterEvent(
+                QPoint(2, 2), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+            self.application.sendEvent(target, enter)
+            self.assertTrue(enter.isAccepted())
+            drop = QDropEvent(
+                QPointF(2, 2), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+            self.application.sendEvent(target, drop)
+            self.assertTrue(drop.isAccepted())
+            self.settle()
+            self.assertIsNotNone(self.window._find_open_tab(str(path)))
+
+    def test_page_organizer_keeps_pdf_drop_as_page_insert(self):
+        import fitz
+        from PyQt5.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+        from PyQt5.QtGui import QDragEnterEvent, QDropEvent
+        tab = self.open_editor()
+        _dialog, grid = self.open_organizer(tab)
+        inserted = self.path.parent / "inserted.pdf"
+        with fitz.open() as document:
+            document.new_page(width=200, height=300)
+            document.save(inserted)
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(inserted))])
+        position = grid.pages.visualItemRect(grid.pages.item(0)).center()
+        enter = QDragEnterEvent(
+            QPoint(position), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+        self.assertTrue(self.window._page_organizer_owns_drop(grid.pages.viewport()))
+        grid.pages.dragEnterEvent(enter)
+        self.assertTrue(enter.isAccepted())
+        drop = QDropEvent(
+            QPointF(position), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+        grid.pages.dropEvent(drop)
+        self.assertTrue(drop.isAccepted())
+        self.assertEqual(tab.doc.page_count, 46)
+
+    def test_separate_organizer_uses_wrapped_grid_without_full_page_raster(self):
         from pdfeditor.core import Document
+        tab = self.open_editor()
         original_render = Document.render
         with patch.object(Document, "render", autospec=True, side_effect=original_render) as render:
-            tab = self.open_editor()
-            self.render_grid(tab)
-        self.assertTrue(tab.is_editor_overview())
-        self.assertFalse(tab._edit_mode)
-        self.assertEqual(tab._page_grid.pages.count(), 45)
-        self.assertEqual(tab._editor_stack.currentWidget(), tab._page_grid)
-        self.assertFalse(tab._zoom_input.isVisible())
+            dialog, grid = self.open_organizer(tab)
+            self.render_grid(grid)
+        self.assertTrue(dialog.isVisible())
+        self.assertEqual(grid.pages.count(), 45)
         self.assertTrue(render.call_count)
         self.assertTrue(all(call.args[2] < 1 for call in render.call_args_list))
-        pages = tab._page_grid.pages
+        pages = grid.pages
         self.assertTrue(pages.dragEnabled())
         self.assertTrue(pages.acceptDrops())
         first, second = pages.visualItemRect(pages.item(0)), pages.visualItemRect(pages.item(1))
         self.assertEqual(first.top(), second.top())
         self.assertGreater(second.left(), first.right())
-        self.assertTrue(tab._detail_button.isVisible())
 
     def test_mouse_drag_starts_with_selected_page_payload(self):
         from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt
@@ -94,7 +158,8 @@ class EditorWorkspaceTests(unittest.TestCase):
         from PyQt5.QtTest import QTest
         from pdfeditor.page_organizer import PAGE_MIME
         tab = self.open_editor()
-        pages = tab._page_grid.pages
+        _dialog, grid = self.open_organizer(tab)
+        pages = grid.pages
         point = pages.visualItemRect(pages.item(0)).center()
         with patch("pdfeditor.page_organizer.QDrag") as drag:
             QTest.mousePress(pages.viewport(), Qt.LeftButton, pos=point)
@@ -113,7 +178,8 @@ class EditorWorkspaceTests(unittest.TestCase):
         from PyQt5.QtGui import QDropEvent
         from pdfeditor.page_organizer import PAGE_MIME
         tab = self.open_editor()
-        pages = tab._page_grid.pages
+        _dialog, grid = self.open_organizer(tab)
+        pages = grid.pages
         target = pages.visualItemRect(pages.item(3)).topRight()
         mime = QMimeData()
         mime.setData(PAGE_MIME, QByteArray(json.dumps([0, 1]).encode("ascii")))
@@ -121,7 +187,7 @@ class EditorWorkspaceTests(unittest.TestCase):
         pages.dropEvent(event)
         self.assertTrue(event.isAccepted())
         self.assertTrue(tab._dirty)
-        self.assertTrue(tab.is_editor_overview())
+        self.assertFalse(tab.is_editor_overview())
         self.assertIn("Page 03", tab.doc._doc[0].get_text())
         self.assertIn("Page 01", tab.doc._doc[2].get_text())
         self.assertEqual([pages.row(item) for item in pages.selectedItems()], [2, 3])
@@ -135,12 +201,13 @@ class EditorWorkspaceTests(unittest.TestCase):
         with fitz.open(self.path) as saved:
             self.assertIn("Page 03", saved[0].get_text())
 
-    def test_double_click_and_large_buttons_share_document_and_edits(self):
+    def test_double_click_in_separate_organizer_returns_to_shared_editor(self):
         from PyQt5.QtCore import Qt
         from PyQt5.QtTest import QTest
         tab = self.open_editor()
         document = tab.doc
-        pages = tab._page_grid.pages
+        dialog, grid = self.open_organizer(tab)
+        pages = grid.pages
         point = pages.visualItemRect(pages.item(2)).center()
         QTest.mouseClick(pages.viewport(), Qt.LeftButton, pos=point)
         QTest.mouseDClick(pages.viewport(), Qt.LeftButton, pos=point)
@@ -148,72 +215,59 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.assertFalse(tab.is_editor_overview())
         self.assertEqual(tab.page_index, 2)
         self.assertTrue(tab._edit_mode)
+        self.assertFalse(dialog.isVisible())
         self.assertIs(tab.doc, document)
         self.assertTrue(tab._perform_text_edit(lambda: tab.doc.add_text_box(2, (35, 365), "Kept edit")))
-        tab._overview_button.click()
-        self.assertTrue(tab.is_editor_overview())
-        self.assertEqual(pages.currentRow(), 2)
-        tab._detail_button.click()
-        self.assertFalse(tab.is_editor_overview())
+        dialog, grid = self.open_organizer(tab)
+        self.assertEqual(grid.pages.currentRow(), 2)
+        grid.open_selected_page()
         self.assertIn("Kept edit", tab.doc._doc[2].get_text())
         tab.undo()
         self.assertNotIn("Kept edit", tab.doc._doc[2].get_text())
 
     def test_long_grid_renders_last_page_and_evicts_old_cards(self):
         tab = self.open_editor()
-        self.render_grid(tab)
-        grid = tab._page_grid
+        dialog, grid = self.open_organizer(tab)
+        self.render_grid(grid)
         self.assertTrue(grid.pages.item(0).data(256))
         grid.pages.scrollToBottom()
         self.settle()
-        self.render_grid(tab)
+        self.render_grid(grid)
         self.assertIn(44, grid.pages.visible_rows())
         self.assertTrue(grid.pages.item(44).data(256))
         self.assertTrue(grid.pages.item(0).icon().isNull())
         self.assertLess(len(grid._rendered_rows), 30)
-        self.window.hide()
+        dialog.hide()
         self.assertFalse(grid._thumbnail_timer.isActive())
 
-    def test_keyboard_edit_and_return_to_overview(self):
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtTest import QTest
+    def test_page_organizer_action_opens_separate_dialog(self):
         tab = self.open_editor()
-        pages = tab._page_grid.pages
-        pages.setCurrentRow(12)
-        QTest.keyClick(pages, Qt.Key_Return)
-        self.assertFalse(tab.is_editor_overview())
-        self.assertEqual(tab.page_index, 12)
-        tab._pages_act.trigger()
-        self.assertTrue(tab.is_editor_overview())
-        self.assertFalse(tab._workspace_header.isHidden())
-        self.assertFalse(tab._interaction_toolbar.isHidden())
-        self.assertEqual(pages.currentRow(), 12)
+        with patch("pdfeditor.pages.PageOrganizerDialog") as dialog:
+            tab.show_page_organizer()
+        dialog.assert_called_once_with(tab, grid=True)
+        dialog.return_value.exec_.assert_called_once()
 
-    def test_editor_omits_view_modes_in_overview_and_detail(self):
+    def test_editor_omits_view_modes_in_detail(self):
         from PyQt5.QtCore import Qt
         from PyQt5.QtTest import QTest
         tab = self.open_editor()
-        for overview in (True, False):
-            if not overview:
-                tab.open_page_editor()
-            for action in (tab._presentation_act, tab._full_screen_act):
-                self.assertFalse(action.isVisible())
-                self.assertFalse(action.isEnabled())
-                self.assertTrue(action.shortcut().isEmpty())
-                self.assertNotIn(action, tab._interaction_toolbar.actions())
-                action.trigger()
-            for key in (Qt.Key_F5, Qt.Key_F11):
-                QTest.keyClick(tab, key)
-            tab.toggle_presentation_mode()
-            tab.toggle_full_screen()
-            self.window.toggle_presentation()
-            self.window.toggle_full_screen()
-            self.settle()
-            self.assertFalse(self.window.presentation_active)
-            self.assertFalse(self.window.isFullScreen())
-            self.assertEqual(tab.is_editor_overview(), overview)
-            self.assertTrue(tab._workspace_header.isVisible())
-            self.assertTrue(tab._interaction_toolbar.isVisible())
+        for action in (tab._presentation_act, tab._full_screen_act):
+            self.assertFalse(action.isVisible())
+            self.assertFalse(action.isEnabled())
+            self.assertTrue(action.shortcut().isEmpty())
+            self.assertNotIn(action, tab._interaction_toolbar.actions())
+            action.trigger()
+        for key in (Qt.Key_F5, Qt.Key_F11):
+            QTest.keyClick(tab, key)
+        tab.toggle_presentation_mode()
+        tab.toggle_full_screen()
+        self.window.toggle_presentation()
+        self.window.toggle_full_screen()
+        self.settle()
+        self.assertFalse(self.window.presentation_active)
+        self.assertFalse(self.window.isFullScreen())
+        self.assertFalse(tab.is_editor_overview())
+        self.assertTrue(tab._interaction_toolbar.isVisible())
 
     def test_editor_label_follows_language_and_dirty_title(self):
         from pdfeditor.i18n import set_language
@@ -225,21 +279,24 @@ class EditorWorkspaceTests(unittest.TestCase):
                 tab._update_title()
                 self.assertEqual(tab.tab_title(), "pages.pdf " + suffix)
                 self.assertEqual(self.window._tabs.tabText(0), tab.tab_title())
-                self.assertIn(suffix, self.window.windowTitle())
+                self.assertNotIn(suffix, self.window.windowTitle())
+                self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF")
                 tab.mark_dirty()
                 self.assertEqual(tab.tab_title(), "*pages.pdf " + suffix)
-                self.assertIn("*pages.pdf " + suffix, self.window.windowTitle())
+                self.assertNotIn(suffix, self.window.windowTitle())
+                self.assertEqual(self.window.windowTitle(), "*pages.pdf — sPDF")
         finally:
             set_language("en")
 
     def test_reorder_failure_restores_document_and_history(self):
         tab = self.open_editor()
+        _dialog, grid = self.open_organizer(tab)
         def failure(_order):
             tab.doc._doc.delete_page(0)
             raise RuntimeError("test failed move")
         with patch.object(tab.doc, "reorder_pages", side_effect=failure), \
                 patch("pdfeditor.document_tools.QMessageBox.warning"):
-            self.assertFalse(tab._page_grid.move_pages([0], 3))
+            self.assertFalse(grid.move_pages([0], 3))
         self.assertEqual(tab.doc.page_count, 45)
         self.assertIn("Page 01", tab.doc._doc[0].get_text())
         self.assertEqual(tab._undo_stack, [])
@@ -265,6 +322,7 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.assertIsNone(tab._workspace_header)
         with patch("pdfeditor.pages.PageOrganizerDialog") as dialog:
             tab.show_page_organizer()
+        dialog.assert_called_once_with(tab, grid=False)
         dialog.return_value.exec_.assert_called_once()
 
 

@@ -427,13 +427,21 @@ class PageOrganizerPanel(QWidget):
 
 
 class PageOrganizerDialog(QDialog):
-    """Keep the existing modal organizer for non-workspace embedded editors."""
+    """Show page organization separately from the document editing canvas."""
 
-    def __init__(self, host):
+    def __init__(self, host, *, grid=False):
         super().__init__(host)
+        self.host = host
         self.setWindowTitle(tr("페이지 구성"))
-        self.resize(620, 760)
+        self.resize(920 if grid else 620, 720 if grid else 760)
         layout = QVBoxLayout(self)
-        self.panel = PageOrganizerPanel(host)
-        self.panel.close_requested.connect(self.accept)
+        self.panel = PageOrganizerPanel(host, grid=grid)
+        if grid:
+            self.panel.page_activated.connect(self._open_page_editor)
+        else:
+            self.panel.close_requested.connect(self.accept)
         layout.addWidget(self.panel)
+
+    def _open_page_editor(self, page):
+        self.accept()
+        self.host.open_page_editor(page)

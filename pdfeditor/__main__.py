@@ -57,6 +57,7 @@ def main():
     parser.add_argument("--workspace", choices=("reader", "editor"))
     parser.add_argument("--peer")
     parser.add_argument("--peer-token")
+    parser.add_argument("--peer-request")
     parser.add_argument("--no-updates", action="store_true")
     args = parser.parse_args()
     # 공식 실행 진입점에서만 자체 업데이트를 켠다. 다른 프로그램이
@@ -66,7 +67,7 @@ def main():
     from .process_workspace import application_bridge
     bridge = application_bridge()
     if args.peer and args.peer_token:
-        bridge.connect_parent(args.peer, args.peer_token)
+        bridge.connect_parent(args.peer, args.peer_token, args.peer_request)
     sys.exit(app.exec_())
 
 

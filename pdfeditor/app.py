@@ -441,6 +441,10 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         self._notes_dock.hide()
 
         self._page_label = QLabel("")
+        self._page_size_label = QLabel("")
+        self._page_size_label.setProperty("role", "secondary")
+        self._page_size_label.setVisible(self._shell.workspace_mode == "editor")
+        self.statusBar().addPermanentWidget(self._page_size_label)
         self.statusBar().addPermanentWidget(self._page_label)
         self._zoom_input = QSpinBox()
         self._zoom_input.setRange(
@@ -1125,7 +1129,12 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
     def _update_page_label(self):
         if self.doc is None:
             self._page_label.setText("")
+            self._page_size_label.setText("")
         else:
+            width, height = self.doc.page_size(self.page_index)
+            width_mm, height_mm = width * 25.4 / 72.0, height * 25.4 / 72.0
+            self._page_size_label.setText(
+                "%g × %g mm" % (round(width_mm, 1), round(height_mm, 1)))
             visible = self.visible_document_pages()
             if len(visible) > 1:
                 self._page_label.setText("%d–%d / %d" % (
@@ -1542,12 +1551,52 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         return True
 
     def eventFilter(self, watched, event):
+        inside_window = watched is self or (
+            isinstance(watched, QWidget) and self.isAncestorOf(watched))
+        if inside_window and event.type() in (
+                QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
+            if self._handle_document_drop(watched, event):
+                return True
         if event.type() == QEvent.KeyPress and (
                 watched is self or
                 isinstance(watched, QWidget) and self.isAncestorOf(watched)):
             if self._handle_presentation_key(event):
                 return True
         return super().eventFilter(watched, event)
+
+    @staticmethod
+    def _document_drop_paths(mime):
+        if not mime.hasUrls():
+            return []
+        paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+        return [path for path in paths
+                if os.path.isfile(path) and is_supported_document(path)]
+
+    @staticmethod
+    def _page_organizer_owns_drop(watched):
+        if not isinstance(watched, QWidget):
+            return False
+        from .page_organizer import PageOrganizerDialog, PageOrganizerList
+        widget = watched
+        while widget is not None:
+            if isinstance(widget, (PageOrganizerDialog, PageOrganizerList)):
+                return True
+            widget = widget.parentWidget()
+        return False
+
+    def _handle_document_drop(self, watched, event):
+        # The page organizer deliberately interprets PDF drops as page insert.
+        if self._page_organizer_owns_drop(watched):
+            return False
+        paths = self._document_drop_paths(event.mimeData())
+        if not paths:
+            return False
+        if event.type() == QEvent.Drop:
+            for path in paths:
+                self.open_in_tab(path)
+        event.setDropAction(Qt.CopyAction)
+        event.accept()
+        return True
 
     def keyPressEvent(self, event):
         if self._handle_presentation_key(event):
@@ -1878,7 +1927,7 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         else:
             self._sync_tab_title(tab)
             if self.workspace_mode == "editor":
-                tab.show_editor_overview()
+                tab.open_page_editor()
 
     # --- 탭 제목/전환/닫기 ---------------------------------------------
 
@@ -1963,9 +2012,13 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         self._tabs.setTabText(i, name)
         self._tabs.setTabToolTip(i, tab.doc.path if tab.doc else "")
         if self._tabs.currentWidget() is tab:
+            window_name = name
+            window_title = self.workspace_title()
+            if self.workspace_mode == "editor" and tab.doc:
+                window_name = ("*" if tab._dirty else "") + os.path.basename(tab.doc.path)
             self.setWindowTitle(
-                "%s — %s" % (name, self.workspace_title())
-                if tab.doc else self.workspace_title())
+                "%s — %s" % (window_name, window_title)
+                if tab.doc else window_title)
 
     def _on_tab_changed(self, i):
         if i < 0:
@@ -2071,9 +2124,9 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             ev.setDropAction(Qt.MoveAction)
             ev.accept()
             return
-        urls = ev.mimeData().urls()
-        if any(is_supported_document(url.toLocalFile()) for url in urls):
-            ev.acceptProposedAction()
+        if self._document_drop_paths(ev.mimeData()):
+            ev.setDropAction(Qt.CopyAction)
+            ev.accept()
 
     def dropEvent(self, ev):
         payload = _decode_tab_drag(ev.mimeData())
@@ -2084,10 +2137,12 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             else:
                 ev.ignore()
             return
-        for url in ev.mimeData().urls():
-            p = url.toLocalFile()
-            if is_supported_document(p):
-                self.open_in_tab(p)
+        paths = self._document_drop_paths(ev.mimeData())
+        for path in paths:
+            self.open_in_tab(path)
+        if paths:
+            ev.setDropAction(Qt.CopyAction)
+            ev.accept()
 
 
 # ======================================================================

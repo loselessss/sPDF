@@ -25,10 +25,30 @@ MAX_MESSAGE = 65536
 TIMEOUT = 15.0
 
 
-def process_command(mode, endpoint, token):
+def process_python_executable():
+    """Return a Python executable whose Popen handle owns the real process."""
     from .paths import is_frozen
-    base = [sys.executable] if is_frozen() else [sys.executable, str(Path(__file__).resolve().parents[1] / "run.py")]
-    return base + ["--workspace", mode, "--peer", endpoint, "--peer-token", token]
+    if (not is_frozen() and os.name == "nt" and sys.prefix != sys.base_prefix
+            and getattr(sys, "_base_executable", None)):
+        return sys._base_executable
+    return sys.executable
+
+
+def process_environment():
+    environment = os.environ.copy()
+    if process_python_executable() != sys.executable:
+        # Preserve the active venv while bypassing the Windows redirector
+        # executable, which otherwise leaves Popen tracking a proxy PID.
+        environment["__PYVENV_LAUNCHER__"] = sys.executable
+    return environment
+
+
+def process_command(mode, endpoint, token, request_id):
+    from .paths import is_frozen
+    base = ([sys.executable] if is_frozen() else
+            [process_python_executable(), str(Path(__file__).resolve().parents[1] / "run.py")])
+    return base + ["--workspace", mode, "--peer", endpoint, "--peer-token", token,
+                   "--peer-request", request_id]
 
 
 @dataclass
@@ -40,17 +60,22 @@ class EditorProcess:
     channel: object = None
     status: str = "starting"
     last_seen: float = 0
+    runtime_pid: object = None
 
     @property
     def pid(self):
-        return self.process.pid
+        # Some Windows Python launchers remain as a small proxy process.  The
+        # authenticated handshake reports the GUI process that actually owns
+        # the workspace and its recovery data.
+        return self.runtime_pid or self.process.pid
 
 
 class Channel(QObject):
-    def __init__(self, bridge, socket, token, outgoing=False):
+    def __init__(self, bridge, socket, token, outgoing=False, request_id=None):
         super().__init__(bridge)
         self.bridge, self.socket, self.token = bridge, socket, token
         self.outgoing = outgoing
+        self.request_id = request_id
         self.authenticated = False
         self.buffer = bytearray()
         self.last_seen = time.monotonic()
@@ -62,7 +87,8 @@ class Channel(QObject):
         socket.readyRead.connect(self.read)
         socket.disconnected.connect(self.disconnected)
         if outgoing:
-            socket.connected.connect(lambda: self.send("hello", token=token, pid=os.getpid()))
+            socket.connected.connect(lambda: self.send(
+                "hello", token=token, pid=os.getpid(), request_id=request_id))
 
     def send(self, kind, **payload):
         if self.socket.state() != QLocalSocket.ConnectedState:
@@ -95,7 +121,7 @@ class Channel(QObject):
                     self.authenticated = True
                     if not self.outgoing:
                         self.send("hello", token=self.token, pid=os.getpid())
-                    self.bridge.connected(self, message.get("pid"))
+                    self.bridge.connected(self, message.get("pid"), message.get("request_id"))
                 else:
                     self.bridge.received(self, message)
                 self.last_seen = time.monotonic()
@@ -139,9 +165,9 @@ class WorkspaceBridge(QObject):
         self.timer.timeout.connect(self.tick)
         self.timer.start()
 
-    def connect_parent(self, endpoint, token):
+    def connect_parent(self, endpoint, token, request_id=None):
         socket = QLocalSocket()
-        channel = Channel(self, socket, token, outgoing=True)
+        channel = Channel(self, socket, token, outgoing=True, request_id=request_id)
         self.channels.append(channel)
         socket.connectToServer(endpoint)
 
@@ -151,9 +177,14 @@ class WorkspaceBridge(QObject):
             channel = Channel(self, socket, self.token)
             self.channels.append(channel)
 
-    def connected(self, channel, pid):
+    def connected(self, channel, pid, request_id=None):
         for child in self.children:
-            if child.pid == pid and child.process.poll() is None:
+            request_matches = (isinstance(request_id, str)
+                               and child.request.get("request_id") == request_id)
+            pid_matches = child.process.pid == pid or child.runtime_pid == pid
+            if (request_matches or pid_matches) and child.process.poll() is None:
+                if isinstance(pid, int) and pid > 0:
+                    child.runtime_pid = pid
                 channel.peer = child
                 child.channel = channel
                 child.status = "connected"
@@ -174,14 +205,14 @@ class WorkspaceBridge(QObject):
                     self.pending[request["request_id"]] = time.monotonic()
                     child.channel.send("open", **request)
                 return child
-        args = process_command(mode, self.endpoint, self.token)
+        args = process_command(mode, self.endpoint, self.token, request["request_id"])
         if not shell.updates_enabled:
             args.append("--no-updates")
         # Popen is deliberately NOT a Qt child process: closing a window or
         # QApplication must not terminate an editor or wait for its shutdown.
         process = subprocess.Popen(args, stdin=subprocess.DEVNULL,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                                   close_fds=True)
+                                   close_fds=True, env=process_environment())
         child = EditorProcess(process, path, mode, request, last_seen=time.monotonic())
         self.children.append(child)
         self.pending[request["request_id"]] = time.monotonic()

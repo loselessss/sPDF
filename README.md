@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.20.0** · English and Korean interface · Windows
+**Current version: 1.21.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -34,7 +34,7 @@ computer unless you explicitly use an external link or optional model download.
 
 - Standalone sPDF opens in a read-only reader. Use the large blue **Edit mode**
   button at the left of the ribbon or Ctrl+E to open an editor in a **separate OS process** with the
-  current page selected in a thumbnail grid. Saving refreshes matching reader
+  current page open on the detailed editing canvas. Saving refreshes matching reader
   windows connected to that sPDF session without moving their view.
 - Choose **Help → Startup workspace → Reader first** (default) or **Editor first**
   for the next launch. The editor's **File → Open reader** opens an independent reader.
@@ -54,11 +54,12 @@ computer unless you explicitly use an external link or optional model download.
   from recovery checkpoints. The small `.spdf-save.lock` file may remain normally;
   its OS lock is released when the writer exits. Automatic refresh covers connected
   workspaces; reopen the document after reconnecting or starting a new reader session.
-- Drag grid thumbnails to reorder pages. Double-click a page or press Enter to
-  edit it in the same window. **Page overview** or Ctrl+Shift+P returns to the
-  grid; unsaved changes and undo/redo history stay intact. Only visible and
-  nearby thumbnails are rendered, even in long documents.
-- Editor tabs and window titles show **[Edit-only]**. Presentation and full-screen
+- **Page Organization** or Ctrl+Shift+P opens a separate thumbnail grid for
+  reordering pages. Double-click a page or choose Edit selected page to return
+  to detailed editing. Unsaved changes and undo/redo history stay intact, and
+  only visible and nearby thumbnails are rendered. The detail view shows the
+  current page's original size in millimetres on the bottom status bar.
+- Only editor tabs show **[Edit-only]**. Presentation and full-screen
   controls stay in the reader; they are not offered in standalone editor windows.
 - Change text content, font size, and color in the editor. Page organization,
   annotations, and manual OCR are available there; text editing has its own
@@ -105,6 +106,9 @@ Download the Windows installer from the
 [latest GitHub release](https://github.com/loselessss/sPDF/releases/latest).
 The installer can add sPDF to the current user's **Open with** list, but it does
 not silently force sPDF as the Windows default PDF application.
+It adds separate **sPDF Reader** and **sPDF Editor** Start menu shortcuts. Reader
+and Editor desktop shortcuts can be selected independently during installation;
+both use the same installed application and start in the named workspace.
 
 In sPDF, **Help → Default PDF App / Browser Settings** shows the current Windows
 association and offers per-user options for Edge, Chrome, and Firefox to pass PDF
@@ -121,7 +125,7 @@ their release version and SHA-256 digest match.
 | Ctrl+O / Ctrl+S / Ctrl+P | Open, save, or print |
 | Ctrl+F | Find text |
 | Ctrl+E | Open the editor from a reader; toggle text editing in an editor |
-| Ctrl+Shift+P | Page overview; return from detailed editing |
+| Ctrl+Shift+P | Open the separate Page Organization window |
 | Ctrl+Z / Ctrl+Y | Undo or redo |
 | Ctrl+B | Bookmark the current page |
 | Alt+Left / Alt+Right | Previous or next view |

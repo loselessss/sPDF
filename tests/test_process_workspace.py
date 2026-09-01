@@ -15,7 +15,8 @@ from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication
 
 from pdfeditor import app, settings
-from pdfeditor.process_workspace import EditorProcess, WorkspaceBridge
+from pdfeditor.process_workspace import (EditorProcess, WorkspaceBridge,
+                                         process_environment, process_python_executable)
 
 
 class ProcessIsolationTests(unittest.TestCase):
@@ -57,9 +58,10 @@ class ProcessIsolationTests(unittest.TestCase):
     def count_tick(self):
         self.ticks += 1
 
-    def command(self, mode, endpoint, token):
-        return [sys.executable, str(Path(__file__).with_name("workspace_process_fixture.py")),
-                "--workspace", mode, "--peer", endpoint, "--peer-token", token]
+    def command(self, mode, endpoint, token, request_id):
+        return [process_python_executable(), str(Path(__file__).with_name("workspace_process_fixture.py")),
+                "--workspace", mode, "--peer", endpoint, "--peer-token", token,
+                "--peer-request", request_id]
 
     def tearDown(self):
         self.timer.stop()
@@ -96,8 +98,30 @@ class ProcessIsolationTests(unittest.TestCase):
 
     def report(self, child):
         path = self.root / str(child.pid) / "report.json"
+        if not path.exists() and child.runtime_pid is None:
+            # A Windows venv launcher may be a proxy whose PID differs from
+            # the real Python GUI process.  Find the unclaimed authenticated
+            # fixture report so direct-process tests observe the real owner.
+            claimed = {item.runtime_pid for item in self.bridge.children
+                       if item is not child and item.runtime_pid is not None}
+            candidates = []
+            for report_path in self.root.glob("[0-9]*/report.json"):
+                try:
+                    pid = int(report_path.parent.name)
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if pid not in claimed and report.get("pid") == pid:
+                    candidates.append((report_path.stat().st_mtime_ns, pid, report))
+            if candidates:
+                _, child.runtime_pid, report = max(candidates)
+                self._reports[child.pid] = report
+                return report
+            path = self.root / str(child.pid) / "report.json"
         try:
             report = json.loads(path.read_text(encoding="utf-8"))
+            if child.runtime_pid is None and report.get("pid") == child.process.pid:
+                child.runtime_pid = report["pid"]
             self._reports[child.pid] = report
             return report
         except (OSError, ValueError):
@@ -123,14 +147,14 @@ class ProcessIsolationTests(unittest.TestCase):
         self.wait(lambda: child.status == "opened" and self.report(child).get("document"))
         report = self.report(child)
         self.assertEqual(report["mode"], "editor")
-        self.assertTrue(report["overview"])
+        self.assertFalse(report["overview"])
         self.assertFalse(report["updates"])
         print("Process isolation: reader PID=%s, editor PID=%s" % (os.getpid(), child.pid), flush=True)
         self.assertIs(self.reader.open_editor(self.tab), child)
         return child
 
     def direct_process(self, mode=None, parent=None):
-        args = [sys.executable, str(Path(__file__).with_name("workspace_process_fixture.py")),
+        args = [process_python_executable(), str(Path(__file__).with_name("workspace_process_fixture.py")),
                 str(self.path), "--no-updates"]
         if mode:
             args += ["--workspace", mode]
@@ -138,7 +162,8 @@ class ProcessIsolationTests(unittest.TestCase):
             info = self.report(parent)
             args += ["--peer", info["endpoint"], "--peer-token", info["token"]]
         process = subprocess.Popen(args, stdin=subprocess.DEVNULL,
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                                   env=process_environment())
         child = EditorProcess(process, str(self.path), mode, {}, status="disconnected")
         self.bridge.children.append(child)  # Keep every test-owned handle for cleanup.
         self.wait(lambda: self.report(child).get("document"))

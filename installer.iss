@@ -5,7 +5,7 @@
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.20.0"
+#define MyAppVersion "1.21.0"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"
@@ -35,9 +35,21 @@ LicenseFile=LICENSE
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
+[CustomMessages]
+english.ReaderShortcut=sPDF Reader
+korean.ReaderShortcut=sPDF 리더
+english.EditorShortcut=sPDF Editor
+korean.EditorShortcut=sPDF 편집기
+english.ReaderDesktopShortcut=Create an sPDF Reader desktop shortcut
+korean.ReaderDesktopShortcut=sPDF 리더 바탕 화면 바로 가기 만들기
+english.EditorDesktopShortcut=Create an sPDF Editor desktop shortcut
+korean.EditorDesktopShortcut=sPDF 편집기 바탕 화면 바로 가기 만들기
+english.AdditionalShortcuts=Additional shortcuts:
+korean.AdditionalShortcuts=추가 바로 가기:
+
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Languages: english
-Name: "desktopicon"; Description: "바탕 화면 바로 가기 만들기"; GroupDescription: "추가 바로 가기:"; Languages: korean
+Name: "desktopreader"; Description: "{cm:ReaderDesktopShortcut}"; GroupDescription: "{cm:AdditionalShortcuts}"; Flags: unchecked
+Name: "desktopeditor"; Description: "{cm:EditorDesktopShortcut}"; GroupDescription: "{cm:AdditionalShortcuts}"; Flags: unchecked
 ; PDF/Illustrator 연결은 '연결 프로그램 후보'로만 등록(기본값을 강제로 뺏지 않음).
 ; 사용자가 나중에 Windows '기본 앱'에서 sPDF를 직접 고를 수 있다.
 Name: "associate"; Description: "Add sPDF to the Open with list for PDF and Illustrator files"; GroupDescription: "File associations:"; Languages: english
@@ -60,8 +72,23 @@ Source: "licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesub
 Source: "build\legal\*"; DestDir: "{app}\third-party"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelId}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelId}"; Tasks: desktopicon
+Name: "{group}\{cm:ReaderShortcut}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--workspace reader"; AppUserModelID: "{#MyAppUserModelId}"
+Name: "{group}\{cm:EditorShortcut}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--workspace editor"; AppUserModelID: "{#MyAppUserModelId}"
+Name: "{autodesktop}\{cm:ReaderShortcut}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--workspace reader"; AppUserModelID: "{#MyAppUserModelId}"; Tasks: desktopreader
+Name: "{autodesktop}\{cm:EditorShortcut}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--workspace editor"; AppUserModelID: "{#MyAppUserModelId}"; Tasks: desktopeditor
+
+[InstallDelete]
+; 업데이트 및 설치 언어 변경 시 이전 바로가기를 정리한 뒤 선택 항목만 다시 만든다.
+Type: files; Name: "{group}\{#MyAppName}.lnk"
+Type: files; Name: "{autodesktop}\{#MyAppName}.lnk"
+Type: files; Name: "{group}\sPDF Reader.lnk"
+Type: files; Name: "{group}\sPDF Editor.lnk"
+Type: files; Name: "{group}\sPDF 리더.lnk"
+Type: files; Name: "{group}\sPDF 편집기.lnk"
+Type: files; Name: "{autodesktop}\sPDF Reader.lnk"
+Type: files; Name: "{autodesktop}\sPDF Editor.lnk"
+Type: files; Name: "{autodesktop}\sPDF 리더.lnk"
+Type: files; Name: "{autodesktop}\sPDF 편집기.lnk"
 
 [Registry]
 ; 설치 시 고른 언어를 앱의 최초 UI 언어 기본값으로 전달한다.

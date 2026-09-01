@@ -100,11 +100,11 @@ HELP_HTML = """
 
 <h3>✏️ 텍스트 편집</h3>
 <p>읽기 창 리본 왼쪽의 큰 <b>편집 모드</b> 버튼이나 Ctrl+E로 편집 창을 엽니다.
-처음에는 바둑판 미리보기에서 페이지를 드래그해 순서를 바꿀 수 있습니다.
-페이지를 두 번 누르거나 Enter를 누르면 같은 창에서 상세 편집합니다.
-<b>페이지 구성</b> 버튼이나 Ctrl+Shift+P로 돌아가도 미저장 변경과
-실행 취소·다시 실행 이력이 유지됩니다.</p>
-<p>편집 문서의 탭과 창 제목에는 <b>[편집 전용]</b>을 표시합니다.
+편집 창은 상세 편집 화면으로 시작하며, 현재 페이지의 기본 크기를 아래 상태표시줄에
+mm 단위로 표시합니다. <b>페이지 구성</b>이나 Ctrl+Shift+P는 페이지를 드래그해
+순서를 바꿀 수 있는 별도 바둑판 창을 엽니다. 미저장 변경과 실행 취소·다시 실행
+이력은 두 창에서 이어집니다.</p>
+<p>편집 문서의 탭에만 <b>[편집 전용]</b>을 표시합니다.
 독립 편집 창에는 프레젠테이션·전체화면 버튼과 메뉴, F5·F11 단축키가 없습니다.
 이 기능들은 읽기 창에서 사용하세요.</p>
 <p>읽기 창에서도 도구 모음·보기 메뉴 또는 <b>Ctrl+[ / Ctrl+]</b>로 현재 쪽을
@@ -241,11 +241,11 @@ the visible area, not the underlying content. Ctrl+Z undoes it.</p>
 reflow editor. Replacement fonts may look different. Page rotation, deletion,
 reordering, and merging participate in undo/redo.</p>
 <p>Use the large <b>Edit mode</b> button at the left of the reader ribbon or
-Ctrl+E to open a separate editor. It starts with a thumbnail grid: drag pages
-to reorder them, then double-click a page or press Enter for detailed editing.
-<b>Page overview</b> or Ctrl+Shift+P returns to the grid in the same window,
-keeping unsaved changes and undo/redo history.</p>
-<p>Editor tabs and window titles display <b>[Edit-only]</b>. Standalone editors
+Ctrl+E to open a separate editor. It starts on the detailed editing canvas and
+shows the current page's original size in millimetres on the bottom status bar.
+<b>Page Organization</b> or Ctrl+Shift+P opens a separate thumbnail grid where
+pages can be reordered. Unsaved changes and undo/redo history remain shared.</p>
+<p>Only editor tabs display <b>[Edit-only]</b>. Standalone editors
 do not offer presentation or full-screen buttons, menus, or F5/F11 shortcuts.
 Use these view modes in the reader.</p>
 <p>

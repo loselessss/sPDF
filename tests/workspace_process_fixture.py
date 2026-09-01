@@ -137,7 +137,11 @@ def tick():
                     pause(phase)
                 yield
         def replace(source, destination):
-            is_pdf = str(destination) == str(ROOT / "source.pdf")
+            try:
+                is_pdf = os.path.samefile(destination, ROOT / "source.pdf")
+            except OSError:
+                is_pdf = (os.path.normcase(os.path.abspath(destination)) ==
+                          os.path.normcase(os.path.abspath(ROOT / "source.pdf")))
             if is_pdf and phase == "before_replace":
                 pause(phase)
             real_replace(source, destination)

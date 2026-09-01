@@ -43,10 +43,8 @@ class PagesMixin:
     def show_page_organizer(self):
         if self.doc is None:
             return
-        if getattr(self, "_page_grid", None) is not None:
-            self.show_editor_overview()
-            return
-        dialog = PageOrganizerDialog(self)
+        dialog = PageOrganizerDialog(
+            self, grid=self._shell.workspace_mode == "editor")
         dialog.exec_()
 
     @editing_command

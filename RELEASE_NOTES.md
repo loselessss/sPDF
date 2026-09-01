@@ -1,16 +1,18 @@
-# sPDF 1.20.0 Release Notes
+# sPDF 1.21.0 Release Notes
 
-Release date: 2026-08-31
+Release date: 2026-09-01
 
-## 1.20.0 - 2026-08-31
+## 1.21.0 - 2026-09-01
 
 ### New features
 
-- Reader and editor workspaces now run in separate OS processes. Editor shutdowns, crashes, and hangs leave the reader available; opening Edit mode can launch a fresh editor.
-- Added Reader first (default) and Editor first startup settings, plus Open reader in the editor's File menu.
+- The installer now adds separate **sPDF Reader** and **sPDF Editor** shortcuts to the Start menu. Each shortcut opens its named workspace directly, regardless of the saved startup preference.
+- Reader and Editor desktop shortcuts can be selected independently during installation.
 
 ### Improvements
 
-- Workspaces use independent document copies. Completed saves refresh connected readers without moving the page, zoom, or scroll position; failed or timed-out refreshes preserve the last good copy.
-- Saves validate a temporary PDF before atomic replacement and preserve a backup. Conflicting editors cannot silently overwrite newer saves; failed saves retain pending edits.
-- Unsaved editor recovery continues independently when the reader exits. Embedded reader, annotation, and self-update policies remain unchanged.
+- Updating from an earlier version removes the old single sPDF shortcut while keeping one application, installer, and update path.
+- Fixed an issue where the reader could open but fail to connect to a new editor window in some Windows environments.
+- Editors now open directly on the detailed canvas, while Page Organization opens in a separate thumbnail-grid window. The redundant mode header and editor marker in the window title were removed; the tab marker remains.
+- The detail view now shows the current page's original size in millimetres on the bottom status bar.
+- Removed the persistent editing hint from the bottom bar. Dropped PDF and AI files now open in new tabs from any area of the main window.

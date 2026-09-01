@@ -23,7 +23,7 @@ class WindowWorkspaceMixin:
     def workspace_title(self):
         from .meta import APP_NAME
         suffix = {"reader": localize("Reader", "읽기"),
-                  "editor": localize("Editor", "편집")}.get(self.workspace_mode)
+                  "editor": None}.get(self.workspace_mode)
         return "%s — %s" % (APP_NAME, suffix) if suffix else APP_NAME
 
     def open_editor(self, source=None, recovery=False):

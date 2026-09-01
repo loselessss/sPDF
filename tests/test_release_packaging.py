@@ -101,9 +101,33 @@ class ReleasePackagingTests(unittest.TestCase):
             r'^APP_USER_MODEL_ID = ["\']([^"\']+)["\']$',
             integration, re.MULTILINE).group(1)
         self.assertEqual(runtime_app_id, app_id)
-        self.assertEqual(installer.count('AppUserModelID: "{#MyAppUserModelId}"'), 2)
+        self.assertEqual(installer.count('AppUserModelID: "{#MyAppUserModelId}"'), 4)
         worker = (ROOT / "ocr_worker_main.py").read_text(encoding="utf-8")
         self.assertIn("set_current_process_app_id()", worker)
+
+    def test_installer_creates_explicit_reader_and_editor_shortcuts(self):
+        installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
+        for target in ("{group}", "{autodesktop}"):
+            self.assertIn(
+                'Name: "%s\\{cm:ReaderShortcut}"' % target, installer)
+            self.assertIn(
+                'Name: "%s\\{cm:EditorShortcut}"' % target, installer)
+        self.assertEqual(installer.count('Parameters: "--workspace reader"'), 2)
+        self.assertEqual(installer.count('Parameters: "--workspace editor"'), 2)
+        self.assertIn("Tasks: desktopreader", installer)
+        self.assertIn("Tasks: desktopeditor", installer)
+        self.assertIn("Flags: unchecked", installer)
+        self.assertIn("korean.ReaderShortcut=sPDF 리더", installer)
+        self.assertIn("korean.EditorShortcut=sPDF 편집기", installer)
+        self.assertNotIn("Tasks: desktopicon", installer)
+        for target in ("{group}", "{autodesktop}"):
+            self.assertIn(
+                'Type: files; Name: "%s\\{#MyAppName}.lnk"' % target,
+                installer)
+            for name in ("sPDF Reader.lnk", "sPDF Editor.lnk",
+                         "sPDF 리더.lnk", "sPDF 편집기.lnk"):
+                self.assertIn(
+                    'Type: files; Name: "%s\\%s"' % (target, name), installer)
 
     def test_installer_registers_pdf_and_illustrator_open_with(self):
         installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
