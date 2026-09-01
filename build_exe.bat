@@ -6,6 +6,9 @@ REM Prerequisite: install PyInstaller and all application dependencies.
 echo === Creating icons ===
 python make_icons.py || goto :err
 
+echo === Building Direct2D renderer ===
+call native\build_d2d_renderer.bat || goto :err
+
 echo === Cleaning previous build ===
 if exist build rmdir /s /q build
 if exist dist\sPDF rmdir /s /q dist\sPDF

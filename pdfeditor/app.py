@@ -29,6 +29,7 @@ from .annots import AnnotMixin
 from .editing import EditMixin
 from .editor_workspace import EditorWorkspaceMixin
 from .document_tools import DocumentToolsMixin
+from .d2d_backend import probe_d2d_backend
 from .icons import fluent_icon
 from .filetypes import (
     DOCUMENT_OPEN_FILTER, is_illustrator_document, is_supported_document)
@@ -382,6 +383,8 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
             self.view = TiledPageView()
             self.view.render_failed.connect(lambda error: self.statusBar().showMessage(
                 localize("Detailed rendering failed: ", "선명한 화면 표시 실패: ") + error, 6000))
+            self.view.render_device_changed.connect(
+                lambda _device: self._update_title())
         else:
             self.view = PageView()
 
@@ -855,6 +858,11 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
 
     def on_wheel_flip(self, direction):
         """휠로 페이지 끝에 닿았을 때 다음/이전 장으로."""
+        if self._shell.workspace_mode == "editor" or self._edit_mode:
+            # 편집 중에는 페이지 바닥의 개체를 작업하며 휠을
+            # 계속 쓴다. 경계에서 다음 장으로 넘어가지 않게 한다.
+            self.view.reset_flip()
+            return
         if self.doc is None:
             return
         if direction > 0 and self.page_index < self.doc.page_count - 1:
@@ -1666,6 +1674,31 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
                 action.setChecked(settings.startup_workspace() == mode)
                 modes.addAction(action)
                 action.triggered.connect(lambda _checked, mode=mode: self._select_startup_workspace(mode))
+        if self.updates_enabled:
+            renderer = parent_menu.addMenu(tr("화면 렌더러"))
+            renderer.setIcon(fluent_icon("settings"))
+            renderers = QActionGroup(renderer)
+            renderers.setExclusive(True)
+            d2d = probe_d2d_backend()
+            gpu_available = (
+                d2d.available and d2d.driver == "hardware" and
+                os.environ.get("SPDF_DISABLE_GPU", "").lower() not in
+                ("1", "true", "yes"))
+            for mode, label in (("auto", tr("자동 (권장)")),
+                                ("gpu", "GPU (Direct2D)"),
+                                ("cpu", "CPU (PyMuPDF)")):
+                action = renderer.addAction(label)
+                action.setCheckable(True)
+                action.setChecked(settings.render_backend() == mode)
+                if mode == "gpu" and not gpu_available:
+                    action.setEnabled(False)
+                    action.setToolTip(localize(
+                        "Direct2D hardware rendering is unavailable.",
+                        "Direct2D 하드웨어 렌더링을 사용할 수 없습니다."))
+                renderers.addAction(action)
+                action.triggered.connect(
+                    lambda _checked=False, selected=mode:
+                    self._select_render_backend(selected))
         menu = parent_menu.addMenu(tr("언어"))
         menu.setIcon(fluent_icon("settings"))
         group = QActionGroup(menu)
@@ -1688,6 +1721,18 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             settings.set_startup_workspace(mode)
         except OSError as error:
             self.statusBar().showMessage(str(error), 8000)
+
+    def _select_render_backend(self, mode):
+        if mode == settings.render_backend():
+            return
+        try:
+            settings.set_render_backend(mode)
+        except OSError as error:
+            self.statusBar().showMessage(str(error), 8000)
+            return
+        QMessageBox.information(
+            self, tr("화면 렌더러 변경"),
+            tr("화면 렌더러 변경 사항은 sPDF를 다시 실행하면 적용됩니다."))
 
     def _select_ui_language(self, language_code):
         if language_code == settings.ui_language():
@@ -2014,6 +2059,9 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         if self._tabs.currentWidget() is tab:
             window_name = name
             window_title = self.workspace_title()
+            if self.workspace_mode in ("reader", "editor"):
+                device = getattr(tab.view, "render_device", "cpu")
+                window_title += " [%s]" % device.upper()
             if self.workspace_mode == "editor" and tab.doc:
                 window_name = ("*" if tab._dirty else "") + os.path.basename(tab.doc.path)
             self.setWindowTitle(

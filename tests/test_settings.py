@@ -29,6 +29,17 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
         with patch.object(settings, "_load", return_value={"startup_workspace": "unknown"}):
             self.assertEqual(settings.startup_workspace(), "reader")
 
+    def test_render_backend_defaults_validates_and_persists(self):
+        self.assertEqual(settings.render_backend(), "auto")
+        self.assertTrue(settings.set_render_backend("gpu"))
+        self.assertEqual(settings.render_backend(), "gpu")
+        self.assertTrue(settings.set_render_backend("cpu"))
+        self.assertEqual(settings.render_backend(), "cpu")
+        self.assertFalse(settings.set_render_backend("vulkan"))
+        self.assertEqual(settings.render_backend(), "cpu")
+        with patch.object(settings, "_load", return_value={"render_backend": "bad"}):
+            self.assertEqual(settings.render_backend(), "auto")
+
     def test_automatic_check_is_limited_to_once_per_24_hours(self):
         settings.mark_automatic_update_check(now=1000)
 

@@ -10,7 +10,7 @@ from pdfeditor.d2d_backend import (ABI_VERSION, D2DSurface, _NativeInfo,
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 1)
+        self.assertEqual(ABI_VERSION, 4)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -59,14 +59,31 @@ class D2DBackendTests(unittest.TestCase):
                     0x00, 0x00, 0xff, 0xff, 0x00, 0xff, 0x00, 0xff,
                     0xff, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff))
                 bitmap = surface.create_bitmap_bgra(pixels, 2, 2)
+                path = surface.create_path([
+                    ("move", 6, 6), ("line", 58, 6),
+                    ("line", 58, 58), ("line", 6, 58), ("close",)])
+                group = surface.create_geometry_group([
+                    (path, (0.5, 0, 0, 0.5, 4, 4)),
+                    (path, (0.25, 0, 0, 0.25, 40, 40)),
+                ])
                 surface.begin_frame(0xff202020)
                 surface.draw_bitmap(bitmap, 8, 8, 56, 56)
+                surface.set_transform(1, 0, 0, 1, 0, 0)
+                surface.fill_rect(4, 4, 20, 12, 0x600078d7)
+                surface.stroke_rect(2, 2, 62, 62, 0xff00a05a, 1.0)
+                surface.fill_path(path, 0x600078d7)
+                surface.stroke_path(path, 0xff00a05a, 2.0)
+                surface.fill_path(group, 0x800000ff)
                 surface.end_frame()
                 surface.resize(96, 80, 120.0)
                 surface.clear(0xfff7f7f7)
                 self.assertFalse(surface.closed)
                 bitmap.close()
                 self.assertTrue(bitmap.closed)
+                path.close()
+                self.assertTrue(path.closed)
+                group.close()
+                self.assertTrue(group.closed)
             self.assertTrue(surface.closed)
         finally:
             user32.DestroyWindow(hwnd)

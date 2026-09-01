@@ -4,6 +4,7 @@ import unittest
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 
@@ -607,6 +608,7 @@ class EmbeddedModeTests(unittest.TestCase):
                 QStatusBar, options=Qt.FindDirectChildrenOnly), [])
         self.assertFalse(window.check_for_updates(manual=True))
         self.assertNotIn("Check for Updates...", menu_texts)
+        self.assertNotIn("Display Renderer", menu_texts)
         window.close()
 
     def test_standalone_window_keeps_update_feature(self):
@@ -636,6 +638,22 @@ class EmbeddedModeTests(unittest.TestCase):
         self.assertTrue(window.updates_enabled)
         self.assertIsNotNone(window._update_service)
         self.assertIn("Check for Updates...", menu_texts)
+        self.assertIn("Display Renderer", menu_texts)
+        window.close()
+
+    def test_unavailable_direct2d_cannot_be_selected(self):
+        from PyQt5.QtWidgets import QAction
+        from pdfeditor.app import AppWindow
+
+        unavailable = SimpleNamespace(available=False, driver="none")
+        with patch("pdfeditor.app.probe_d2d_backend", return_value=unavailable), \
+                patch("pdfeditor.app.settings.automatic_update_check_due",
+                      return_value=False), \
+                patch("pdfeditor.app.settings.ui_language", return_value="en"):
+            window = AppWindow(updates_enabled=True)
+        actions = {action.text(): action for action in window.findChildren(QAction)}
+        self.assertIn("GPU (Direct2D)", actions)
+        self.assertFalse(actions["GPU (Direct2D)"].isEnabled())
         window.close()
 
 

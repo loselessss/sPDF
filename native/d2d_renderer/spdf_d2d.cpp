@@ -5,8 +5,11 @@
 #include <cstring>
 #include <iterator>
 #include <new>
+#include <unordered_map>
+#include <vector>
 
 #include <d2d1_1.h>
+#include <d2d1_2.h>
 #include <d3d11_1.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
@@ -95,6 +98,12 @@ public:
         ComPtr<ID2D1Bitmap1> resource;
     };
 
+    struct Path {
+        Surface* owner;
+        ComPtr<ID2D1Geometry> resource;
+        ComPtr<ID2D1GeometryRealization> fill_realization;
+    };
+
     HRESULT initialize(
         HWND hwnd,
         std::uint32_t width,
@@ -147,6 +156,9 @@ public:
         if (FAILED(result)) {
             return result;
         }
+        // Geometry realizations cache tessellation for repeated zoom/pan frames.
+        // They are optional and FillGeometry remains the compatibility path.
+        d2d_context_.As(&d2d_context1_);
         result = DWriteCreateFactory(
             DWRITE_FACTORY_TYPE_SHARED,
             __uuidof(IDWriteFactory),
@@ -182,7 +194,7 @@ public:
     }
 
     HRESULT resize(std::uint32_t width, std::uint32_t height, float dpi) noexcept {
-        if (!swap_chain_ || width == 0 || height == 0) {
+        if (!swap_chain_ || drawing_ || width == 0 || height == 0) {
             return E_INVALIDARG;
         }
         d2d_context_->SetTarget(nullptr);
@@ -222,6 +234,21 @@ public:
         return S_OK;
     }
 
+    HRESULT set_transform(
+        float m11,
+        float m12,
+        float m21,
+        float m22,
+        float dx,
+        float dy) noexcept {
+        if (!d2d_context_ || !drawing_) {
+            return E_UNEXPECTED;
+        }
+        d2d_context_->SetTransform(D2D1::Matrix3x2F(
+            m11, m12, m21, m22, dx, dy));
+        return S_OK;
+    }
+
     HRESULT create_bitmap(
         const void* pixels,
         std::uint32_t width,
@@ -255,6 +282,215 @@ public:
             return result;
         }
         *bitmap = result_bitmap;
+        return S_OK;
+    }
+
+    HRESULT create_path(
+        const SpdfD2DPathCommand* commands,
+        std::uint32_t command_count,
+        bool even_odd,
+        Path** path) noexcept {
+        if (!d2d_factory_ || commands == nullptr || command_count == 0 || path == nullptr) {
+            return E_INVALIDARG;
+        }
+        *path = nullptr;
+        auto result_path = new (std::nothrow) Path{this, nullptr, nullptr};
+        if (result_path == nullptr) {
+            return E_OUTOFMEMORY;
+        }
+        ComPtr<ID2D1PathGeometry> geometry;
+        auto result = d2d_factory_->CreatePathGeometry(&geometry);
+        ComPtr<ID2D1GeometrySink> sink;
+        if (SUCCEEDED(result)) {
+            result = geometry->Open(&sink);
+        }
+        if (FAILED(result)) {
+            delete result_path;
+            return result;
+        }
+        sink->SetFillMode(even_odd ? D2D1_FILL_MODE_ALTERNATE : D2D1_FILL_MODE_WINDING);
+        bool figure_open = false;
+        for (std::uint32_t index = 0; index < command_count; ++index) {
+            const auto& command = commands[index];
+            switch (command.type) {
+            case SPDF_D2D_PATH_MOVE:
+                if (figure_open) {
+                    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+                }
+                sink->BeginFigure(
+                    D2D1::Point2F(command.points[0], command.points[1]),
+                    D2D1_FIGURE_BEGIN_FILLED);
+                figure_open = true;
+                break;
+            case SPDF_D2D_PATH_LINE:
+                if (!figure_open) {
+                    result = E_INVALIDARG;
+                    break;
+                }
+                sink->AddLine(D2D1::Point2F(command.points[0], command.points[1]));
+                break;
+            case SPDF_D2D_PATH_CUBIC:
+                if (!figure_open) {
+                    result = E_INVALIDARG;
+                    break;
+                }
+                sink->AddBezier(D2D1::BezierSegment(
+                    D2D1::Point2F(command.points[0], command.points[1]),
+                    D2D1::Point2F(command.points[2], command.points[3]),
+                    D2D1::Point2F(command.points[4], command.points[5])));
+                break;
+            case SPDF_D2D_PATH_CLOSE:
+                if (!figure_open) {
+                    result = E_INVALIDARG;
+                    break;
+                }
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                figure_open = false;
+                break;
+            default:
+                result = E_INVALIDARG;
+                break;
+            }
+            if (FAILED(result)) {
+                break;
+            }
+        }
+        if (figure_open) {
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+        }
+        if (SUCCEEDED(result)) {
+            result = sink->Close();
+        }
+        if (FAILED(result)) {
+            delete result_path;
+            return result;
+        }
+        result_path->resource = geometry;
+        realize_path(result_path);
+        *path = result_path;
+        return S_OK;
+    }
+
+    HRESULT create_geometry_group(
+        Path* const* paths,
+        const SpdfD2DTransform* transforms,
+        std::uint32_t path_count,
+        bool even_odd,
+        Path** group) noexcept {
+        if (!d2d_factory_ || paths == nullptr || transforms == nullptr ||
+                path_count == 0 || group == nullptr) {
+            return E_INVALIDARG;
+        }
+        *group = nullptr;
+        std::vector<ComPtr<ID2D1TransformedGeometry>> transformed;
+        std::vector<ID2D1Geometry*> geometries;
+        transformed.reserve(path_count);
+        geometries.reserve(path_count);
+        for (std::uint32_t index = 0; index < path_count; ++index) {
+            const auto path = paths[index];
+            if (path == nullptr || path->owner != this || !path->resource) {
+                return E_INVALIDARG;
+            }
+            const auto& matrix = transforms[index];
+            ComPtr<ID2D1TransformedGeometry> instance;
+            const auto d2d_matrix = D2D1::Matrix3x2F(
+                matrix.m11, matrix.m12, matrix.m21, matrix.m22,
+                matrix.dx, matrix.dy);
+            const auto result = d2d_factory_->CreateTransformedGeometry(
+                path->resource.Get(),
+                &d2d_matrix,
+                &instance);
+            if (FAILED(result)) {
+                return result;
+            }
+            geometries.push_back(instance.Get());
+            transformed.push_back(std::move(instance));
+        }
+        auto result_group = new (std::nothrow) Path{this, nullptr, nullptr};
+        if (result_group == nullptr) {
+            return E_OUTOFMEMORY;
+        }
+        ComPtr<ID2D1GeometryGroup> geometry_group;
+        const auto result = d2d_factory_->CreateGeometryGroup(
+            even_odd ? D2D1_FILL_MODE_ALTERNATE : D2D1_FILL_MODE_WINDING,
+            geometries.data(), path_count, &geometry_group);
+        if (FAILED(result)) {
+            delete result_group;
+            return result;
+        }
+        result_group->resource = geometry_group;
+        realize_path(result_group);
+        *group = result_group;
+        return S_OK;
+    }
+
+    HRESULT fill_rect(
+        float left,
+        float top,
+        float right,
+        float bottom,
+        std::uint32_t argb) noexcept {
+        if (!drawing_ || right <= left || bottom <= top) {
+            return E_INVALIDARG;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        auto result = create_brush(argb, &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        d2d_context_->FillRectangle(D2D1::RectF(left, top, right, bottom), brush.Get());
+        return S_OK;
+    }
+
+    HRESULT stroke_rect(
+        float left,
+        float top,
+        float right,
+        float bottom,
+        std::uint32_t argb,
+        float width) noexcept {
+        if (!drawing_ || right <= left || bottom <= top || width <= 0.0f) {
+            return E_INVALIDARG;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        auto result = create_brush(argb, &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        d2d_context_->DrawRectangle(
+            D2D1::RectF(left, top, right, bottom), brush.Get(), width);
+        return S_OK;
+    }
+
+    HRESULT fill_path(Path* path, std::uint32_t argb) noexcept {
+        if (!drawing_ || path == nullptr || path->owner != this || !path->resource) {
+            return E_INVALIDARG;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        auto result = create_brush(argb, &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        if (d2d_context1_ && path->fill_realization) {
+            d2d_context1_->DrawGeometryRealization(
+                path->fill_realization.Get(), brush.Get());
+        } else {
+            d2d_context_->FillGeometry(path->resource.Get(), brush.Get());
+        }
+        return S_OK;
+    }
+
+    HRESULT stroke_path(Path* path, std::uint32_t argb, float width) noexcept {
+        if (!drawing_ || path == nullptr || path->owner != this ||
+                !path->resource || width <= 0.0f) {
+            return E_INVALIDARG;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        auto result = create_brush(argb, &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        d2d_context_->DrawGeometry(path->resource.Get(), brush.Get(), width);
         return S_OK;
     }
 
@@ -301,6 +537,35 @@ public:
     }
 
 private:
+    void realize_path(Path* path) noexcept {
+        if (d2d_context1_ && path != nullptr && path->resource) {
+            // 0.05 PDF points stays below half a pixel at the 800% UI limit.
+            d2d_context1_->CreateFilledGeometryRealization(
+                path->resource.Get(), 0.05f, &path->fill_realization);
+        }
+    }
+
+    HRESULT create_brush(
+        std::uint32_t argb,
+        ID2D1SolidColorBrush** brush) noexcept {
+        const auto cached = brushes_.find(argb);
+        if (cached != brushes_.end()) {
+            return cached->second.CopyTo(brush);
+        }
+        const auto alpha = static_cast<float>((argb >> 24) & 0xff) / 255.0f;
+        const auto red = static_cast<float>((argb >> 16) & 0xff) / 255.0f;
+        const auto green = static_cast<float>((argb >> 8) & 0xff) / 255.0f;
+        const auto blue = static_cast<float>(argb & 0xff) / 255.0f;
+        ComPtr<ID2D1SolidColorBrush> created;
+        const auto result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(red, green, blue, alpha), &created);
+        if (FAILED(result)) {
+            return result;
+        }
+        brushes_.emplace(argb, created);
+        return created.CopyTo(brush);
+    }
+
     HRESULT create_target() noexcept {
         ComPtr<IDXGISurface> back_buffer;
         auto result = swap_chain_->GetBuffer(0, IID_PPV_ARGS(&back_buffer));
@@ -333,8 +598,10 @@ private:
     ComPtr<ID2D1Factory1> d2d_factory_;
     ComPtr<ID2D1Device> d2d_device_;
     ComPtr<ID2D1DeviceContext> d2d_context_;
+    ComPtr<ID2D1DeviceContext1> d2d_context1_;
     ComPtr<ID2D1Bitmap1> target_;
     ComPtr<IDWriteFactory> dwrite_factory_;
+    std::unordered_map<std::uint32_t, ComPtr<ID2D1SolidColorBrush>> brushes_;
     bool drawing_ = false;
 };
 
@@ -466,6 +733,21 @@ std::int32_t spdf_d2d_begin_frame(void* surface, std::uint32_t argb) noexcept {
         static_cast<Surface*>(surface)->begin_frame(argb));
 }
 
+std::int32_t spdf_d2d_set_transform(
+    void* surface,
+    float m11,
+    float m12,
+    float m21,
+    float m22,
+    float dx,
+    float dy) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->set_transform(
+        m11, m12, m21, m22, dx, dy));
+}
+
 std::int32_t spdf_d2d_create_bitmap(
     void* surface,
     const void* bgra_pixels,
@@ -482,6 +764,40 @@ std::int32_t spdf_d2d_create_bitmap(
         height,
         stride,
         reinterpret_cast<Surface::Bitmap**>(bitmap)));
+}
+
+std::int32_t spdf_d2d_create_path(
+    void* surface,
+    const SpdfD2DPathCommand* commands,
+    std::uint32_t command_count,
+    std::uint32_t even_odd,
+    void** path) noexcept {
+    if (surface == nullptr || path == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->create_path(
+        commands,
+        command_count,
+        even_odd != 0,
+        reinterpret_cast<Surface::Path**>(path)));
+}
+
+std::int32_t spdf_d2d_create_geometry_group(
+    void* surface,
+    void* const* paths,
+    const SpdfD2DTransform* transforms,
+    std::uint32_t path_count,
+    std::uint32_t even_odd,
+    void** group) noexcept {
+    if (surface == nullptr || paths == nullptr || transforms == nullptr ||
+            group == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->create_geometry_group(
+            reinterpret_cast<Surface::Path* const*>(paths), transforms,
+            path_count, even_odd != 0,
+            reinterpret_cast<Surface::Path**>(group)));
 }
 
 std::int32_t spdf_d2d_draw_bitmap(
@@ -504,6 +820,58 @@ std::int32_t spdf_d2d_draw_bitmap(
         opacity));
 }
 
+std::int32_t spdf_d2d_fill_rect(
+    void* surface,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    std::uint32_t argb) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->fill_rect(
+        left, top, right, bottom, argb));
+}
+
+std::int32_t spdf_d2d_stroke_rect(
+    void* surface,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    std::uint32_t argb,
+    float width) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->stroke_rect(
+        left, top, right, bottom, argb, width));
+}
+
+std::int32_t spdf_d2d_fill_path(
+    void* surface,
+    void* path,
+    std::uint32_t argb) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->fill_path(
+        static_cast<Surface::Path*>(path), argb));
+}
+
+std::int32_t spdf_d2d_stroke_path(
+    void* surface,
+    void* path,
+    std::uint32_t argb,
+    float width) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->stroke_path(
+        static_cast<Surface::Path*>(path), argb, width));
+}
+
 std::int32_t spdf_d2d_end_frame(void* surface) noexcept {
     if (surface == nullptr) {
         return static_cast<std::int32_t>(E_INVALIDARG);
@@ -513,6 +881,10 @@ std::int32_t spdf_d2d_end_frame(void* surface) noexcept {
 
 void spdf_d2d_destroy_bitmap(void* bitmap) noexcept {
     delete static_cast<Surface::Bitmap*>(bitmap);
+}
+
+void spdf_d2d_destroy_path(void* path) noexcept {
+    delete static_cast<Surface::Path*>(path);
 }
 
 void spdf_d2d_destroy_surface(void* surface) noexcept {

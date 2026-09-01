@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 1
+ABI_VERSION = 4
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -25,6 +25,18 @@ class _NativeInfo(Structure):
         ("feature_level", c_uint32),
         ("last_hresult", c_int32),
         ("adapter_name", c_wchar * 128),
+    ]
+
+
+class _PathCommand(Structure):
+    _fields_ = [("type", c_uint32), ("points", c_float * 6)]
+
+
+class _Transform(Structure):
+    _fields_ = [
+        ("m11", c_float), ("m12", c_float),
+        ("m21", c_float), ("m22", c_float),
+        ("dx", c_float), ("dy", c_float),
     ]
 
 
@@ -65,16 +77,39 @@ def _load_library(path):
     library.spdf_d2d_clear_surface.restype = c_int32
     library.spdf_d2d_begin_frame.argtypes = [c_void_p, c_uint32]
     library.spdf_d2d_begin_frame.restype = c_int32
+    library.spdf_d2d_set_transform.argtypes = [
+        c_void_p, c_float, c_float, c_float, c_float, c_float, c_float]
+    library.spdf_d2d_set_transform.restype = c_int32
     library.spdf_d2d_create_bitmap.argtypes = [
         c_void_p, c_void_p, c_uint32, c_uint32, c_uint32, POINTER(c_void_p)]
     library.spdf_d2d_create_bitmap.restype = c_int32
+    library.spdf_d2d_create_path.argtypes = [
+        c_void_p, POINTER(_PathCommand), c_uint32, c_uint32, POINTER(c_void_p)]
+    library.spdf_d2d_create_path.restype = c_int32
+    library.spdf_d2d_create_geometry_group.argtypes = [
+        c_void_p, POINTER(c_void_p), POINTER(_Transform), c_uint32,
+        c_uint32, POINTER(c_void_p)]
+    library.spdf_d2d_create_geometry_group.restype = c_int32
     library.spdf_d2d_draw_bitmap.argtypes = [
         c_void_p, c_void_p, c_float, c_float, c_float, c_float, c_float]
     library.spdf_d2d_draw_bitmap.restype = c_int32
+    library.spdf_d2d_fill_rect.argtypes = [
+        c_void_p, c_float, c_float, c_float, c_float, c_uint32]
+    library.spdf_d2d_fill_rect.restype = c_int32
+    library.spdf_d2d_stroke_rect.argtypes = [
+        c_void_p, c_float, c_float, c_float, c_float, c_uint32, c_float]
+    library.spdf_d2d_stroke_rect.restype = c_int32
+    library.spdf_d2d_fill_path.argtypes = [c_void_p, c_void_p, c_uint32]
+    library.spdf_d2d_fill_path.restype = c_int32
+    library.spdf_d2d_stroke_path.argtypes = [
+        c_void_p, c_void_p, c_uint32, c_float]
+    library.spdf_d2d_stroke_path.restype = c_int32
     library.spdf_d2d_end_frame.argtypes = [c_void_p]
     library.spdf_d2d_end_frame.restype = c_int32
     library.spdf_d2d_destroy_bitmap.argtypes = [c_void_p]
     library.spdf_d2d_destroy_bitmap.restype = None
+    library.spdf_d2d_destroy_path.argtypes = [c_void_p]
+    library.spdf_d2d_destroy_path.restype = None
     library.spdf_d2d_destroy_surface.argtypes = [c_void_p]
     library.spdf_d2d_destroy_surface.restype = None
     return library
@@ -94,6 +129,7 @@ class D2DSurface:
         self._library = _load_library(library_path)
         self._handle = c_void_p()
         self._bitmaps = set()
+        self._paths = set()
         native = _NativeInfo()
         native.struct_size = ctypes.sizeof(_NativeInfo)
         result = self._library.spdf_d2d_create_surface(
@@ -143,6 +179,63 @@ class D2DSurface:
         self._bitmaps.add(bitmap)
         return bitmap
 
+    def create_path(self, commands, *, even_odd=False):
+        """Create an immutable Direct2D geometry from compact path commands.
+
+        Commands are ``(kind, coordinates...)`` where kind is ``move``,
+        ``line``, ``cubic``, or ``close``.
+        """
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        kinds = {"move": 1, "line": 2, "cubic": 3, "close": 4}
+        native_commands = []
+        expected = {"move": 2, "line": 2, "cubic": 6, "close": 0}
+        for command in commands:
+            kind, values = command[0], command[1:]
+            if kind not in kinds or len(values) != expected.get(kind):
+                raise ValueError("invalid Direct2D path command")
+            item = _PathCommand()
+            item.type = kinds[kind]
+            for index, value in enumerate(values):
+                item.points[index] = float(value)
+            native_commands.append(item)
+        if not native_commands:
+            raise ValueError("Direct2D path cannot be empty")
+        array = (_PathCommand * len(native_commands))(*native_commands)
+        handle = c_void_p()
+        result = self._library.spdf_d2d_create_path(
+            self._handle, array, len(native_commands), bool(even_odd),
+            byref(handle))
+        _check_hresult(result, "Direct2D path creation")
+        path = D2DPath(self, handle)
+        self._paths.add(path)
+        return path
+
+    def create_geometry_group(self, instances, *, even_odd=False):
+        """Create one immutable geometry from transformed path instances."""
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        instances = tuple(instances)
+        if not instances:
+            raise ValueError("Direct2D geometry group cannot be empty")
+        handles = (c_void_p * len(instances))()
+        transforms = (_Transform * len(instances))()
+        for index, (path, matrix) in enumerate(instances):
+            if path.closed or path._surface is not self:
+                raise ValueError("path does not belong to this Direct2D surface")
+            if len(matrix) != 6:
+                raise ValueError("invalid Direct2D geometry transform")
+            handles[index] = path._handle
+            transforms[index] = _Transform(*map(float, matrix))
+        handle = c_void_p()
+        result = self._library.spdf_d2d_create_geometry_group(
+            self._handle, handles, transforms, len(instances), bool(even_odd),
+            byref(handle))
+        _check_hresult(result, "Direct2D geometry group creation")
+        group = D2DPath(self, handle)
+        self._paths.add(group)
+        return group
+
     def begin_frame(self, argb=0xffe8e8e8):
         if self.closed:
             raise RuntimeError("Direct2D surface is closed")
@@ -160,6 +253,50 @@ class D2DSurface:
                 float(right), float(bottom), float(opacity)),
             "Direct2D bitmap draw")
 
+    def set_transform(self, m11, m12, m21, m22, dx, dy):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        _check_hresult(
+            self._library.spdf_d2d_set_transform(
+                self._handle, float(m11), float(m12), float(m21),
+                float(m22), float(dx), float(dy)),
+            "Direct2D transform")
+
+    def fill_rect(self, left, top, right, bottom, argb):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        _check_hresult(
+            self._library.spdf_d2d_fill_rect(
+                self._handle, float(left), float(top), float(right),
+                float(bottom), int(argb) & 0xffffffff),
+            "Direct2D rectangle fill")
+
+    def stroke_rect(self, left, top, right, bottom, argb, width=1.0):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        _check_hresult(
+            self._library.spdf_d2d_stroke_rect(
+                self._handle, float(left), float(top), float(right),
+                float(bottom), int(argb) & 0xffffffff, float(width)),
+            "Direct2D rectangle stroke")
+
+    def fill_path(self, path, argb):
+        if path.closed or path._surface is not self:
+            raise ValueError("path does not belong to this Direct2D surface")
+        _check_hresult(
+            self._library.spdf_d2d_fill_path(
+                self._handle, path._handle, int(argb) & 0xffffffff),
+            "Direct2D path fill")
+
+    def stroke_path(self, path, argb, width=1.0):
+        if path.closed or path._surface is not self:
+            raise ValueError("path does not belong to this Direct2D surface")
+        _check_hresult(
+            self._library.spdf_d2d_stroke_path(
+                self._handle, path._handle, int(argb) & 0xffffffff,
+                float(width)),
+            "Direct2D path stroke")
+
     def end_frame(self):
         if self.closed:
             raise RuntimeError("Direct2D surface is closed")
@@ -171,6 +308,8 @@ class D2DSurface:
         if not self.closed:
             for bitmap in tuple(self._bitmaps):
                 bitmap.close()
+            for path in tuple(self._paths):
+                path.close()
             self._library.spdf_d2d_destroy_surface(self._handle)
             self._handle = c_void_p()
 
@@ -203,6 +342,28 @@ class D2DBitmap:
             self._surface._library.spdf_d2d_destroy_bitmap(self._handle)
             self._handle = c_void_p()
             self._surface._bitmaps.discard(self)
+
+    def __del__(self):
+        try:
+            self.close()
+        except (AttributeError, OSError):
+            pass
+
+
+class D2DPath:
+    def __init__(self, surface, handle):
+        self._surface = surface
+        self._handle = handle
+
+    @property
+    def closed(self):
+        return not bool(self._handle)
+
+    def close(self):
+        if not self.closed:
+            self._surface._library.spdf_d2d_destroy_path(self._handle)
+            self._handle = c_void_p()
+            self._surface._paths.discard(self)
 
     def __del__(self):
         try:

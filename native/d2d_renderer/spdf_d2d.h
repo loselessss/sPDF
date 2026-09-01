@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 1;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 4;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -27,9 +27,32 @@ struct SpdfD2DInfo {
     wchar_t adapter_name[SPDF_D2D_ADAPTER_NAME_LENGTH];
 };
 
+enum SpdfD2DPathCommandType : std::uint32_t {
+    SPDF_D2D_PATH_MOVE = 1,
+    SPDF_D2D_PATH_LINE = 2,
+    SPDF_D2D_PATH_CUBIC = 3,
+    SPDF_D2D_PATH_CLOSE = 4,
+};
+
+struct SpdfD2DPathCommand {
+    std::uint32_t type;
+    float points[6];
+};
+
+struct SpdfD2DTransform {
+    float m11;
+    float m12;
+    float m21;
+    float m22;
+    float dx;
+    float dy;
+};
+
 static_assert(sizeof(wchar_t) == 2, "The sPDF D2D ABI requires Windows wchar_t");
 static_assert(offsetof(SpdfD2DInfo, adapter_name) == 20, "Unexpected D2D ABI layout");
 static_assert(sizeof(SpdfD2DInfo) == 276, "Unexpected D2D ABI size");
+static_assert(sizeof(SpdfD2DPathCommand) == 28, "Unexpected path command layout");
+static_assert(sizeof(SpdfD2DTransform) == 24, "Unexpected transform layout");
 
 SPDF_D2D_API std::uint32_t spdf_d2d_abi_version() noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_probe(SpdfD2DInfo* info) noexcept;
@@ -51,6 +74,14 @@ SPDF_D2D_API std::int32_t spdf_d2d_clear_surface(
 SPDF_D2D_API std::int32_t spdf_d2d_begin_frame(
     void* surface,
     std::uint32_t argb) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_set_transform(
+    void* surface,
+    float m11,
+    float m12,
+    float m21,
+    float m22,
+    float dx,
+    float dy) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_create_bitmap(
     void* surface,
     const void* bgra_pixels,
@@ -58,6 +89,19 @@ SPDF_D2D_API std::int32_t spdf_d2d_create_bitmap(
     std::uint32_t height,
     std::uint32_t stride,
     void** bitmap) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_create_path(
+    void* surface,
+    const SpdfD2DPathCommand* commands,
+    std::uint32_t command_count,
+    std::uint32_t even_odd,
+    void** path) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_create_geometry_group(
+    void* surface,
+    void* const* paths,
+    const SpdfD2DTransform* transforms,
+    std::uint32_t path_count,
+    std::uint32_t even_odd,
+    void** group) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_draw_bitmap(
     void* surface,
     void* bitmap,
@@ -66,6 +110,31 @@ SPDF_D2D_API std::int32_t spdf_d2d_draw_bitmap(
     float right,
     float bottom,
     float opacity) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_fill_rect(
+    void* surface,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    std::uint32_t argb) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_stroke_rect(
+    void* surface,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    std::uint32_t argb,
+    float width) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_fill_path(
+    void* surface,
+    void* path,
+    std::uint32_t argb) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_stroke_path(
+    void* surface,
+    void* path,
+    std::uint32_t argb,
+    float width) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_end_frame(void* surface) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_bitmap(void* bitmap) noexcept;
+SPDF_D2D_API void spdf_d2d_destroy_path(void* path) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_surface(void* surface) noexcept;

@@ -175,6 +175,11 @@ EN = {
     "이 위치에는 링크가 없습니다": "There is no link at this location",
     "목록 지우기": "Clear List",
     "언어": "Language",
+    "화면 렌더러": "Display Renderer",
+    "자동 (권장)": "Auto (Recommended)",
+    "화면 렌더러 변경": "Display Renderer Change",
+    "화면 렌더러 변경 사항은 sPDF를 다시 실행하면 적용됩니다.":
+        "The display renderer change will take effect after restarting sPDF.",
     "왼쪽 패널": "Left Panel",
     "한국어": "Korean",
     "언어 변경": "Language Change",

@@ -2,6 +2,30 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
+## 1.23.0 - 2026-09-02
+
+### New features
+
+- Standalone reader and editor windows now upload visible 512-pixel PDF tiles to a Direct2D bitmap cache on supported Windows systems.
+- A new display-renderer menu lets standalone users choose Auto, GPU (Direct2D), or CPU (PyMuPDF); changes take effect after restarting sPDF.
+- Document window titles show the active `[GPU]` or `[CPU]` display device, and the GPU choice is disabled when Direct2D hardware rendering is unavailable.
+
+### Performance improvements
+
+- Direct3D 11, a DXGI flip-model swap chain, and Direct2D now composite page previews, detailed tiles, search highlights, text selections, and editable-text outlines on the GPU.
+- Common pages containing text, shapes, and placed images can now be drawn directly through the GPU path for faster redraws while zooming and panning.
+- Existing PDF text keeps its original shape and placement. Pages that exceed the bounded image cache automatically use the complete CPU fallback.
+- Hidden and closed tabs release their native bitmaps and surfaces, while the existing 64 MiB per-tab tile limit continues to bound detailed image caches.
+
+### Improvements
+
+- Native initialization, presentation, or device failures fall back to the existing Qt display path without closing the document or changing interaction coordinates.
+- Scrolling beyond the top or bottom edge in Edit mode no longer changes pages automatically.
+
+### Other
+
+- Pages using complex clipping, shading, masks, transparency groups, or stroke styles keep the complete PyMuPDF path to preserve display quality.
+
 ## 1.22.0 - 2026-09-01
 
 ### New features

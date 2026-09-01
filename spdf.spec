@@ -33,6 +33,10 @@ gui_version_info, ocr_version_info = write_version_info_files(
 legal_bundle = write_legal_bundle(spec_root / "build" / "legal")
 legal_datas = [("LICENSE", "."), ("LICENSES.md", "."), ("SOURCE_CODE.md", "."),
                ("licenses", "licenses"), (str(legal_bundle), "third-party")]
+d2d_renderer = spec_root / "native" / "bin" / "spdf_d2d_renderer.dll"
+if not d2d_renderer.is_file():
+    raise FileNotFoundError(
+        "Direct2D renderer is missing; run native\\build_d2d_renderer.bat first")
 
 # --- OCR 워커: onnxruntime/rapidocr/cv2, PyQt5 제외 ---
 ocr_datas, ocr_bins, ocr_hidden = [], [], []
@@ -84,7 +88,7 @@ exe_ocr = EXE(
 # --- GUI: PyQt5/PyMuPDF, onnxruntime류 제외(워커가 담당) ---
 a_gui = Analysis(
     ["run.py"],
-    binaries=[],
+    binaries=[(str(d2d_renderer), "native")],
     datas=[("assets/spdf.ico", "assets"),
            ("assets/spdf_doc.ico", "assets")] + legal_datas,
     hiddenimports=["pdfeditor", "fitz"],

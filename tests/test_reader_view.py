@@ -224,6 +224,206 @@ class ReaderViewTests(unittest.TestCase):
         self.assertEqual(tiles, set(self.view._tiles))
         self.assertEqual(state, (self.view.horizontalScrollBar().value(), self.view.verticalScrollBar().value()))
 
+    def test_render_device_distinguishes_hardware_direct2d_from_warp(self):
+        from types import SimpleNamespace
+
+        self.view._d2d_surface = Mock(
+            info=SimpleNamespace(driver="hardware"))
+        self.assertEqual(self.view.render_device, "gpu")
+        self.view._d2d_surface.info.driver = "warp"
+        self.assertEqual(self.view.render_device, "cpu")
+        self.view._d2d_surface = None
+
+    def test_forced_gpu_mode_rejects_direct2d_warp(self):
+        from types import SimpleNamespace
+        from pdfeditor import reader_view
+
+        with patch.object(reader_view, "opengl_allowed", return_value=True), \
+                patch.object(reader_view.settings, "render_backend",
+                             return_value="gpu"), \
+                patch.object(
+                    reader_view, "probe_d2d_backend",
+                    return_value=SimpleNamespace(available=True, driver="warp")):
+            view = reader_view.ReaderPageView()
+        try:
+            self.assertFalse(view._d2d_requested)
+            self.assertEqual(view.composition_backend, "cpu")
+        finally:
+            view.close()
+
+    def test_direct2d_uploads_tiles_and_draws_interaction_overlays(self):
+        from PyQt5.QtCore import QRectF
+
+        class Bitmap:
+            closed = False
+
+            def close(self):
+                self.closed = True
+
+        class Surface:
+            def __init__(self):
+                self.created = []
+                self.drawn = []
+                self.filled = []
+                self.stroked = []
+
+            def create_bitmap_bgra(self, pixels, width, height, stride):
+                self.created.append((len(pixels), width, height, stride))
+                return Bitmap()
+
+            def begin_frame(self, _color):
+                pass
+
+            def set_transform(self, *values):
+                self.transform = values
+
+            def draw_bitmap(self, bitmap, *rect):
+                self.drawn.append((bitmap, rect))
+
+            def fill_rect(self, *values):
+                self.filled.append(values)
+
+            def stroke_rect(self, *values):
+                self.stroked.append(values)
+
+            def end_frame(self):
+                pass
+
+        self.finish_tiles()
+        self.view.canvas.set_selection([QRectF(60, 70, 80, 20)])
+        self.view.canvas.set_edit_boxes([QRectF(70, 110, 90, 24)])
+        surface = Surface()
+        self.view._d2d_surface = surface
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._paint_d2d()
+        self.assertGreaterEqual(len(surface.created), 2)
+        self.assertGreaterEqual(len(surface.drawn), 2)
+        self.assertEqual(len(surface.filled), 1)
+        self.assertEqual(len(surface.stroked), 1)
+        created = len(surface.created)
+        self.view._paint_d2d()
+        self.assertEqual(len(surface.created), created)
+        old_preview = self.view._d2d_previews[0][1]
+        self.view.render_document(self.doc, [1], 1)
+        self.assertTrue(old_preview.closed)
+        self.assertNotIn(0, self.view._d2d_previews)
+        self.view._d2d_surface = None
+        self.view._d2d_previews.clear()
+        self.view._d2d_tiles.clear()
+
+    def test_supported_vector_page_skips_cpu_tiles_and_rasterizes_paths(self):
+        from pdfeditor.gpu_raster import VectorPage, VectorPath
+
+        scene = VectorPage(True, (VectorPath(
+            (("move", 20, 20), ("line", 120, 20),
+             ("line", 120, 100), ("close",)),
+            fill_argb=0xff0080ff, stroke_argb=0xffff0000,
+            stroke_width=2),))
+        native_path = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = native_path
+        self.view._d2d_surface = surface
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+
+        self.view._paint_d2d()
+        surface.create_path.assert_called_once_with(
+            scene.paths[0].commands, even_odd=False)
+        surface.fill_path.assert_called_once_with(native_path, 0xff0080ff)
+        surface.stroke_path.assert_called_once_with(native_path, 0xffff0000, 2)
+        surface.create_bitmap_bgra.assert_not_called()
+        self.view._plan_tiles()
+        self.assertFalse(self.view._pending)
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_supported_image_scene_uploads_bitmap_and_preserves_transform(self):
+        from pdfeditor.gpu_raster import VectorImage, VectorPage
+
+        image = VectorImage(
+            bytes((0, 0, 255, 255)) * 4, 2, 2, 8,
+            (100, 0, 0, 80, 25, 35), .75)
+        scene = VectorPage(True, items=(image,))
+        bitmap = Mock(closed=False)
+        surface = Mock()
+        surface.create_bitmap_bgra.return_value = bitmap
+        self.view._d2d_surface = surface
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+
+        self.view._paint_d2d()
+        surface.create_bitmap_bgra.assert_called_once_with(
+            image.pixels, 2, 2, 8)
+        surface.draw_bitmap.assert_called_once_with(
+            bitmap, 0, 0, 1, 1, .75)
+        transform = surface.set_transform.call_args_list[-2].args
+        page_transform = surface.set_transform.call_args_list[-1].args
+        self.assertEqual(transform[:4], image.transform[:4])
+        self.assertEqual(transform[4] - page_transform[4], image.transform[4])
+        self.assertEqual(transform[5] - page_transform[5], image.transform[5])
+        self.view._plan_tiles()
+        self.assertFalse(self.view._pending)
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_repeated_glyphs_share_geometry_and_one_realized_group(self):
+        from pdfeditor.gpu_raster import VectorPage, VectorPath
+
+        commands = (("move", 0, 0), ("line", 1, 0),
+                    ("line", 1, 1), ("close",))
+        glyphs = tuple(VectorPath(
+            commands, fill_argb=0xff202020,
+            transform=(12, 0, 0, 12, x, 40)) for x in (20, 40, 60))
+        scene = VectorPage(True, glyphs, items=glyphs)
+        path = Mock(closed=False)
+        group = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = path
+        surface.create_geometry_group.return_value = group
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+
+        self.view._paint_d2d()
+        surface.create_path.assert_called_once_with(commands, even_odd=False)
+        surface.create_geometry_group.assert_called_once_with(
+            [(path, glyph.transform) for glyph in glyphs], even_odd=False)
+        surface.fill_path.assert_called_once_with(group, 0xff202020)
+        self.assertEqual(surface.set_transform.call_args_list[-2].args[:4],
+                         (1.0, 0.0, 0.0, 1.0))
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_same_page_refresh_asks_document_for_invalidated_vector_scene(self):
+        from pdfeditor.gpu_raster import VectorPage, VectorPath
+
+        first = VectorPage(True, (VectorPath(
+            (("move", 10, 10), ("line", 20, 20)),
+            stroke_argb=0xff000000),))
+        changed = VectorPage(False, reason="unsupported operation: fill-text")
+        self.view._d2d_requested = True
+        with patch.object(
+                self.doc, "gpu_vector_page",
+                side_effect=(first, changed)) as vector_page:
+            self.view.render_document(self.doc, [0], 0)
+            self.view.render_document(self.doc, [0], 0)
+        self.assertEqual(vector_page.call_count, 2)
+        self.assertIs(self.view._vector_pages[0], changed)
+        self.view._d2d_requested = False
+
     def test_render_failure_keeps_preview_and_stops_queue(self):
         self.view._plan_tiles()
         errors = []

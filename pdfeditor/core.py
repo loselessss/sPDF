@@ -61,6 +61,7 @@ class Document:
             raise
         self._source_revision = self._snapshot.revision if self._snapshot else None
         self._display_cache = {}
+        self._gpu_vector_cache = {}
         sidecar_exists = os.path.exists(os.path.realpath(path) + ".spdf-annotations.json")
         if self.read_only and (self.annotation_mode or sidecar_exists):
             try:
@@ -92,6 +93,7 @@ class Document:
         document._password = None
         document._doc = fitz.open("pdf", data)
         document._display_cache = {}
+        document._gpu_vector_cache = {}
         return document
 
     @staticmethod
@@ -111,6 +113,7 @@ class Document:
     def close(self):
         if self._doc is not None:
             self._display_cache.clear()
+            self._gpu_vector_cache.clear()
             self._doc.close()
             self._doc = None
         if getattr(self, "_snapshot", None) is not None:
@@ -181,8 +184,19 @@ class Document:
     def invalidate_render(self, index=None):
         if index is None:
             self._display_cache.clear()
+            self._gpu_vector_cache.clear()
         else:
             self._display_cache.pop(index, None)
+            self._gpu_vector_cache.pop(index, None)
+
+    def gpu_vector_page(self, index):
+        """Return a conservative Direct2D scene or an unsupported result."""
+        scene = self._gpu_vector_cache.get(index)
+        if scene is None:
+            from .gpu_raster import vector_page_from_pymupdf
+            scene = vector_page_from_pymupdf(self._doc[index])
+            self._gpu_vector_cache[index] = scene
+        return scene
 
     def page_size(self, index):
         r = self._doc[index].rect
@@ -841,6 +855,7 @@ class Document:
                 shutil.copy2(out_path, out_path + ".bak")
             if same_path:
                 self._display_cache.clear()
+                self._gpu_vector_cache.clear()
                 self._doc.close()
                 self._doc = None
             try:

@@ -19,6 +19,8 @@ SIDEBAR_MODES = ("none", "thumbnails", "bookmarks")
 DEFAULT_SIDEBAR_MODE = "thumbnails"
 PRINT_DUPLEX_MODES = ("simplex", "long", "short")
 DEFAULT_PRINT_DUPLEX_MODE = "simplex"
+RENDER_BACKENDS = ("auto", "gpu", "cpu")
+DEFAULT_RENDER_BACKEND = "auto"
 
 
 def _load():
@@ -124,6 +126,21 @@ def set_startup_workspace(mode):
         return False
     data = _load()
     data["startup_workspace"] = mode
+    _save(data)
+    return True
+
+
+def render_backend():
+    mode = str(_load().get("render_backend", DEFAULT_RENDER_BACKEND)).lower()
+    return mode if mode in RENDER_BACKENDS else DEFAULT_RENDER_BACKEND
+
+
+def set_render_backend(mode):
+    normalized = str(mode).lower()
+    if normalized not in RENDER_BACKENDS:
+        return False
+    data = _load()
+    data["render_backend"] = normalized
     _save(data)
     return True
 

@@ -1,19 +1,23 @@
-# sPDF 1.22.0 Release Notes
+# sPDF 1.23.0 Release Notes
 
-Release date: 2026-09-01
+Release date: 2026-09-02
 
-## 1.22.0 - 2026-09-01
+## 1.23.0 - 2026-09-02
 
 ### New features
 
-- The standalone editor now uses the same OpenGL image-composition and visible-region tile display as the reader.
+- Reader and editor windows now use Direct2D to display visible PDF regions on supported Windows systems.
+- Choose Auto, GPU (Direct2D), or CPU (PyMuPDF) from the display-renderer menu. Restart sPDF after changing it.
+- Document window titles show the active `[GPU]` or `[CPU]` device. The GPU choice is disabled when Direct2D hardware rendering is unavailable.
 
 ### Performance improvements
 
-- Zooming and panning in the editor reuse the existing preview immediately, then sharpen only the visible regions. Detailed image caching remains bounded to 64 MiB per tab.
-- Systems without usable OpenGL continue through the CPU display path without changing editing coordinates or saved output.
+- Page previews, detailed visible regions, search results, text selections, and editable-text outlines are composited by the GPU.
+- Common pages containing text, shapes, and placed images can now use the direct GPU path for faster redraws while zooming and panning, without changing the original text shape or placement.
+- GPU resources are released when a tab is hidden or closed, and detailed image caching remains bounded to 64 MiB per tab.
 
 ### Improvements
 
-- After a document is handed to Edit mode successfully, sPDF closes its reader tab and closes the reader process when it was the last tab. Failed or timed-out opens leave the reader unchanged.
-- Switching from an editor to a reader now checks unsaved work, hands off the document, and closes the source editor tab.
+- If the GPU display cannot start or stops working, sPDF keeps the document open and switches to its existing display path.
+- Pages using complex clipping, shading, masks, transparency groups, or stroke styles automatically keep the complete PyMuPDF display path to preserve quality.
+- Scrolling past a page edge in Edit mode no longer moves automatically to the previous or next page.

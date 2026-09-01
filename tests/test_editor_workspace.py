@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 @unittest.skipUnless(importlib.util.find_spec("PyQt5"), "PyQt5 required")
@@ -287,6 +287,17 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.assertFalse(tab.is_editor_overview())
         self.assertTrue(tab._interaction_toolbar.isVisible())
 
+    def test_wheel_at_page_edge_does_not_leave_editor_page(self):
+        tab = self.open_editor()
+        tab.view._flip_accum = tab.view.FLIP_THRESHOLD
+        with patch.object(tab, "next_page") as next_page, \
+                patch.object(tab, "prev_page") as prev_page:
+            tab.on_wheel_flip(1)
+            tab.on_wheel_flip(-1)
+        next_page.assert_not_called()
+        prev_page.assert_not_called()
+        self.assertEqual(tab.view._flip_accum, 0)
+
     def test_editor_label_follows_language_and_dirty_title(self):
         from pdfeditor.i18n import set_language
         tab = self.open_editor()
@@ -298,13 +309,26 @@ class EditorWorkspaceTests(unittest.TestCase):
                 self.assertEqual(tab.tab_title(), "pages.pdf " + suffix)
                 self.assertEqual(self.window._tabs.tabText(0), tab.tab_title())
                 self.assertNotIn(suffix, self.window.windowTitle())
-                self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF")
+                self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF [CPU]")
                 tab.mark_dirty()
                 self.assertEqual(tab.tab_title(), "*pages.pdf " + suffix)
                 self.assertNotIn(suffix, self.window.windowTitle())
-                self.assertEqual(self.window.windowTitle(), "*pages.pdf — sPDF")
+                self.assertEqual(self.window.windowTitle(), "*pages.pdf — sPDF [CPU]")
         finally:
             set_language("en")
+
+    def test_window_title_tracks_actual_render_device(self):
+        from types import SimpleNamespace
+
+        tab = self.open_editor()
+        tab.view._d2d_surface = Mock(
+            info=SimpleNamespace(driver="hardware"))
+        tab._update_title()
+        self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF [GPU]")
+        tab.view._d2d_surface.info.driver = "warp"
+        tab._update_title()
+        self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF [CPU]")
+        tab.view._d2d_surface = None
 
     def test_reorder_failure_restores_document_and_history(self):
         tab = self.open_editor()

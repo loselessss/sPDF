@@ -2,12 +2,13 @@
 
 English | [한국어](README.ko.md)
 
-sPDF is a Windows desktop PDF reader and editor for everyday document work.
-It combines fast reading, practical page editing, annotations, offline OCR, and
-multi-document tools in one application. Documents stay on your
+sPDF is a Windows desktop PDF reader and editor with a **GPU rendering pipeline
+for fast zooming, panning, and screen updates**. It combines practical page
+editing, annotations, offline OCR, and multi-document tools in one application.
+Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.22.0** · English and Korean interface · Windows
+**Current version: 1.23.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -16,7 +17,8 @@ computer unless you explicitly use an external link or optional model download.
 - Open regular and encrypted PDFs with nearby-page rendering that stays usable
   on long documents.
 - Zoom up to 800% in the reader and editor with immediate image scaling and progressive
-  sharpening of visible regions. OpenGL handles image composition when available.
+  sharpening of visible regions. On Windows, Direct2D caches and composites visible
+  tiles when available.
 - Rotate the current page view left or right using the toolbar, View menu, or
   Ctrl+[ / Ctrl+]. Reader rotation is temporary and does not change the PDF;
   rotate in the editor to save a page's orientation.
@@ -139,10 +141,12 @@ Press **F1** in the application for the complete localized guide.
 
 - Text editing replaces content within the original line or box. It is not a
   full text-reflow editor, and replacement fonts can look different.
-- Standalone reader and editor workspaces use viewport-sized OpenGL surfaces for
-  image composition, with CPU display fallback. PyMuPDF still interprets and
-  rasterizes PDFs on the CPU; this is not a GPU-only PDF engine. The embedded
-  display path is unchanged.
+- Standalone reader and editor workspaces use viewport-sized Direct2D surfaces on
+  supported Windows systems, with Qt/OpenGL and CPU display fallback. Supported
+  pages rasterize vectors and exact glyph outlines through Direct2D and compose
+  decoded images there. Complex clipping, shading, masks, transparency groups,
+  and stroke styles keep the complete PyMuPDF CPU path, so this is not a
+  GPU-only PDF engine. The embedded display path is unchanged.
 - Reader and editor previews cover only the current one or two pages. Detailed
   tiles use a 64 MiB cache per tab; this is not a limit on total application memory.
 - Margin cropping changes the visible page area; it does not erase the hidden
@@ -170,11 +174,16 @@ the same release page as the installer. See [SOURCE_CODE.md](SOURCE_CODE.md)
 for details, including build instructions. License texts are also available
 offline in **Help → Open-source Licenses**.
 
-sPDF is built with Python, PyQt5, and PyMuPDF. RapidOCR runs in a separate worker
-process so its runtime is loaded only when OCR is requested.
+sPDF is built with Python, PyQt5, PyMuPDF, and a small Windows Direct2D renderer.
+RapidOCR runs in a separate worker process so its runtime is loaded only when OCR
+is requested.
 
 Set `SPDF_DISABLE_GPU=1` before launching to troubleshoot using the CPU display
 path. Visible-region tile rendering and immediate zoom remain available.
+Standalone users can also choose **Auto**, **GPU (Direct2D)**, or **CPU
+(PyMuPDF)** in the display-renderer menu; restart sPDF after changing it. The
+document window title shows the active `[GPU]` or `[CPU]` path, and the GPU
+choice is disabled when Direct2D hardware rendering is unavailable.
 
 ```bash
 pip install PyQt5 PyMuPDF rapidocr onnxruntime
