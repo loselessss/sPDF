@@ -2,17 +2,18 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.21.0 - 2026-09-01
+## 1.22.0 - 2026-09-01
 
 ### New features
 
-- The installer now adds separate sPDF Reader and sPDF Editor shortcuts to the Start menu. Each shortcut opens its named workspace directly, regardless of the saved startup preference.
-- Reader and Editor desktop shortcuts can be selected independently during installation.
+- The standalone editor now uses the same OpenGL image-composition and visible-region tile display as the reader.
+
+### Performance improvements
+
+- Zooming and panning in the editor reuse the existing preview immediately, then sharpen only visible 512-pixel tiles. Detailed image caching remains bounded to 64 MiB per tab.
+- Systems without usable OpenGL continue through the CPU display path with the same editing coordinates and saved output.
 
 ### Improvements
 
-- Updating from an earlier version removes the old single sPDF shortcut while keeping one application, installer, and update path.
-- Fixed an issue where the reader could open but fail to connect to a new editor window in some Windows environments.
-- Editors now open directly on the detailed canvas, while Page Organization opens in a separate thumbnail-grid window. The redundant mode header and editor marker in the window title were removed; the tab marker remains.
-- The detail view now shows the current page's original size in millimetres on the bottom status bar.
-- Removed the persistent editing hint from the bottom bar. Dropped PDF and AI files now open in new tabs from any area of the main window.
+- After a document is handed to Edit mode successfully, sPDF closes its reader tab and closes the reader process when it was the last tab. Failed or timed-out opens leave the reader unchanged.
+- Switching from an editor to a reader now checks unsaved work, hands off the document, and closes the source editor tab so the same file does not keep overlapping workspace modes.

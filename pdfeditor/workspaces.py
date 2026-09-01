@@ -31,7 +31,8 @@ class WindowWorkspaceMixin:
             return None
         from .process_workspace import application_bridge
         try:
-            return application_bridge().launch(self, source, recovery=recovery)
+            return application_bridge().launch(
+                self, source, recovery=recovery, handoff_source=not recovery)
         except OSError as error:
             self.statusBar().showMessage(str(error), 8000)
             return None
@@ -39,9 +40,24 @@ class WindowWorkspaceMixin:
     def open_reader(self):
         if self.workspace_mode != "editor":
             return None
+        source = self._tabs.currentWidget()
+        if source is not None and not source.maybe_save():
+            return None
         from .process_workspace import application_bridge
         try:
-            return application_bridge().launch(self, mode="reader")
+            return application_bridge().launch(
+                self, source, mode="reader", handoff_source=True)
         except OSError as error:
             self.statusBar().showMessage(str(error), 8000)
             return None
+
+    def _complete_workspace_handoff(self, source):
+        """Close only the source document after its peer opened successfully."""
+        if source is None or self._tabs.indexOf(source) < 0:
+            return
+        self._remove_tab(source)
+        if self._tabs.count() == 0:
+            # Let the open acknowledgement return before destroying the window
+            # and possibly ending this process.
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, self.close)

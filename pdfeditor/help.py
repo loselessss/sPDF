@@ -100,6 +100,8 @@ HELP_HTML = """
 
 <h3>✏️ 텍스트 편집</h3>
 <p>읽기 창 리본 왼쪽의 큰 <b>편집 모드</b> 버튼이나 Ctrl+E로 편집 창을 엽니다.
+편집기가 문서를 정상적으로 열면 같은 파일의 리더 탭을 닫고, 마지막 탭이면 리더
+프로세스도 종료합니다. 열기 실패·시간 초과 때는 리더를 그대로 유지합니다.
 편집 창은 상세 편집 화면으로 시작하며, 현재 페이지의 기본 크기를 아래 상태표시줄에
 mm 단위로 표시합니다. <b>페이지 구성</b>이나 Ctrl+Shift+P는 페이지를 드래그해
 순서를 바꿀 수 있는 별도 바둑판 창을 엽니다. 미저장 변경과 실행 취소·다시 실행
@@ -116,8 +118,8 @@ mm 단위로 표시합니다. <b>페이지 구성</b>이나 Ctrl+Shift+P는 페�
 </table>
 <p>편집 모드에서 <b>초록 테두리</b>로 표시된 글자 토막을 클릭해 내용을
 고칩니다. <b>빈 곳을 클릭</b>하면 그 자리에 새 글자를 얹습니다.
-내용과 함께 <b>글자 크기·색상</b>을 선택할 수 있습니다. 저장하면 같은 실행
-세션의 읽기 창도 읽던 위치를 유지한 채 갱신됩니다.</p>
+내용과 함께 <b>글자 크기·색상</b>을 선택할 수 있습니다. 읽기 창으로 돌아갈 때는
+파일 메뉴의 <b>읽기 창 열기</b>를 사용하며 미저장 확인 후 편집 탭을 닫습니다.</p>
 <p><b>스캔본도 편집됩니다</b> — 먼저 OCR(Ctrl+R)을 돌리면 글자를 클릭할 수
 있게 되고, 고치면 주변 종이색을 자동으로 떠서 원래 글자를 덮은 뒤 새 글자를
 씁니다. 배경이 깨끗한 문서는 티가 잘 안 나고, 얼룩·무늬가 있는 스캔은 덮은
@@ -243,6 +245,9 @@ reordering, and merging participate in undo/redo.</p>
 <p>Use the large <b>Edit mode</b> button at the left of the reader ribbon or
 Ctrl+E to open a separate editor. It starts on the detailed editing canvas and
 shows the current page's original size in millimetres on the bottom status bar.
+After the editor confirms that the document opened, sPDF closes the matching
+reader tab and closes the reader process when it was the last tab. A failed or
+timed-out open leaves the reader unchanged.
 <b>Page Organization</b> or Ctrl+Shift+P opens a separate thumbnail grid where
 pages can be reordered. Unsaved changes and undo/redo history remain shared.</p>
 <p>Only editor tabs display <b>[Edit-only]</b>. Standalone editors
@@ -251,8 +256,9 @@ Use these view modes in the reader.</p>
 <p>
 Reader toolbar/View menu rotation and Ctrl+[ / Ctrl+] rotate only the current
 page view without modifying the PDF. Use the editor to save its orientation.
-Text dialogs offer content, font-size and color controls. Saving refreshes
-readers in the same running sPDF session without moving their view.</p>
+Text dialogs offer content, font-size and color controls. Use <b>Open reader</b>
+from the File menu to return after checking unsaved work; the source editor tab
+then closes.</p>
 
 <p style="color:gray;">See Help → Open-source Licenses for third-party notices.</p>
 <p>Recovery copies refresh every 30 seconds while edits are pending. Protected

@@ -7,7 +7,7 @@ It combines fast reading, practical page editing, annotations, offline OCR, and
 multi-document tools in one application. Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.21.0** · English and Korean interface · Windows
+**Current version: 1.22.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -15,7 +15,7 @@ computer unless you explicitly use an external link or optional model download.
 
 - Open regular and encrypted PDFs with nearby-page rendering that stays usable
   on long documents.
-- Zoom up to 800% in the reader with immediate image scaling and progressive
+- Zoom up to 800% in the reader and editor with immediate image scaling and progressive
   sharpening of visible regions. OpenGL handles image composition when available.
 - Rotate the current page view left or right using the toolbar, View menu, or
   Ctrl+[ / Ctrl+]. Reader rotation is temporary and does not change the PDF;
@@ -34,21 +34,22 @@ computer unless you explicitly use an external link or optional model download.
 
 - Standalone sPDF opens in a read-only reader. Use the large blue **Edit mode**
   button at the left of the ribbon or Ctrl+E to open an editor in a **separate OS process** with the
-  current page open on the detailed editing canvas. Saving refreshes matching reader
-  windows connected to that sPDF session without moving their view.
+  current page open on the detailed editing canvas. Once the editor confirms that
+  the document opened, sPDF closes that reader tab and closes the reader process
+  when it was the last tab. A failed or timed-out open leaves the reader unchanged.
 - Choose **Help → Startup workspace → Reader first** (default) or **Editor first**
-  for the next launch. The editor's **File → Open reader** opens an independent reader.
-- Closing, crashing, or hanging an editor leaves the reader on its last good copy.
-  Open Edit mode again to relaunch a closed editor. After 15 seconds without a
-  response, opening Edit mode can start a new process; the old one is never killed automatically.
+  for the next launch. The editor's **File → Open reader** checks unsaved work,
+  hands the document to a reader, and then closes the source editor tab.
+- The two processes overlap only until the destination confirms a successful open.
+  If an editor later exits or crashes, reopen the file in a reader; independent
+  recovery checkpoints remain available for unsaved editing work.
 - Each workspace reads a private disk copy. Saves complete and validate a temporary
   PDF before backing up and replacing the destination. Only a completed-save
   notification refreshes readers. Failed refreshes, timeouts, or an editor stopping
   just after replacement but before notification leave the last good reader copy open.
 - If another editor saved the source first, Save As preserves both versions instead
   of overwriting the newer file. Another application's file lock may prevent saving,
-  but pending edits and reader copies stay intact. Closing the reader does not close
-  the editor or its independent recovery session.
+  but pending edits and independent recovery checkpoints stay intact.
 - Each workspace needs temporary disk space roughly equal to the input size. A
   forced exit can leave temporary copies for OS temp cleanup; these are separate
   from recovery checkpoints. The small `.spdf-save.lock` file may remain normally;
@@ -138,11 +139,12 @@ Press **F1** in the application for the complete localized guide.
 
 - Text editing replaces content within the original line or box. It is not a
   full text-reflow editor, and replacement fonts can look different.
-- The reader uses a viewport-sized OpenGL surface for image composition, with
-  CPU display fallback. PyMuPDF still interprets and rasterizes PDFs on the CPU;
-  this is not a GPU-only PDF engine. Editor and embedded display paths are unchanged.
-- Reader previews cover only the current one or two pages. Detailed tiles use
-  a 64 MiB cache per reader tab; this is not a limit on total application memory.
+- Standalone reader and editor workspaces use viewport-sized OpenGL surfaces for
+  image composition, with CPU display fallback. PyMuPDF still interprets and
+  rasterizes PDFs on the CPU; this is not a GPU-only PDF engine. The embedded
+  display path is unchanged.
+- Reader and editor previews cover only the current one or two pages. Detailed
+  tiles use a 64 MiB cache per tab; this is not a limit on total application memory.
 - Margin cropping changes the visible page area; it does not erase the hidden
   content. Crop and bookmark changes support undo/redo.
 - TXT bookmark import accepts `1 | Introduction`, `Introduction | 1`, or

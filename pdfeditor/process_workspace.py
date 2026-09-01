@@ -155,6 +155,7 @@ class WorkspaceBridge(QObject):
         self.channels = []
         self.children = []
         self.pending = {}
+        self.handoffs = {}
         self.seen = []
         self.refreshing = {}
         self.copying = set()
@@ -191,7 +192,8 @@ class WorkspaceBridge(QObject):
                 channel.send("open", **child.request)
                 break
 
-    def launch(self, shell, source=None, mode="editor", recovery=False):
+    def launch(self, shell, source=None, mode="editor", recovery=False,
+               handoff_source=False):
         if source is None:
             source = shell._tabs.currentWidget()
         path = os.path.abspath(source.doc.path) if source is not None and source.doc else None
@@ -203,6 +205,8 @@ class WorkspaceBridge(QObject):
                 if child.channel is not None and child.status in ("opened", "open_failed", "open_timeout"):
                     child.request = request
                     self.pending[request["request_id"]] = time.monotonic()
+                    if handoff_source and source is not None and path:
+                        self.handoffs[request["request_id"]] = (shell, source)
                     child.channel.send("open", **request)
                 return child
         args = process_command(mode, self.endpoint, self.token, request["request_id"])
@@ -216,6 +220,8 @@ class WorkspaceBridge(QObject):
         child = EditorProcess(process, path, mode, request, last_seen=time.monotonic())
         self.children.append(child)
         self.pending[request["request_id"]] = time.monotonic()
+        if handoff_source and source is not None and path:
+            self.handoffs[request["request_id"]] = (shell, source)
         self.report(localize("Opening a separate workspace process…", "별도 작업 프로세스를 여는 중…"))
         return child
 
@@ -228,10 +234,17 @@ class WorkspaceBridge(QObject):
             if request_id not in self.pending:
                 return  # Expired or superseded completion.
             del self.pending[request_id]
+            handoff = self.handoffs.pop(request_id, None)
+            opened = bool(message.get("ok"))
             if channel.peer:
-                channel.peer.status = "opened" if message.get("ok") else "open_failed"
-            self.report(localize("Workspace opened.", "작업 창을 열었습니다.") if message.get("ok") else
+                channel.peer.status = "opened" if opened else "open_failed"
+            self.report(localize("Workspace opened.", "작업 창을 열었습니다.") if opened else
                         localize("Document could not be opened in the workspace.", "작업 창에서 문서를 열지 못했습니다."))
+            if opened and handoff is not None:
+                shell, source = handoff
+                QTimer.singleShot(
+                    0, lambda owner=shell, tab=source:
+                    owner._complete_workspace_handoff(tab))
         elif kind == "saved":
             event = message.get("event")
             path, revision = message.get("path"), message.get("revision")
@@ -384,8 +397,8 @@ class WorkspaceBridge(QObject):
                 child.status = "exited"
             elif now - child.last_seen > TIMEOUT and child.status not in ("unresponsive", "disconnected"):
                 child.status = "unresponsive"
-                self.report(localize("Workspace is not responding. Reading remains available; open the editor again to start a new process.",
-                                     "작업 창이 응답하지 않습니다. 읽기는 계속 가능하며 편집 모드를 다시 누르면 새 프로세스로 엽니다."))
+                self.report(localize("The other workspace is not responding. The current window remains available; retry the mode switch to start a new process.",
+                                     "다른 작업 창이 응답하지 않습니다. 현재 창은 계속 사용할 수 있으며 모드 전환을 다시 시도하면 새 프로세스로 엽니다."))
         # Retain only a small diagnostic history; dropping old Popen instances
         # also releases their Windows process handles.
         ended = [child for child in self.children if child.status == "exited"]
@@ -393,12 +406,13 @@ class WorkspaceBridge(QObject):
         for request, started in list(self.pending.items()):
             if now - started > TIMEOUT:
                 del self.pending[request]
+                self.handoffs.pop(request, None)
                 for child in self.children:
                     if (child.request.get("request_id") == request and child.status not in
                             ("exited", "disconnected", "unresponsive")):
                         child.status = "open_timeout"
-                        self.report(localize("Opening the document timed out. The reader is unchanged; you can retry.",
-                                             "문서 열기 시간이 초과되었습니다. 리더는 유지되며 다시 시도할 수 있습니다."))
+                        self.report(localize("Opening the document timed out. The current window is unchanged; you can retry.",
+                                             "문서 열기 시간이 초과되었습니다. 현재 창은 유지되며 다시 시도할 수 있습니다."))
         for tab, (token, doc, started) in list(self.refreshing.items()):
             if now - started > TIMEOUT:
                 del self.refreshing[tab]

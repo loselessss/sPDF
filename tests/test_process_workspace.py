@@ -142,7 +142,7 @@ class ProcessIsolationTests(unittest.TestCase):
         return self.report(child)
 
     def launch(self):
-        child = self.reader.open_editor(self.tab)
+        child = self.bridge.launch(self.reader, self.tab)
         self.assertNotEqual(child.pid, os.getpid())
         self.wait(lambda: child.status == "opened" and self.report(child).get("document"))
         report = self.report(child)
@@ -150,8 +150,16 @@ class ProcessIsolationTests(unittest.TestCase):
         self.assertFalse(report["overview"])
         self.assertFalse(report["updates"])
         print("Process isolation: reader PID=%s, editor PID=%s" % (os.getpid(), child.pid), flush=True)
-        self.assertIs(self.reader.open_editor(self.tab), child)
+        self.assertIs(self.bridge.launch(self.reader, self.tab), child)
         return child
+
+    def test_mode_handoff_closes_source_reader_after_editor_is_ready(self):
+        child = self.reader.open_editor(self.tab)
+        self.wait(lambda: child.status == "opened" and self.report(child).get("document"))
+        self.wait(lambda: self.reader not in app._app_windows)
+        self.assertEqual(self.reader._tabs.count(), 0)
+        self.assertFalse(self.reader.isVisible())
+        self.assertEqual(self.report(child)["mode"], "editor")
 
     def direct_process(self, mode=None, parent=None):
         args = [process_python_executable(), str(Path(__file__).with_name("workspace_process_fixture.py")),
@@ -247,8 +255,9 @@ class ProcessIsolationTests(unittest.TestCase):
         child = self.reader.open_editor(self.tab)
         self.wait(lambda: child.status == "open_failed")
         self.assert_reader_usable()
+        self.assertIn(self.reader, app._app_windows)
         self.path.write_bytes(self.original)
-        self.assertIs(self.reader.open_editor(self.tab), child)
+        self.assertIs(self.bridge.launch(self.reader, self.tab), child)
         self.wait(lambda: child.status == "opened" and self.report(child).get("document"))
         self.assert_reader_usable()
 

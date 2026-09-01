@@ -13,6 +13,7 @@ test-*.log
 /build/
 /dist/
 /Output/
+/native/bin/
 
 # OCR 모델 (설치본 빌드 시 rapidocr 패키지에서 가져옴 — 리포에 두지 않음)
 *.onnx

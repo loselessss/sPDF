@@ -281,7 +281,8 @@ class EmbeddedModeTests(unittest.TestCase):
             with patch("pdfeditor.process_workspace.application_bridge") as bridge:
                 child = reader.open_editor(tab)
                 self.assertIs(child, bridge.return_value.launch.return_value)
-                bridge.return_value.launch.assert_called_once_with(reader, tab, recovery=False)
+                bridge.return_value.launch.assert_called_once_with(
+                    reader, tab, recovery=False, handoff_source=True)
             self.assertIsInstance(tab.view, ReaderPageView)
             self.assertFalse(reader.updates_enabled)
             self.assertTrue(tab._open_editor_act.isVisible())
@@ -289,6 +290,41 @@ class EmbeddedModeTests(unittest.TestCase):
             child = reader.new_window()
             self.assertEqual(child.workspace_mode, "reader")
             self.assertFalse(child.updates_enabled)
+
+    def test_editor_hands_saved_document_to_reader_and_cancel_keeps_tab(self):
+        with self.document_windows() as (module, source):
+            editor = module.new_window(str(source), workspace_mode="editor")
+            self.settle()
+            tab = editor._tabs.currentWidget()
+            with patch("pdfeditor.process_workspace.application_bridge") as bridge, \
+                    patch.object(tab, "maybe_save", return_value=True) as maybe_save:
+                child = editor.open_reader()
+            self.assertIs(child, bridge.return_value.launch.return_value)
+            maybe_save.assert_called_once_with()
+            bridge.return_value.launch.assert_called_once_with(
+                editor, tab, mode="reader", handoff_source=True)
+
+            with patch("pdfeditor.process_workspace.application_bridge") as bridge, \
+                    patch.object(tab, "maybe_save", return_value=False):
+                self.assertIsNone(editor.open_reader())
+            bridge.assert_not_called()
+            self.assertGreaterEqual(editor._tabs.indexOf(tab), 0)
+
+    def test_successful_handoff_closes_only_the_source_tab(self):
+        with self.document_windows() as (module, source):
+            second_path = source.with_name("second.pdf")
+            second_path.write_bytes(source.read_bytes())
+            reader = module.new_window(str(source), workspace_mode="reader")
+            self.settle()
+            first = reader._find_open_tab(str(source))
+            second = reader.open_in_tab(str(second_path))
+            self.settle()
+            reader._complete_workspace_handoff(first)
+            self.settle()
+            self.assertEqual(reader._tabs.count(), 1)
+            self.assertIs(reader._tabs.widget(0), second)
+            self.assertIn(reader, module._app_windows)
+            self.assertTrue(reader.isVisible())
 
     def test_embedded_reader_has_no_editor_escape_hatch(self):
         from pdfeditor.widgets import PageView

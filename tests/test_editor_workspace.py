@@ -78,6 +78,7 @@ class EditorWorkspaceTests(unittest.TestCase):
                 break
 
     def test_editor_starts_in_detail_without_inline_mode_header(self):
+        from pdfeditor.reader_view import TiledPageView
         tab = self.open_editor()
         self.assertFalse(tab.is_editor_overview())
         self.assertTrue(tab._edit_mode)
@@ -87,6 +88,23 @@ class EditorWorkspaceTests(unittest.TestCase):
         self.assertTrue(tab._page_size_label.isVisible())
         self.assertEqual(tab._page_size_label.text(), "98.8 × 141.1 mm")
         self.assertEqual(tab.statusBar().currentMessage(), "")
+        self.assertIsInstance(tab.view, TiledPageView)
+        self.assertEqual(tab.view.composition_backend, "cpu")
+        self.assertTrue(tab.view.canvas._edit_boxes)
+
+    def test_editor_tiled_view_keeps_zoom_and_edit_interaction_bounded(self):
+        from PyQt5.QtCore import QPointF
+        tab = self.open_editor()
+        with patch.object(tab, "edit_span_at") as edit:
+            tab.view.canvas.clicked.emit(QPointF(40, 60))
+        edit.assert_called_once()
+        tab.set_zoom(8.0)
+        tab.view._plan_tiles()
+        self.assertEqual(tab._cache, {})
+        self.assertLessEqual(len(tab.view._wanted), 48)
+        self.assertTrue(tab.view._pending or tab.view._wanted)
+        preview = tab.view._previews[tab.page_index]
+        self.assertLessEqual(preview.width() * preview.height(), 1_100_000)
 
     def test_document_files_drop_anywhere_in_main_window(self):
         from PyQt5.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl

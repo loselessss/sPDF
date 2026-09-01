@@ -1,4 +1,4 @@
-"""Viewport-sized reader compositor with bounded, on-demand CPU PDF tiles.
+"""Viewport-sized workspace compositor with bounded, on-demand CPU PDF tiles.
 
 OpenGL only composites already-rasterized images. MuPDF remains on the GUI
 thread: it is not thread-safe. One small tile per timer tick yields between
@@ -440,3 +440,9 @@ class ReaderPageView(QGraphicsView):
         super().resizeEvent(event)
         if hasattr(self, "canvas"):
             self._viewport_moved()
+
+
+# ReaderPageView remains as the compatibility name used by embedded consumers
+# and existing tests. Standalone reader and editor workspaces share the class,
+# but each process owns its own document, timers, cache and OpenGL context.
+TiledPageView = ReaderPageView

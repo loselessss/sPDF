@@ -377,9 +377,9 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         self._sidebar_stack = QStackedWidget()
         self._sidebar_stack.addWidget(self.thumbs)
         self._sidebar_stack.addWidget(self.bookmarks)
-        if self._shell.workspace_mode == "reader":
-            from .reader_view import ReaderPageView
-            self.view = ReaderPageView()
+        if self._shell.workspace_mode in ("reader", "editor"):
+            from .reader_view import TiledPageView
+            self.view = TiledPageView()
             self.view.render_failed.connect(lambda error: self.statusBar().showMessage(
                 localize("Detailed rendering failed: ", "선명한 화면 표시 실패: ") + error, 6000))
         else:
