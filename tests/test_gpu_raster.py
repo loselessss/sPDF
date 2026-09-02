@@ -68,8 +68,10 @@ def linear_gradient_pdf_bytes():
     return bytes(data)
 
 
-def isolated_group_pdf_bytes():
+def isolated_group_pdf_bytes(blend_mode="Normal", background=False):
     page_content = b"q /GS1 gs /Fm1 Do Q\n"
+    if background:
+        page_content = b"0.2 0.4 0.6 rg 0 0 300 240 re f\n" + page_content
     form_content = (
         b"1 0 0 rg 20 20 180 140 re f "
         b"0 0 1 rg 100 80 180 140 re f\n")
@@ -85,7 +87,8 @@ def isolated_group_pdf_bytes():
         b"/Resources << >> /Group << /S /Transparency /I true "
         b"/CS /DeviceRGB >> /Length " + str(len(form_content)).encode() +
         b" >>\nstream\n" + form_content + b"endstream",
-        b"<< /Type /ExtGState /ca 0.5 /CA 0.5 >>",
+        b"<< /Type /ExtGState /ca 0.5 /CA 0.5 /BM /" +
+        blend_mode.encode("ascii") + b" >>",
     ]
     data = bytearray(b"%PDF-1.4\n")
     offsets = [0]
@@ -142,6 +145,36 @@ def soft_mask_pdf_bytes():
 
 
 class GpuRasterSceneTests(unittest.TestCase):
+    def test_supported_separable_blends_remain_gpu_scenes(self):
+        from pdfeditor.gpu_raster import GroupPush, vector_page_from_pymupdf
+        modes = ("Multiply", "Screen", "Overlay", "Darken", "Lighten",
+                 "ColorDodge", "ColorBurn", "HardLight", "SoftLight",
+                 "Difference", "Exclusion")
+        for mode, name in enumerate(modes, 1):
+            with self.subTest(mode=name), fitz.open(
+                    stream=isolated_group_pdf_bytes(name), filetype="pdf") as pdf:
+                scene = vector_page_from_pymupdf(pdf[0])
+                self.assertTrue(scene.supported, scene.reason)
+                self.assertIn("blend-mode", scene.features)
+                self.assertTrue(any(isinstance(item, GroupPush) and
+                    item.blend_mode == mode for item in scene.drawables))
+
+    def test_nonseparable_blend_keeps_complete_fallback(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        with fitz.open(stream=isolated_group_pdf_bytes("Hue"), filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertFalse(scene.supported)
+        self.assertIn("nonseparable", scene.reason)
+
+    def test_blended_scene_rejects_groups_inside_active_clips(self):
+        from pdfeditor.gpu_raster import (ClipPush, ClipPop, GroupPush,
+                                         GroupPop, _validate_composite_context)
+        clip = ClipPush((("move", 0, 0), ("line", 1, 1)))
+        self.assertIn("clip/mask", _validate_composite_context(
+            (clip, GroupPush(.5, 9), GroupPop(), ClipPop())))
+        self.assertEqual("", _validate_composite_context(
+            (GroupPush(.5, 9), clip, ClipPop(), GroupPop())))
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.path = Path(self.directory.name) / "gpu-scene.pdf"

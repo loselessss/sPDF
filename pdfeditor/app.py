@@ -87,6 +87,10 @@ def _render_diagnostic_summary(info):
         "cpu": "CPU",
     }
     reason_labels = (
+        (("blend group inside clip/mask",),
+         localize("blend inside clip/mask", "클리핑·마스크 안의 혼합")),
+        (("nonseparable blend",),
+         localize("color-component blend", "색상 성분 혼합")),
         (("begin-mask", "end-mask"), localize("soft mask", "소프트 마스크")),
         (("clip-image-mask",), localize("clip mask", "클리핑 마스크")),
         (("non-uniform stroked text transform",),
@@ -117,6 +121,7 @@ def _render_diagnostic_summary(info):
         "soft-mask": localize("soft mask", "소프트 마스크"),
         "clip-mask": localize("clip mask", "클리핑 마스크"),
         "stroke-style": localize("stroke style", "선 스타일"),
+        "blend-mode": localize("blend mode", "혼합 모드"),
         "stroked-text": localize("stroked text", "윤곽선 글자"),
         "stroked-text-clip": localize(
             "stroked text clip", "윤곽선 글자 클리핑"),

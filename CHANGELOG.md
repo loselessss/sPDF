@@ -2,13 +2,13 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.27.0 - 2026-09-02
+## 1.28.0 - 2026-09-02
 
 ### Performance improvements
 
-- Stroked PDF text can now use exact glyph outlines on the Direct2D path.
-- Stroke-and-clip text and stroked vector clipping are converted to GPU clipping geometry instead of forcing a whole-page CPU fallback.
+- Isolated PDF groups can now use Soft Light, Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Difference, and Exclusion through Direct2D GPU effects.
+- Supported blended scenes keep GPU drawing instead of switching the whole page to CPU rendering, while retaining group opacity and the existing backdrop.
 
 ### Improvements
 
-- Non-uniformly transformed stroked text, special blend modes, non-isolated translucent groups, and uncommon unsupported effects continue to use the complete PyMuPDF path to preserve display quality.
+- Rendering diagnostics distinguish unsupported blends inside clips/masks and color-component blend modes. Non-isolated/knockout groups and unsupported combinations retain the CPU fallback.

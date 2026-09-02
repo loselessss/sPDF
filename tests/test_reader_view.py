@@ -393,6 +393,26 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
 
+    def test_blended_scene_uses_explicit_composite_groups(self):
+        from pdfeditor.gpu_raster import GroupPush, GroupPop, VectorPage
+        scene = VectorPage(True, items=(
+            GroupPush(1), GroupPush(.5, 9), GroupPop(), GroupPop()))
+        surface = Mock()
+        self.view._d2d_surface = surface
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        self.view._paint_d2d()
+        self.assertEqual([call.args for call in
+            surface.begin_composite_group.call_args_list], [(0, 1), (9, .5)])
+        self.assertEqual(surface.end_composite_group.call_count, 2)
+        surface.push_opacity_layer.assert_not_called()
+        surface.create_bitmap_bgra.assert_not_called()
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
     def test_supported_image_scene_uploads_bitmap_and_preserves_transform(self):
         from pdfeditor.gpu_raster import VectorImage, VectorPage
 

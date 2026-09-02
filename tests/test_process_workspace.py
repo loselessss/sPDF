@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import fitz
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QCoreApplication, QEvent, QTimer
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication
 
@@ -25,6 +26,14 @@ class ProcessIsolationTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         cls.application = QApplication.instance() or QApplication([])
         cls.application.setQuitOnLastWindowClosed(False)
+
+    @classmethod
+    def tearDownClass(cls):
+        # Release test-owned QObject cycles while QApplication is still alive,
+        # not during Python's unordered interpreter shutdown.
+        gc.collect()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        cls.application.processEvents()
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

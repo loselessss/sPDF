@@ -300,6 +300,8 @@ class ReaderPageView(QGraphicsView):
         resources = {resource for resource in native_items
                      if resource is not None} | auxiliary
         draws = []
+        composite_groups = any(
+            isinstance(item, GroupPush) and item.blend_mode for item in items)
         index = 0
         while index < len(items):
             item = items[index]
@@ -318,11 +320,14 @@ class ReaderPageView(QGraphicsView):
                 index += 1
                 continue
             if isinstance(item, GroupPush):
-                draws.append(("group_push", item.opacity))
+                if composite_groups:
+                    draws.append(("composite_push", item.blend_mode, item.opacity))
+                else:
+                    draws.append(("group_push", item.opacity))
                 index += 1
                 continue
             if isinstance(item, GroupPop):
-                draws.append(("group_pop", None))
+                draws.append(("composite_pop" if composite_groups else "group_pop", None))
                 index += 1
                 continue
             if isinstance(item, MaskBegin):
@@ -399,6 +404,12 @@ class ReaderPageView(QGraphicsView):
                 continue
             if kind == "group_pop":
                 self._d2d_surface.pop_layer()
+                continue
+            if kind == "composite_push":
+                self._d2d_surface.begin_composite_group(resource, values[0])
+                continue
+            if kind == "composite_pop":
+                self._d2d_surface.end_composite_group()
                 continue
             if kind == "mask_begin":
                 area, luminosity, background_argb = resource, *values

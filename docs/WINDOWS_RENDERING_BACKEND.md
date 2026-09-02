@@ -4,6 +4,17 @@
 
 상태: Direct2D 타일 합성 및 제한형 PDF 벡터·글자 GPU 래스터화 적용
 
+### 현재 단계: 1.28.0 / ABI v10
+
+- 1.26~1.27의 소프트/이미지 마스크, 사용자 선 스타일, 윤곽선 글자와 stroked clip geometry에 이어 격리 그룹의 **11개 separable 혼합 모드**를 실제 표시 경로에 연결했다. Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion이 대상이다.
+- 혼합 장면은 일반 그룹까지 명시적인 GPU 중간 bitmap에 그린다. 그룹을 닫을 때 소스 불투명도를 적용하고 배경 snapshot과 Direct2D Blend effect로 합성한 결과를 이전 target에 복사한다. 배경을 두 번 source-over하지 않으며, 페이지 좌표·DPI 변환은 그대로 유지한다. [Microsoft Blend effect의 입력·알파 합성 정의](https://learn.microsoft.com/en-us/windows/win32/direct2d/blend)를 따른다.
+- 임시 bitmap은 PDF 전체 확대 크기가 아닌 viewport 크기이며, 소스와 배경 각 1개를 중첩 깊이별로 예약하여 표면별 256 MiB 상한을 적용한다. 그룹 종료·실패·표면 해제 시 회수한다. 현재는 프레임별 임시 버퍼이며 풀 재사용·부분 갱신은 후속 최적화다.
+- 장면에 혼합 모드가 있을 때 모든 그룹은 격리되어야 하고, 그룹 진입 시 활성 clip/mask가 없어야 한다. 그룹에 들어간 뒤 자체 clip을 열고 닫는 것은 지원한다. 앞선 clip/mask를 가로지르는 그룹은 사전 검증에서 페이지 전체 CPU 경로로 보낸다. 이 제한을 제거할 때는 부모 배경·clip·마스크가 중복 적용되지 않도록 별도 검증한다.
+- Hue/Saturation/Color/Luminosity, knockout·비격리 그룹, 타일 패턴, 마스크 transfer function과 기타 미지원 명령은 아직 남아 있다. **요소/그룹 단위 CPU 대체 구조까지 완료한 것은 아니다.** shading 생성과 이미지 디코딩도 현재 CPU 작업이다.
+- 실제 Direct2D 출력 픽셀을 읽는 명시적 진단 API를 추가했다. 11개 모드의 반투명 배경·소스·그룹 opacity 결과를 수식과 비교하고, 실제 PDF의 GPU 장면을 CPU 렌더의 내부 픽셀과 비교한다. 픽셀 readback은 테스트용 호출에만 사용하며 일반 repaint 경로에는 넣지 않는다. 임의 포스터·색 관리·모든 중첩 조합의 품질이나 속도 우위를 이 테스트만으로 보장하지 않는다.
+
+### 1.25.0 구현 이력
+
 구현 현황: sPDF 1.25.0에서 ABI v6 DLL을 독립 실행 리더·편집기의 실제 Qt HWND에 연결한다. Intel Iris Xe의 하드웨어 D3D feature level 11.1에서 D3D11/DXGI 장치, Direct2D device context, DirectWrite factory와 flip-model swap chain을 검증했다. PyMuPDF의 512px BGRA 타일, 페이지 회전 행렬, 검색·선택·편집 테두리를 Direct2D로 합성한다. 지원되는 페이지는 MuPDF가 CPU에서 해석한 선·사각형·베지어와 원래 글꼴 glyph 윤곽을 immutable Direct2D geometry 및 realization으로 만들어 상세 CPU 타일 없이 GPU 래스터화한다. CPU에서 디코딩한 배치 이미지와 색상 스텐실 마스크는 원래 PDF 행렬로 Direct2D가 확대·합성하며, 중첩된 벡터·텍스트 클리핑은 표시 순서대로 Direct2D layer에 적용한다. 모든 shading 유형은 제한된 고품질 이미지로 변환해 합성하고 일반 격리 투명도 그룹은 opacity layer로 처리한다. 숨김·닫기 때 네이티브 캐시를 해제하며 실패하면 같은 문서와 좌표를 유지한 채 Qt 표시로 전환한다.
 
 ## 결정
@@ -16,7 +27,7 @@ sPDF 독립 실행 리더와 편집기의 Windows 우선 화면 백엔드는 다
 - 리더와 편집기는 같은 백엔드 코드를 사용하되 장치·swap chain·캐시·문서 상태를 각 OS 프로세스가 독립 소유한다.
 - 장치 생성 실패, 원격 데스크톱, 드라이버 reset에는 CPU 표시 경로로 전환한다. 편집 좌표와 저장 결과는 백엔드와 무관해야 한다.
 
-Direct2D는 PDF 파일을 해석하는 엔진이 아니다. PyMuPDF가 CPU에서 PDF 명령을 해석하고 원래 glyph 윤곽과 이미지를 제공하며, Direct2D는 지원되는 장면을 래스터화·합성한다. 기존 PDF 글자를 DirectWrite로 다시 조판하지 않는다. 벡터·텍스트 클리핑, 색상 스텐실 이미지 마스크, 제한된 shading 이미지와 일반 격리 투명도 그룹을 지원한다. 소프트/클리핑 마스크, 특수 혼합 모드·비격리 반투명 그룹·복잡한 선 모양이 있거나 이미지 장면 데이터가 64 MiB를 넘으면 페이지 전체를 기존 CPU 타일 경로로 표시한다.
+Direct2D는 PDF 파일을 해석하는 엔진이 아니다. PyMuPDF가 CPU에서 PDF 명령을 해석하고 원래 glyph 윤곽과 이미지를 제공하며, Direct2D는 지원되는 장면을 래스터화·합성한다. 기존 PDF 글자를 DirectWrite로 다시 조판하지 않는다. 지원 범위와 혼합 조합의 제한은 위 현재 단계에 따른다. 미지원 명령이 있거나 이미지 장면 데이터가 64 MiB를 넘으면 페이지 전체를 기존 CPU 타일 경로로 표시한다.
 
 Microsoft 문서의 [Direct2D device context 구성](https://learn.microsoft.com/en-us/windows/win32/direct2d/devices-and-device-contexts), [Direct2D·Direct3D 상호 운용](https://learn.microsoft.com/en-us/windows/win32/direct2d/direct2d-and-direct3d-interoperation-overview), [DXGI 개요](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/d3d10-graphics-programming-guide-dxgi)를 기준으로 구현한다.
 

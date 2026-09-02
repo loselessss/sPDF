@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.27.0** · English and Korean interface · Windows
+**Current version: 1.28.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -146,10 +146,15 @@ Press **F1** in the application for the complete localized guide.
   pages rasterize vectors and exact glyph outlines through Direct2D and compose
   decoded images there. Nested vector and text clipping, colored stencil images,
   ordinary isolated transparency groups, soft and image clip masks, and complex
-  stroke styles, stroked text, and stroked clipping paths are supported. Shadings are rendered into a bounded high-quality
-  image and then composed by Direct2D. Special blend modes, non-isolated
-  translucent groups, non-uniformly transformed stroked text, and a few uncommon effects keep the
-  complete PyMuPDF CPU path, so this is not yet a GPU-only PDF engine.
+  stroke styles, stroked text, and stroked clipping paths are supported.
+  Isolated groups can use 11 blend modes including Soft Light, Multiply, Screen,
+  and Overlay through GPU effects. Groups entered inside an existing clip/mask,
+  non-isolated or knockout groups, and Hue/Saturation/Color/Luminosity blends
+  still use the CPU fallback in blended scenes. Shadings are rendered into a
+  bounded high-quality image and then composed by Direct2D. Non-uniformly
+  transformed stroked text and other unsupported effects retain the complete
+  PyMuPDF path, so this is not yet a GPU-only PDF engine. Blend scratch buffers
+  are viewport-sized and bounded to a 256 MiB reservation per surface.
   The embedded display path is unchanged.
 - Reader and editor previews cover only the current one or two pages. Detailed
   tiles use a 64 MiB cache per tab; this is not a limit on total application memory.

@@ -1,9 +1,10 @@
-# sPDF 1.27.0 Release Notes
+# sPDF 1.28.0 Release Notes
 
 Release date: 2026-09-02
 
-## 1.27.0 - 2026-09-02
+## 1.28.0 - 2026-09-02
 
 ### Performance improvements
 
-- PDFs containing stroked text, stroke-and-clip text, or stroked vector clipping can stay on the Direct2D path more often instead of switching the whole page to CPU rendering.
+- Isolated PDF groups using Soft Light, Multiply, Screen, Overlay, and seven other blend modes can now stay on the GPU path with their original backdrop and group opacity.
+- Unsupported nested clip/mask combinations, non-isolated/knockout groups, and color-component blends continue to use the CPU fallback to preserve display quality.

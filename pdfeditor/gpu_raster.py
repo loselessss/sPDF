@@ -61,6 +61,8 @@ class ClipPop:
 @dataclass(frozen=True)
 class GroupPush:
     opacity: float
+    blend_mode: int = 0
+    isolated: bool = True
 
 
 @dataclass(frozen=True)
@@ -599,8 +601,13 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         try:
             self._features.add("transparency-group")
             opacity = float(alpha)
-            if int(blendmode) != int(_mupdf.FZ_BLEND_NORMAL) or knockout:
-                raise ValueError("unsupported transparency group")
+            mode = int(blendmode)
+            if knockout:
+                raise ValueError("unsupported knockout transparency group")
+            if not 0 <= mode <= 11:
+                raise ValueError("unsupported nonseparable blend mode: %s" % mode)
+            if mode:
+                self._features.add("blend-mode")
             if colorspace:
                 source = _mupdf.FzColorspace(colorspace)
                 source.thisown = False
@@ -610,11 +617,11 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     (channels == 3 or (self._mask_depth and channels == 1)))
                 if not valid_device_space:
                     raise ValueError("unsupported transparency group colorspace")
-            if not isolated and opacity < 1.0 - 1e-6:
+            if not isolated and (mode or opacity < 1.0 - 1e-6):
                 raise ValueError("unsupported non-isolated transparency group")
             if not math.isfinite(opacity) or opacity < 0.0 or opacity > 1.0:
                 raise ValueError("invalid transparency group opacity")
-            self.items.append(GroupPush(opacity))
+            self.items.append(GroupPush(opacity, mode, bool(isolated)))
             self._group_depth += 1
         except Exception as error:
             self.failure = str(error)
@@ -634,6 +641,28 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self._fail("end-tile")
 
 
+def _validate_composite_context(items):
+    """Target snapshots cannot straddle an implicit clip or mask layer yet."""
+    clip_depth = 0
+    mask_depth = 0
+    for item in items:
+        if isinstance(item, (ClipPush, ClipStrokePush)):
+            clip_depth += 1
+        elif isinstance(item, ClipPop):
+            clip_depth -= 1
+        elif isinstance(item, MaskBegin):
+            mask_depth += 1
+        elif isinstance(item, MaskEnd):
+            mask_depth -= 1
+            clip_depth += 1
+        elif isinstance(item, GroupPush):
+            if not item.isolated:
+                return "unsupported non-isolated group in blended scene"
+            if clip_depth or mask_depth:
+                return "unsupported blend group inside clip/mask"
+    return ""
+
+
 def vector_page_from_pymupdf(page):
     """Return a complete GPU scene only when every operation is supported."""
     rect = page.rect
@@ -647,6 +676,8 @@ def vector_page_from_pymupdf(page):
             device.failure = "unbalanced transparency group stack"
         if device._mask_depth:
             device.failure = "unbalanced soft mask stack"
+        if not device.failure and "blend-mode" in device._features:
+            device.failure = _validate_composite_context(device.items)
     except Exception as error:
         device.failure = str(error)
     finally:
