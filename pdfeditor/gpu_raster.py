@@ -223,6 +223,24 @@ def _uniform_scale(matrix):
     return first
 
 
+def _is_identity_transfer_function(function):
+    if not function:
+        return True
+    fn = _mupdf.FzFunction(function)
+    fn.thisown = False
+    samples = (0.0, 0.25, 0.5, 0.75, 1.0)
+    inputs = _mupdf.new_floats(1)
+    try:
+        for value in samples:
+            _mupdf.floats_setitem(inputs, 0, value)
+            output = float(fn.fz_eval_function(inputs, 1, 1))
+            if not math.isfinite(output) or abs(output - value) > 1e-5:
+                return False
+    finally:
+        _mupdf.delete_floats(inputs)
+    return True
+
+
 class _DisplayListDevice(_mupdf.FzDevice2):
     """Record only operations with an exact Direct2D representation."""
 
@@ -246,8 +264,11 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self._features = set()
 
     def _fail(self, operation):
+        self._set_failure("unsupported operation: " + operation)
+
+    def _set_failure(self, reason):
         if not self.failure:
-            self.failure = "unsupported operation: " + operation
+            self.failure = reason
 
     def fill_path(self, _context, path, even_odd, ctm, colorspace, color,
                   alpha, color_params):
@@ -259,7 +280,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     colorspace, color, alpha, color_params),
                 transform=_matrix(ctm)))
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def stroke_path(self, _context, path, stroke, ctm, colorspace, color,
                     alpha, color_params):
@@ -284,7 +305,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 commands, stroke_argb=argb, stroke_width=width,
                 stroke_style=style, transform=transform))
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def clip_path(self, _context, path, even_odd, ctm, _scissor):
         try:
@@ -293,11 +314,11 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 _path_commands(path), bool(even_odd), _matrix(ctm)))
             self._clip_depth += 1
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def pop_clip(self, _context):
         if self._clip_depth <= 0:
-            self.failure = "unbalanced clip stack"
+            self._set_failure("unbalanced clip stack")
             return
         self.items.append(ClipPop())
         self._clip_depth -= 1
@@ -350,7 +371,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     commands, fill_argb=argb,
                     transform=transform, groupable=True))
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def fill_image(self, _context, image, ctm, alpha, _color_params):
         try:
@@ -363,8 +384,8 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 raise ValueError("page image data exceeds GPU scene limit")
             pixmap = pymupdf.Pixmap(
                 source.fz_get_unscaled_pixmap_from_image())
-            if pixmap.n - pixmap.alpha == 1:
-                # Mask forms commonly contain grayscale(+alpha), not RGBA.
+            if pixmap.n - pixmap.alpha != 3:
+                # PDF images may be Gray/CMYK/ICC-based; Direct2D receives BGRA.
                 pixmap = pymupdf.Pixmap(pymupdf.csRGB, pixmap)
             if not pixmap.alpha and pixmap.n == 3:
                 pixmap = pymupdf.Pixmap(pixmap, 1)
@@ -388,7 +409,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 _matrix(ctm), max(0.0, min(1.0, float(alpha))), bool(source.interpolate())))
             self._image_bytes += cost
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def stroke_text(self, _context, text, stroke, ctm, colorspace, color,
                     alpha, color_params):
@@ -403,7 +424,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     stroke_argb=argb, stroke_width=width,
                     stroke_style=style))
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def clip_text(self, _context, text, ctm, _scissor):
         try:
@@ -416,7 +437,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             self.items.append(ClipPush(tuple(commands)))
             self._clip_depth += 1
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def clip_stroke_text(self, _context, text, stroke, ctm, _scissor):
         try:
@@ -432,7 +453,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 tuple(commands), width, style))
             self._clip_depth += 1
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def clip_stroke_path(self, _context, path, stroke, ctm, _scissor):
         try:
@@ -442,7 +463,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 _path_commands(path), width, style, _matrix(ctm)))
             self._clip_depth += 1
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def fill_image_mask(self, _context, image, ctm, colorspace, color,
                         alpha, color_params):
@@ -477,7 +498,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 _matrix(ctm), max(0.0, min(1.0, float(alpha))), bool(source.interpolate())))
             self._image_bytes += cost
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def clip_image_mask(self, _context, image, ctm, _scissor):
         try:
@@ -506,7 +527,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             self._image_bytes += cost
             self._features.add("clip-mask")
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def fill_shade(self, _context, shade_ptr, ctm, alpha, color_params):
         try:
@@ -572,7 +593,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 max(0.0, min(1.0, float(alpha)))))
             self._image_bytes += cost
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def begin_mask(self, _context, area, luminosity, colorspace, background,
                    color_params):
@@ -589,14 +610,13 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             self._mask_depth += 1
             self._features.add("soft-mask")
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def end_mask(self, _context, function):
         if self._mask_depth <= 0:
-            if not self.failure:
-                self.failure = "unbalanced soft mask stack"
+            self._set_failure("unbalanced soft mask stack")
             return
-        if function:
+        if not _is_identity_transfer_function(function):
             self._fail("soft-mask-transfer-function")
         self.items.append(MaskEnd())
         self._mask_depth -= 1
@@ -621,7 +641,10 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 valid_device_space = (
                     _mupdf.fz_colorspace_is_device(source) and
                     (channels == 3 or (self._mask_depth and channels == 1)))
-                if not valid_device_space:
+                pass_through_group = (
+                    bool(isolated) and mode == 0 and
+                    opacity >= 1.0 - 1e-6)
+                if not valid_device_space and not pass_through_group:
                     raise ValueError("unsupported transparency group colorspace")
             if not isolated and (mode or opacity < 1.0 - 1e-6):
                 raise ValueError("unsupported non-isolated transparency group")
@@ -630,12 +653,11 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             self.items.append(GroupPush(opacity, mode, bool(isolated)))
             self._group_depth += 1
         except Exception as error:
-            self.failure = str(error)
+            self._set_failure(str(error))
 
     def end_group(self, _context):
         if self._group_depth <= 0:
-            if not self.failure:
-                self.failure = "unbalanced transparency group stack"
+            self._set_failure("unbalanced transparency group stack")
             return
         self.items.append(GroupPop())
         self._group_depth -= 1
@@ -681,11 +703,11 @@ def vector_page_from_pymupdf(page):
     try:
         _mupdf.fz_run_page(
             page.this, device, _mupdf.FzMatrix(), _mupdf.FzCookie())
-        if device._clip_depth:
+        if not device.failure and device._clip_depth:
             device.failure = "unbalanced clip stack"
-        if device._group_depth:
+        if not device.failure and device._group_depth:
             device.failure = "unbalanced transparency group stack"
-        if device._mask_depth:
+        if not device.failure and device._mask_depth:
             device.failure = "unbalanced soft mask stack"
         if not device.failure and ("blend-mode" in device._features or
                                    any(isinstance(item, MaskBegin) for item in device.items)):

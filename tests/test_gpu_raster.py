@@ -38,6 +38,38 @@ def image_mask_pdf_bytes():
     return bytes(data)
 
 
+def cmyk_image_pdf_bytes():
+    pixels = bytes((0, 255, 255, 0, 255, 0, 255, 0,
+                    255, 255, 0, 0, 0, 0, 0, 128))
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length 44 >>\nstream\n"
+        b"q 0 0 1 rg 120 0 0 120 30 30 cm /Im1 Do Q\nendstream",
+        b"<< /Type /XObject /Subtype /Image /Width 2 /Height 2 "
+        b"/ColorSpace /DeviceCMYK /BitsPerComponent 8 /Length " +
+        str(len(pixels)).encode() + b" >>\nstream\n" + pixels + b"\nendstream",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 def linear_gradient_pdf_bytes():
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -149,9 +181,11 @@ def blended_mask_pdf_bytes(blend_mode="SoftLight", luminosity=True,
         return pdf.tobytes()
 
 
-def soft_mask_pdf_bytes():
+def soft_mask_pdf_bytes(transfer_function=None):
     page_content = b"q /GS1 gs 1 0 0 rg 20 20 260 200 re f Q\n"
     mask_content = b"0.5 g 50 50 200 140 re f\n"
+    transfer = (b" /TR " + transfer_function
+                if transfer_function is not None else b"")
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -165,7 +199,44 @@ def soft_mask_pdf_bytes():
         b"/CS /DeviceGray >> /Length " + str(len(mask_content)).encode() +
         b" >>\nstream\n" + mask_content + b"endstream",
         b"<< /Type /ExtGState /SMask << /S /Luminosity /G 5 0 R "
-        b"/BC [0] >> >>",
+        b"/BC [0]" + transfer + b" >> >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
+def cmyk_group_pdf_bytes(alpha=1.0, blend_mode="Normal"):
+    page_content = b"q /GS1 gs /Fm1 Do Q\n"
+    form_content = b"0 1 1 0 k 20 20 180 140 re f\n"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /XObject << /Fm1 5 0 R >> "
+        b"/ExtGState << /GS1 6 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+        b"<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
+        b"/Resources << >> /Group << /S /Transparency /I true "
+        b"/CS /DeviceCMYK >> /Length " + str(len(form_content)).encode() +
+        b" >>\nstream\n" + form_content + b"endstream",
+        b"<< /Type /ExtGState /ca " + str(alpha).encode("ascii") +
+        b" /CA " + str(alpha).encode("ascii") + b" /BM /" +
+        blend_mode.encode("ascii") + b" >>",
     ]
     data = bytearray(b"%PDF-1.4\n")
     offsets = [0]
@@ -273,6 +344,56 @@ class GpuRasterSceneTests(unittest.TestCase):
                 image = next(item for item in scene.drawables if isinstance(item, VectorImage))
                 self.assertEqual(image.interpolate, interpolate)
                 self.assertEqual(image.pixels[:8], bytes((255, 255, 255, 255, 128, 128, 128, 255)))
+
+    def test_cmyk_image_is_converted_to_gpu_bgra_bitmap(self):
+        from pdfeditor.gpu_raster import VectorImage, vector_page_from_pymupdf
+        with fitz.open(stream=cmyk_image_pdf_bytes(), filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("image", scene.features)
+        image = scene.drawables[0]
+        self.assertIsInstance(image, VectorImage)
+        self.assertEqual((image.width, image.height, image.stride), (2, 2, 8))
+        self.assertEqual(len(image.pixels), 16)
+
+    def test_identity_soft_mask_transfer_function_stays_on_gpu(self):
+        from pdfeditor.gpu_raster import MaskEnd, vector_page_from_pymupdf
+        identity = (b"<< /FunctionType 2 /Domain [0 1] /C0 [0] "
+                    b"/C1 [1] /N 1 >>")
+        with fitz.open(stream=soft_mask_pdf_bytes(identity),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("soft-mask", scene.features)
+        self.assertTrue(any(isinstance(item, MaskEnd)
+                            for item in scene.drawables))
+
+    def test_nonidentity_soft_mask_transfer_function_uses_cpu_fallback(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        inverse = (b"<< /FunctionType 2 /Domain [0 1] /C0 [1] "
+                   b"/C1 [0] /N 1 >>")
+        with fitz.open(stream=soft_mask_pdf_bytes(inverse),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertFalse(scene.supported)
+        self.assertIn("soft-mask-transfer-function", scene.reason)
+
+    def test_opaque_normal_cmyk_transparency_wrapper_stays_on_gpu(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        with fitz.open(stream=cmyk_group_pdf_bytes(),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("transparency-group", scene.features)
+        self.assertIn("vector", scene.features)
+
+    def test_cmyk_transparency_group_with_opacity_still_falls_back(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        with fitz.open(stream=cmyk_group_pdf_bytes(alpha=0.5),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertFalse(scene.supported)
+        self.assertIn("transparency group colorspace", scene.reason)
 
     def test_nested_geometry_clips_with_all_blends_stay_on_gpu(self):
         from pdfeditor.gpu_raster import vector_page_from_pymupdf
