@@ -36,6 +36,7 @@ class VectorImage:
     stride: int
     transform: tuple
     opacity: float = 1.0
+    interpolate: bool = True
 
 
 @dataclass(frozen=True)
@@ -362,6 +363,11 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 raise ValueError("page image data exceeds GPU scene limit")
             pixmap = pymupdf.Pixmap(
                 source.fz_get_unscaled_pixmap_from_image())
+            if pixmap.n - pixmap.alpha == 1:
+                # Mask forms commonly contain grayscale(+alpha), not RGBA.
+                pixmap = pymupdf.Pixmap(pymupdf.csRGB, pixmap)
+            if not pixmap.alpha and pixmap.n == 3:
+                pixmap = pymupdf.Pixmap(pixmap, 1)
             rgba = pixmap.samples
             cost = pixmap.width * pixmap.height * 4
             if pixmap.n != 4 or not pixmap.alpha or len(rgba) < cost:
@@ -379,7 +385,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 bgra[offset:offset + 4] = blue, green, red, opacity
             self.items.append(VectorImage(
                 bytes(bgra), pixmap.width, pixmap.height, pixmap.width * 4,
-                _matrix(ctm), max(0.0, min(1.0, float(alpha)))))
+                _matrix(ctm), max(0.0, min(1.0, float(alpha))), bool(source.interpolate())))
             self._image_bytes += cost
         except Exception as error:
             self.failure = str(error)
@@ -468,7 +474,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             cost = len(bgra)
             self.items.append(VectorImage(
                 bytes(bgra), pixmap.width, pixmap.height, pixmap.width * 4,
-                _matrix(ctm), max(0.0, min(1.0, float(alpha)))))
+                _matrix(ctm), max(0.0, min(1.0, float(alpha))), bool(source.interpolate())))
             self._image_bytes += cost
         except Exception as error:
             self.failure = str(error)
@@ -494,7 +500,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 MaskBegin(self._page_rect, False, 0),
                 VectorImage(
                     bytes(bgra), pixmap.width, pixmap.height,
-                    pixmap.width * 4, _matrix(ctm)),
+                    pixmap.width * 4, _matrix(ctm), interpolate=bool(source.interpolate())),
                 MaskEnd()))
             self._clip_depth += 1
             self._image_bytes += cost
@@ -642,29 +648,30 @@ class _DisplayListDevice(_mupdf.FzDevice2):
 
 
 def _validate_composite_context(items):
-    """Geometry clips use explicit captures; soft masks still use layers."""
-    clips = []
-    mask_depth = 0
+    """Explicit targets require properly nested group, clip and mask scopes."""
+    scopes = []
     for item in items:
         if isinstance(item, (ClipPush, ClipStrokePush)):
-            if mask_depth or any(clips):
-                return "unsupported clip group inside mask"
-            clips.append(False)
+            scopes.append("clip")
         elif isinstance(item, ClipPop):
-            if not clips:
+            if not scopes or scopes[-1] != "clip":
                 return "unbalanced composite clip stack"
-            clips.pop()
+            scopes.pop()
         elif isinstance(item, MaskBegin):
-            mask_depth += 1
+            scopes.append("mask")
         elif isinstance(item, MaskEnd):
-            mask_depth -= 1
-            clips.append(True)
+            if not scopes or scopes[-1] != "mask":
+                return "unbalanced composite mask stack"
+            scopes[-1] = "clip"
         elif isinstance(item, GroupPush):
             if not item.isolated:
                 return "unsupported non-isolated group in blended scene"
-            if mask_depth or any(clips):
-                return "unsupported blend group inside mask"
-    return ""
+            scopes.append("group")
+        elif isinstance(item, GroupPop):
+            if not scopes or scopes[-1] != "group":
+                return "unbalanced composite group stack"
+            scopes.pop()
+    return "unbalanced composite scope stack" if scopes else ""
 
 
 def vector_page_from_pymupdf(page):
@@ -680,7 +687,8 @@ def vector_page_from_pymupdf(page):
             device.failure = "unbalanced transparency group stack"
         if device._mask_depth:
             device.failure = "unbalanced soft mask stack"
-        if not device.failure and "blend-mode" in device._features:
+        if not device.failure and ("blend-mode" in device._features or
+                                   any(isinstance(item, MaskBegin) for item in device.items)):
             device.failure = _validate_composite_context(device.items)
     except Exception as error:
         device.failure = str(error)

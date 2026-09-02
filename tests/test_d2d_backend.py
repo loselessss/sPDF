@@ -45,7 +45,7 @@ def pdf_component_blend(mode, backdrop, source):
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 12)
+        self.assertEqual(ABI_VERSION, 14)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -231,16 +231,26 @@ class D2DBackendTests(unittest.TestCase):
                 # scene, and compare interior pixels with MuPDF's CPU render.
                 import pymupdf
                 from pdfeditor.gpu_raster import (
-                    ClipPush, ClipPop, GroupPush, GroupPop, VectorPath,
+                    ClipPush, ClipPop, GroupPush, GroupPop, VectorPath, VectorImage,
+                    MaskBegin, MaskEnd,
                     vector_page_from_pymupdf)
-                from tests.test_gpu_raster import isolated_group_pdf_bytes
-                for name, clipped in itertools.product(("Multiply", "Screen", "Overlay", "Darken", "Lighten",
+                from tests.test_gpu_raster import isolated_group_pdf_bytes, blended_mask_pdf_bytes
+                pdf_cases = [("%s clipped=%s" % (name, clipped),
+                              isolated_group_pdf_bytes(name, background=True, clip=clipped))
+                             for name, clipped in itertools.product(("Multiply", "Screen", "Overlay", "Darken", "Lighten",
                              "ColorDodge", "ColorBurn", "HardLight", "SoftLight",
                              "Difference", "Exclusion", "Hue", "Saturation",
-                             "Color", "Luminosity"), (False, True)):
-                    with self.subTest(pdf_blend=name, clipped=clipped), pymupdf.open(
-                            stream=isolated_group_pdf_bytes(name, background=True, clip=clipped),
-                            filetype="pdf") as pdf:
+                             "Color", "Luminosity"), (False, True))]
+                for name, luminosity, mask_blend, color in itertools.product(
+                        ("Multiply", "SoftLight", "Hue"), (False, True), (False, True),
+                        ((.5, .5, .5), (1, 0, 0), (0, 1, 0), (0, 0, 1))):
+                    pdf_cases.append(("%s mask=%s inner_blend=%s color=%s" %
+                        (name, luminosity, mask_blend, color), blended_mask_pdf_bytes(
+                            name, luminosity, mask_blend, color)))
+                pdf_cases.append(("bitmap luminosity mask", blended_mask_pdf_bytes(image=True)))
+                for name, pdf_bytes in pdf_cases:
+                    with self.subTest(pdf_blend=name), pymupdf.open(
+                            stream=pdf_bytes, filetype="pdf") as pdf:
                         scene = vector_page_from_pymupdf(pdf[0])
                         self.assertTrue(scene.supported, scene.reason)
                         reference = pdf[0].get_pixmap(matrix=pymupdf.Matrix(.2, .2))
@@ -253,6 +263,20 @@ class D2DBackendTests(unittest.TestCase):
                                 surface.end_composite_group()
                             elif isinstance(item, ClipPop):
                                 surface.end_clip_group()
+                            elif isinstance(item, MaskBegin):
+                                surface.set_transform(.2, 0, 0, .2, 0, 0)
+                                surface.begin_composite_mask(
+                                    item.area, item.luminosity, item.background_argb)
+                            elif isinstance(item, MaskEnd):
+                                surface.set_transform(1, 0, 0, 1, 0, 0)
+                                surface.end_composite_mask()
+                            elif isinstance(item, VectorImage):
+                                surface.set_transform(*(value * .2 for value in item.transform))
+                                bitmap_resource = surface.create_bitmap_bgra(
+                                    item.pixels, item.width, item.height, item.stride)
+                                frame_paths.append(bitmap_resource)
+                                surface.draw_bitmap(bitmap_resource, 0, 0, 1, 1, item.opacity,
+                                                    interpolate=item.interpolate)
                             elif isinstance(item, (VectorPath, ClipPush)):
                                 matrix = item.transform or (1, 0, 0, 1, 0, 0)
                                 surface.set_transform(*(value * .2 for value in matrix))
@@ -268,6 +292,9 @@ class D2DBackendTests(unittest.TestCase):
                                         surface.stroke_path(geometry, item.stroke_argb,
                                                             item.stroke_width)
                         actual = surface.read_pixels_bgra(64, 64)
+                        surface.end_frame()
+                        for geometry in frame_paths:
+                            geometry.close()
                         for x, y in ((2, 2), (10, 20), (25, 25), (50, 10),
                                      (6, 25), (20, 20), (35, 30), (50, 40)):
                             offset = (y * 64 + x) * 4
@@ -276,9 +303,6 @@ class D2DBackendTests(unittest.TestCase):
                             self.assertTrue(all(abs(a - b) <= 3 for a, b in
                                 zip(native_rgb, reference_rgb)),
                                 (name, (x, y), native_rgb, reference_rgb))
-                        surface.end_frame()
-                        for geometry in frame_paths:
-                            geometry.close()
                 # Fractional clip edges must interpolate once, even with
                 # translucent backdrops and nested captures at non-default DPI.
                 fractional = surface.create_path([
@@ -286,6 +310,32 @@ class D2DBackendTests(unittest.TestCase):
                     ("line", 43.75, 51.25), ("line", 10.25, 51.25), ("close",)])
                 for dpi in (96.0, 120.0):
                     surface.resize(80, 80, dpi)
+                    for luminosity, nesting in itertools.product((False, True), (1, 2)):
+                        with self.subTest(mask_dpi=dpi, luminosity=luminosity, nesting=nesting):
+                            surface.begin_frame(0xff4080c0)
+                            for _ in range(nesting):
+                                surface.begin_composite_mask((8, 8, 48, 48), luminosity,
+                                                             0xff000000 if luminosity else 0)
+                                surface.fill_rect(0, 0, 64, 64, 0x80ffffff)
+                                surface.end_composite_mask()
+                            surface.begin_composite_group(9, .6)
+                            surface.fill_rect(0, 0, 64, 64, 0xc0c04080)
+                            surface.end_composite_group()
+                            for _ in range(nesting):
+                                surface.end_clip_group()
+                            masked = surface.read_pixels_bgra(80, 80)
+                            surface.end_frame()
+                            outside = (3 * 80 + 3) * 4
+                            self.assertEqual(masked[outside:outside + 4], bytes((192, 128, 64, 255)))
+                            inside = (24 * 80 + 24) * 4
+                            weight = (128 / 255) ** nesting
+                            af = 192 / 255 * .6
+                            expected = [round(255 * (cb / 255 + weight * af *
+                                (blend_value(9, cb / 255, cf / 255) - cb / 255)))
+                                for cb, cf in zip((192, 128, 64), (128, 64, 192))]
+                            self.assertTrue(all(abs(a - b) <= 4 for a, b in
+                                zip(masked[inside:inside + 3], expected)),
+                                (masked[inside:inside + 4], expected))
                     for transform in ((1, 0, 0, 1, 0, 0), (0, 1, -1, 0, 64, 0)):
                         with self.subTest(clip_dpi=dpi, transform=transform):
                             surface.begin_frame()
@@ -375,6 +425,13 @@ class D2DBackendTests(unittest.TestCase):
                     surface.end_composite_group()  # Wrong capture type must not pop.
                 with self.assertRaises(OSError):
                     surface.end_frame()  # Unwind an unfinished clip capture too.
+                surface.clear(0xfff7f7f7)
+                surface.begin_frame()
+                surface.begin_composite_mask((0, 0, 64, 64), False, 0)
+                with self.assertRaises(OSError):
+                    surface.end_composite_group()
+                with self.assertRaises(OSError):
+                    surface.end_frame()
                 surface.clear(0xfff7f7f7)
                 self.assertFalse(surface.closed)
                 bitmap.close()

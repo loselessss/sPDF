@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 12
+ABI_VERSION = 14
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -118,10 +118,17 @@ def _load_library(path):
     library.spdf_d2d_begin_clip_group.restype = c_int32
     library.spdf_d2d_end_clip_group.argtypes = [c_void_p]
     library.spdf_d2d_end_clip_group.restype = c_int32
+    library.spdf_d2d_begin_composite_mask.argtypes = [
+        c_void_p, c_float, c_float, c_float, c_float, c_uint32, c_uint32]
+    library.spdf_d2d_begin_composite_mask.restype = c_int32
+    library.spdf_d2d_end_composite_mask.argtypes = [c_void_p]
+    library.spdf_d2d_end_composite_mask.restype = c_int32
+    library.spdf_d2d_set_luminosity_lut.argtypes = [c_void_p, POINTER(c_ubyte), c_uint32, c_uint32]
+    library.spdf_d2d_set_luminosity_lut.restype = c_int32
     library.spdf_d2d_read_pixels.argtypes = [c_void_p, c_void_p, c_size_t]
     library.spdf_d2d_read_pixels.restype = c_int32
     library.spdf_d2d_draw_bitmap.argtypes = [
-        c_void_p, c_void_p, c_float, c_float, c_float, c_float, c_float]
+        c_void_p, c_void_p, c_float, c_float, c_float, c_float, c_float, c_uint32]
     library.spdf_d2d_draw_bitmap.restype = c_int32
     library.spdf_d2d_fill_rect.argtypes = [
         c_void_p, c_float, c_float, c_float, c_float, c_uint32]
@@ -388,6 +395,27 @@ class D2DSurface:
         _check_hresult(self._library.spdf_d2d_end_clip_group(
             self._handle), "Direct2D clip group end")
 
+    def begin_composite_mask(self, area, luminosity, background_argb):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        if luminosity:
+            from .gpu_color import luminosity_lut
+            signature, edge, data = luminosity_lut()
+            if getattr(self, "_luminosity_profile", None) != signature:
+                buffer = (c_ubyte * len(data)).from_buffer_copy(data)
+                _check_hresult(self._library.spdf_d2d_set_luminosity_lut(
+                    self._handle, buffer, len(data), edge), "Direct2D mask color table")
+                self._luminosity_profile = signature
+        _check_hresult(self._library.spdf_d2d_begin_composite_mask(
+            self._handle, *map(float, area), int(bool(luminosity)), int(background_argb)),
+            "Direct2D composite mask start")
+
+    def end_composite_mask(self):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        _check_hresult(self._library.spdf_d2d_end_composite_mask(self._handle),
+                       "Direct2D composite mask end")
+
     def read_pixels_bgra(self, width, height):
         """Explicit test/diagnostic readback, never part of ordinary repaint."""
         if self.closed:
@@ -400,13 +428,13 @@ class D2DSurface:
             self._handle, pixels, size), "Direct2D pixel readback")
         return bytes(pixels)
 
-    def draw_bitmap(self, bitmap, left, top, right, bottom, opacity=1.0):
+    def draw_bitmap(self, bitmap, left, top, right, bottom, opacity=1.0, interpolate=True):
         if bitmap.closed or bitmap._surface is not self:
             raise ValueError("bitmap does not belong to this Direct2D surface")
         _check_hresult(
             self._library.spdf_d2d_draw_bitmap(
                 self._handle, bitmap._handle, float(left), float(top),
-                float(right), float(bottom), float(opacity)),
+                float(right), float(bottom), float(opacity), int(bool(interpolate))),
             "Direct2D bitmap draw")
 
     def set_transform(self, m11, m12, m21, m22, dx, dy):

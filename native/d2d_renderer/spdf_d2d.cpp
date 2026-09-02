@@ -11,7 +11,9 @@
 
 #include <d2d1_1.h>
 #include <d2d1_2.h>
+#include <d2d1_3.h>
 #include <d2d1effects.h>
+#include <d2d1effects_2.h>
 #include <d3d11_1.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
@@ -695,7 +697,8 @@ public:
     }
 
     HRESULT begin_composite_group(
-        std::uint32_t mode, float opacity, Path* clip = nullptr) noexcept {
+        std::uint32_t mode, float opacity, Path* clip = nullptr,
+        bool mask_build = false) noexcept {
         // No implicit layer may cross a target switch. The scene validator
         // rejects these combinations before any page drawing starts.
         if (!drawing_ || layer_depth_ != 0 || !mask_captures_.empty() ||
@@ -711,7 +714,7 @@ public:
         const auto size = capture.previous->GetPixelSize();
         // Source + temporary backdrop, plus a coverage mask for explicit clips.
         capture.bytes = static_cast<std::uint64_t>(size.width) * size.height * 4 *
-            (clip == nullptr ? 2 : 3);
+            (mask_build ? 4 : (clip == nullptr ? 2 : 3));
         constexpr std::uint64_t budget = 256ULL * 1024 * 1024;
         if (capture.bytes == 0 || composite_bytes_ + capture.bytes > budget) {
             return E_OUTOFMEMORY;
@@ -760,6 +763,7 @@ public:
         }
         capture.mode = mode;
         capture.opacity = opacity;
+        capture.building_mask = mask_build;
         composite_bytes_ += capture.bytes;
         composite_captures_.push_back(capture);
         d2d_context_->SetTarget(capture.source.Get());
@@ -767,9 +771,114 @@ public:
         return S_OK;
     }
 
+    HRESULT set_luminosity_lut(
+        const unsigned char* data, std::uint32_t size, std::uint32_t edge) noexcept {
+        if (data == nullptr || edge < 2 || edge > 65 ||
+                size != edge * edge * edge * 4) return E_INVALIDARG;
+        ComPtr<ID2D1DeviceContext2> context;
+        auto result = d2d_context_.As(&context);
+        if (FAILED(result)) return result;
+        const std::uint32_t extents[] = {edge, edge, edge};
+        const std::uint32_t strides[] = {edge * 4, edge * edge * 4};
+        ComPtr<ID2D1LookupTable3D> table;
+        result = context->CreateLookupTable3D(D2D1_BUFFER_PRECISION_8BPC_UNORM,
+            extents, data, size, strides, &table);
+        if (SUCCEEDED(result)) luminosity_lut_ = table;
+        return result;
+    }
+
+    HRESULT begin_composite_mask(
+        float left, float top, float right, float bottom, bool luminosity,
+        std::uint32_t background_argb) noexcept {
+        if (!std::isfinite(left) || !std::isfinite(top) || !std::isfinite(right) ||
+                !std::isfinite(bottom) || right <= left || bottom <= top) return E_INVALIDARG;
+        auto result = begin_composite_group(0, 1.0f, nullptr, true);
+        if (FAILED(result)) return result;
+        auto& capture = composite_captures_.back();
+        capture.luminosity = luminosity;
+        capture.mask_area = D2D1::RectF(left, top, right, bottom);
+        d2d_context_->GetTransform(&capture.mask_transform);
+        if (luminosity || ((background_argb >> 24) & 0xff) != 0) {
+            result = fill_rect(left, top, right, bottom, background_argb);
+        }
+        return result;
+    }
+
+    HRESULT end_composite_mask() noexcept {
+        if (!drawing_ || composite_captures_.empty() || layer_depth_ != 0 ||
+                !mask_captures_.empty() || !composite_captures_.back().building_mask) {
+            return E_UNEXPECTED;
+        }
+        auto& capture = composite_captures_.back();
+        const auto properties = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET, capture.source->GetPixelFormat(), dpi_, dpi_);
+        ComPtr<ID2D1Bitmap1> coverage, content;
+        auto result = d2d_context_->CreateBitmap(
+            capture.source->GetPixelSize(), nullptr, 0, properties, &coverage);
+        if (SUCCEEDED(result)) result = d2d_context_->CreateBitmap(
+            capture.source->GetPixelSize(), nullptr, 0, properties, &content);
+        ComPtr<ID2D1RectangleGeometry> area;
+        if (SUCCEEDED(result)) result = d2d_factory_->CreateRectangleGeometry(
+            capture.mask_area, &area);
+        ComPtr<ID2D1Image> mask_image = capture.source;
+        ComPtr<ID2D1Effect> luminance, color_conversion;
+        if (SUCCEEDED(result) && capture.luminosity) {
+            if (!luminosity_lut_) return E_UNEXPECTED;
+            result = d2d_context_->CreateEffect(CLSID_D2D1LookupTable3D, &color_conversion);
+            if (SUCCEEDED(result)) {
+                color_conversion->SetInput(0, capture.source.Get());
+                result = color_conversion->SetValue(D2D1_LOOKUPTABLE3D_PROP_LUT,
+                                                    luminosity_lut_.Get());
+            }
+            if (SUCCEEDED(result)) result = color_conversion->SetValue(
+                D2D1_LOOKUPTABLE3D_PROP_ALPHA_MODE, D2D1_ALPHA_MODE_PREMULTIPLIED);
+            if (SUCCEEDED(result)) result = d2d_context_->CreateEffect(
+                CLSID_D2D1LuminanceToAlpha, &luminance);
+            if (SUCCEEDED(result)) {
+                luminance->SetInputEffect(0, color_conversion.Get());
+                luminance->GetOutput(&mask_image);
+            }
+        }
+        if (SUCCEEDED(result)) result = d2d_context_->Flush();
+        if (FAILED(result)) return result;
+        d2d_context_->SetTarget(nullptr);
+        result = content->CopyFromBitmap(nullptr, capture.previous.Get(), nullptr);
+        if (FAILED(result)) {
+            d2d_context_->SetTarget(capture.source.Get());
+            return result;
+        }
+        D2D1_MATRIX_3X2_F transform;
+        d2d_context_->GetTransform(&transform);
+        d2d_context_->SetTarget(coverage.Get());
+        d2d_context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+        d2d_context_->SetTransform(capture.mask_transform);
+        const auto parameters = D2D1::LayerParameters1(
+            D2D1::InfiniteRect(), area.Get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(), 1.0f, nullptr, D2D1_LAYER_OPTIONS1_NONE);
+        d2d_context_->PushLayer(parameters, nullptr);
+        d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+        d2d_context_->DrawImage(mask_image.Get(), D2D1::Point2F(0, 0),
+            D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_SOURCE_COPY);
+        d2d_context_->PopLayer();
+        result = d2d_context_->Flush();
+        d2d_context_->SetTransform(transform);
+        if (FAILED(result)) {
+            d2d_context_->SetTarget(capture.source.Get());
+            return result;
+        }
+        // Reuse the same stack entry for the applied mask scope. Children now
+        // see the backdrop; clip-pop applies the finished coverage exactly once.
+        capture.mask = coverage;
+        capture.source = content;
+        capture.building_mask = false;
+        d2d_context_->SetTarget(content.Get());
+        return S_OK;
+    }
+
     HRESULT end_composite_group(bool clip = false) noexcept {
         if (!drawing_ || composite_captures_.empty() || layer_depth_ != 0 ||
                 !mask_captures_.empty() ||
+                composite_captures_.back().building_mask ||
                 (composite_captures_.back().mask != nullptr) != clip) return E_UNEXPECTED;
         auto capture = composite_captures_.back();
         composite_captures_.pop_back();
@@ -988,7 +1097,7 @@ public:
         float top,
         float right,
         float bottom,
-        float opacity) noexcept {
+        float opacity, bool interpolate) noexcept {
         if (!drawing_ || bitmap == nullptr || bitmap->owner != this ||
                 !bitmap->resource || right <= left || bottom <= top) {
             return E_INVALIDARG;
@@ -998,7 +1107,7 @@ public:
             bitmap->resource.Get(),
             &destination,
             std::clamp(opacity, 0.0f, 1.0f),
-            D2D1_INTERPOLATION_MODE_LINEAR,
+            interpolate ? D2D1_INTERPOLATION_MODE_LINEAR : D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
             nullptr);
         return S_OK;
     }
@@ -1061,6 +1170,10 @@ private:
         ComPtr<ID2D1Bitmap1> previous;
         ComPtr<ID2D1Bitmap1> source;
         ComPtr<ID2D1Bitmap1> mask;
+        bool building_mask = false;
+        bool luminosity = false;
+        D2D1_RECT_F mask_area{};
+        D2D1_MATRIX_3X2_F mask_transform{};
         std::uint32_t mode = 0;
         float opacity = 1.0f;
         std::uint64_t bytes = 0;
@@ -1141,6 +1254,7 @@ private:
     std::vector<MaskCapture> mask_captures_;
     std::vector<CompositeCapture> composite_captures_;
     std::uint64_t composite_bytes_ = 0;
+    ComPtr<ID2D1LookupTable3D> luminosity_lut_;
     std::uint32_t layer_depth_ = 0;
     bool drawing_ = false;
 };
@@ -1459,6 +1573,26 @@ std::int32_t spdf_d2d_end_clip_group(void* surface) noexcept {
     return static_cast<std::int32_t>(static_cast<Surface*>(surface)->end_composite_group(true));
 }
 
+std::int32_t spdf_d2d_begin_composite_mask(
+    void* surface, float left, float top, float right, float bottom,
+    std::uint32_t luminosity, std::uint32_t background_argb) noexcept {
+    if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->begin_composite_mask(
+        left, top, right, bottom, luminosity != 0, background_argb));
+}
+
+std::int32_t spdf_d2d_end_composite_mask(void* surface) noexcept {
+    if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->end_composite_mask());
+}
+
+std::int32_t spdf_d2d_set_luminosity_lut(
+    void* surface, const unsigned char* data, std::uint32_t size, std::uint32_t edge) noexcept {
+    if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->set_luminosity_lut(
+        data, size, edge));
+}
+
 std::int32_t spdf_d2d_read_pixels(
     void* surface, void* pixels, std::size_t size) noexcept {
     if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
@@ -1472,7 +1606,7 @@ std::int32_t spdf_d2d_draw_bitmap(
     float top,
     float right,
     float bottom,
-    float opacity) noexcept {
+    float opacity, std::uint32_t interpolate) noexcept {
     if (surface == nullptr) {
         return static_cast<std::int32_t>(E_INVALIDARG);
     }
@@ -1482,7 +1616,7 @@ std::int32_t spdf_d2d_draw_bitmap(
         top,
         right,
         bottom,
-        opacity));
+        opacity, interpolate != 0));
 }
 
 std::int32_t spdf_d2d_fill_rect(

@@ -301,7 +301,8 @@ class ReaderPageView(QGraphicsView):
                      if resource is not None} | auxiliary
         draws = []
         composite_groups = any(
-            isinstance(item, GroupPush) and item.blend_mode for item in items)
+            isinstance(item, MaskBegin) or
+            (isinstance(item, GroupPush) and item.blend_mode) for item in items)
         clip_groups = []
         index = 0
         while index < len(items):
@@ -329,18 +330,20 @@ class ReaderPageView(QGraphicsView):
                 index += 1
                 continue
             if isinstance(item, MaskBegin):
-                draws.append(("mask_begin", item.area, item.luminosity,
+                kind = "composite_mask_begin" if composite_groups else "mask_begin"
+                draws.append((kind, item.area, item.luminosity,
                               item.background_argb))
                 index += 1
                 continue
             if isinstance(item, MaskEnd):
-                clip_groups.append(False)
-                draws.append(("mask_end", None))
+                clip_groups.append(composite_groups)
+                kind = "composite_mask_end" if composite_groups else "mask_end"
+                draws.append((kind, None))
                 index += 1
                 continue
             if isinstance(item, VectorImage):
                 draws.append(("image", native_items[index], item.opacity,
-                              item.transform))
+                              item.transform, item.interpolate))
                 index += 1
                 continue
             if not isinstance(item, VectorPath):
@@ -417,21 +420,26 @@ class ReaderPageView(QGraphicsView):
             if kind == "composite_pop":
                 self._d2d_surface.end_composite_group()
                 continue
-            if kind == "mask_begin":
+            if kind in ("mask_begin", "composite_mask_begin"):
                 area, luminosity, background_argb = resource, *values
                 self._set_item_transform(page_transform, None)
-                self._d2d_surface.begin_mask(
-                    area, luminosity, background_argb)
+                begin_mask = (self._d2d_surface.begin_composite_mask
+                              if kind == "composite_mask_begin"
+                              else self._d2d_surface.begin_mask)
+                begin_mask(area, luminosity, background_argb)
                 continue
-            if kind == "mask_end":
+            if kind in ("mask_end", "composite_mask_end"):
                 self._d2d_surface.set_transform(1, 0, 0, 1, 0, 0)
-                self._d2d_surface.end_mask()
+                if kind == "composite_mask_end":
+                    self._d2d_surface.end_composite_mask()
+                else:
+                    self._d2d_surface.end_mask()
                 continue
             if kind == "image":
-                opacity, transform = values
+                opacity, transform, interpolate = values
                 self._set_item_transform(page_transform, transform)
                 self._d2d_surface.draw_bitmap(
-                    resource, 0, 0, 1, 1, opacity)
+                    resource, 0, 0, 1, 1, opacity, interpolate=interpolate)
                 continue
             fill_argb, stroke_argb, stroke_width, transform, stroke_style = \
                 values

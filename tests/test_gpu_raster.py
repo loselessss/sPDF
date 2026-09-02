@@ -115,6 +115,40 @@ def isolated_group_pdf_bytes(blend_mode="Normal", background=False, clip=False):
     return bytes(data)
 
 
+def blended_mask_pdf_bytes(blend_mode="SoftLight", luminosity=True,
+                           mask_blend=False, color=(.5, .5, .5), image=False):
+    """A real PDF with a mask applied to a blended, isolated form."""
+    with fitz.open(stream=isolated_group_pdf_bytes(blend_mode, background=True),
+                   filetype="pdf") as pdf:
+        mask = pdf.get_new_xref()
+        resources = "/ExtGState << /Mix << /BM /Multiply >> >>"
+        content = ("%s %s %s rg 50 50 200 140 re f\n" % color).encode("ascii")
+        if mask_blend:
+            inner = pdf.get_new_xref()
+            pdf.update_object(inner,
+                "<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
+                "/Group << /S /Transparency /I true /CS /DeviceRGB >> /Resources << >> >>")
+            pdf.update_stream(inner, b"0.75 g 60 60 180 120 re f\n")
+            resources += " /XObject << /Inner %s 0 R >>" % inner
+            content += b"q 60 60 170 110 re W n /Mix gs /Inner Do Q\n"
+        if image:
+            bitmap = pdf.get_new_xref()
+            pdf.update_object(bitmap,
+                "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 "
+                "/ColorSpace /DeviceGray /BitsPerComponent 8 >>")
+            pdf.update_stream(bitmap, bytes((255, 128, 64, 0)))
+            resources += " /XObject << /Im %s 0 R >>" % bitmap
+            content = b"q 200 0 0 140 50 50 cm /Im Do Q\n"
+        pdf.update_object(mask,
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
+            "/Group << /S /Transparency /I true /CS /DeviceRGB >> "
+            "/Resources << " + resources + " >> >>")
+        pdf.update_stream(mask, content)
+        pdf.xref_set_key(6, "SMask", "<< /S /%s /G %s 0 R /BC [0 0 0] >>" %
+                         ("Luminosity" if luminosity else "Alpha", mask))
+        return pdf.tobytes()
+
+
 def soft_mask_pdf_bytes():
     page_content = b"q /GS1 gs 1 0 0 rg 20 20 260 200 re f Q\n"
     mask_content = b"0.5 g 50 50 200 140 re f\n"
@@ -186,7 +220,7 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertEqual("", _validate_composite_context(
             (GroupPush(.5, 9), clip, ClipPop(), GroupPop())))
 
-    def test_blended_scene_still_rejects_groups_and_clips_in_soft_masks(self):
+    def test_blended_scene_supports_groups_and_clips_in_soft_masks(self):
         from pdfeditor.gpu_raster import (ClipPush, ClipPop, GroupPush, GroupPop,
                                          MaskBegin, MaskEnd, _validate_composite_context)
         mask = MaskBegin((0, 0, 100, 100), True, 0xff000000)
@@ -195,7 +229,50 @@ class GpuRasterSceneTests(unittest.TestCase):
                       (mask, MaskEnd(), GroupPush(1, 9), GroupPop(), ClipPop()),
                       (mask, MaskEnd(), clip, ClipPop(), ClipPop())):
             with self.subTest(items=items):
-                self.assertIn("inside mask", _validate_composite_context(items))
+                self.assertEqual("", _validate_composite_context(items))
+
+    def test_blended_scene_rejects_crossed_mask_and_group_scopes(self):
+        from pdfeditor.gpu_raster import (ClipPop, GroupPush, GroupPop,
+                                         MaskBegin, MaskEnd, _validate_composite_context)
+        mask = MaskBegin((0, 0, 100, 100), True, 0xff000000)
+        for items in ((mask, GroupPush(1), MaskEnd(), GroupPop(), ClipPop()),
+                      (GroupPush(1), mask, MaskEnd(), GroupPop(), ClipPop()),
+                      (mask,)):
+            with self.subTest(items=items):
+                self.assertIn("unbalanced", _validate_composite_context(items))
+
+    def test_actual_blends_in_mask_build_and_apply_scopes_stay_on_gpu(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        for luminosity in (False, True):
+            for mask_blend in (False, True):
+                with self.subTest(luminosity=luminosity, mask_blend=mask_blend), fitz.open(
+                        stream=blended_mask_pdf_bytes(luminosity=luminosity,
+                            mask_blend=mask_blend), filetype="pdf") as pdf:
+                    scene = vector_page_from_pymupdf(pdf[0])
+                    self.assertTrue(scene.supported, scene.reason)
+                    self.assertIn("soft-mask", scene.features)
+                    self.assertIn("blend-mode", scene.features)
+
+    def test_colored_luminosity_masks_stay_on_gpu(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        for color in ((1, 0, 0), (0, 1, 0), (0, 0, 1)):
+            with self.subTest(color=color), fitz.open(
+                    stream=blended_mask_pdf_bytes(color=color), filetype="pdf") as pdf:
+                scene = vector_page_from_pymupdf(pdf[0])
+                self.assertTrue(scene.supported, scene.reason)
+
+    def test_grayscale_mask_image_preserves_pdf_interpolation(self):
+        from pdfeditor.gpu_raster import VectorImage, vector_page_from_pymupdf
+        with fitz.open(stream=blended_mask_pdf_bytes(image=True), filetype="pdf") as pdf:
+            for interpolate in (False, True):
+                for xref in range(1, pdf.xref_length()):
+                    if pdf.xref_get_key(xref, "Subtype")[1] == "/Image":
+                        pdf.xref_set_key(xref, "Interpolate", str(interpolate).lower())
+                scene = vector_page_from_pymupdf(pdf[0])
+                self.assertTrue(scene.supported, scene.reason)
+                image = next(item for item in scene.drawables if isinstance(item, VectorImage))
+                self.assertEqual(image.interpolate, interpolate)
+                self.assertEqual(image.pixels[:8], bytes((255, 255, 255, 255, 128, 128, 128, 255)))
 
     def test_nested_geometry_clips_with_all_blends_stay_on_gpu(self):
         from pdfeditor.gpu_raster import vector_page_from_pymupdf

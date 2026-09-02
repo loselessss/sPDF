@@ -1,4 +1,4 @@
-# sPDF 1.28.2 Release Notes
+# sPDF 1.28.3 Release Notes
 
 Release date: 2026-09-02
 
@@ -15,4 +15,9 @@ Release date: 2026-09-02
 ## 1.28.2 improvements - 2026-09-02
 
 - Blended PDF groups inside nested geometry and text clips now also stay on the GPU path, preserving the backdrop and clipped edges.
-- Unsupported combinations inside soft/image masks and non-isolated/knockout groups continue to use the CPU fallback to preserve display quality.
+
+## 1.28.3 improvements - 2026-09-02
+
+- Blends and clipping inside alpha, luminosity, and image masks now also use the GPU, including nested masks.
+- Colored luminosity masks follow PDF soft-mask color conversion, and grayscale mask images preserve their image interpolation settings.
+- Non-isolated/knockout groups and mask transfer functions continue to use the CPU fallback.

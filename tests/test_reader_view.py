@@ -466,7 +466,7 @@ class ReaderViewTests(unittest.TestCase):
         surface.create_bitmap_bgra.assert_called_once_with(
             image.pixels, 2, 2, 8)
         surface.draw_bitmap.assert_called_once_with(
-            bitmap, 0, 0, 1, 1, .75)
+            bitmap, 0, 0, 1, 1, .75, interpolate=True)
         transform = surface.set_transform.call_args_list[-2].args
         page_transform = surface.set_transform.call_args_list[-1].args
         self.assertEqual(transform[:4], image.transform[:4])
@@ -601,12 +601,12 @@ class ReaderViewTests(unittest.TestCase):
         surface = Mock()
         surface.create_path.return_value = path
         calls = []
-        surface.begin_mask.side_effect = lambda *args: calls.append(
+        surface.begin_composite_mask.side_effect = lambda *args: calls.append(
             ("begin-mask", *args))
         surface.fill_path.side_effect = lambda resource, color: calls.append(
             ("fill", resource, color))
-        surface.end_mask.side_effect = lambda: calls.append(("end-mask",))
-        surface.pop_clip.side_effect = lambda: calls.append(("pop-mask",))
+        surface.end_composite_mask.side_effect = lambda: calls.append(("end-mask",))
+        surface.end_clip_group.side_effect = lambda: calls.append(("pop-mask",))
         self.view._d2d_surface = surface
         self.view._d2d_requested = True
         self.view._vector_pages[0] = scene
