@@ -604,8 +604,8 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             mode = int(blendmode)
             if knockout:
                 raise ValueError("unsupported knockout transparency group")
-            if not 0 <= mode <= 11:
-                raise ValueError("unsupported nonseparable blend mode: %s" % mode)
+            if not 0 <= mode <= 15:
+                raise ValueError("unsupported blend mode: %s" % mode)
             if mode:
                 self._features.add("blend-mode")
             if colorspace:

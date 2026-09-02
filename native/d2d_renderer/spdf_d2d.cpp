@@ -698,7 +698,7 @@ public:
         // No implicit layer may cross a target switch. The scene validator
         // rejects these combinations before any page drawing starts.
         if (!drawing_ || layer_depth_ != 0 || !mask_captures_.empty() ||
-                mode > 11 || !std::isfinite(opacity) || opacity < 0 || opacity > 1) {
+                mode > 15 || !std::isfinite(opacity) || opacity < 0 || opacity > 1) {
             return E_INVALIDARG;
         }
         CompositeCapture capture;
@@ -775,7 +775,9 @@ public:
                     D2D1_BLEND_MODE_LIGHTEN, D2D1_BLEND_MODE_COLOR_DODGE,
                     D2D1_BLEND_MODE_COLOR_BURN, D2D1_BLEND_MODE_HARD_LIGHT,
                     D2D1_BLEND_MODE_SOFT_LIGHT, D2D1_BLEND_MODE_DIFFERENCE,
-                    D2D1_BLEND_MODE_EXCLUSION};
+                    D2D1_BLEND_MODE_EXCLUSION, D2D1_BLEND_MODE_HUE,
+                    D2D1_BLEND_MODE_SATURATION, D2D1_BLEND_MODE_COLOR,
+                    D2D1_BLEND_MODE_LUMINOSITY};
                 blend->SetInput(0, backdrop.Get());
                 blend->SetInputEffect(1, alpha.Get());
                 result = blend->SetValue(D2D1_BLEND_PROP_MODE, modes[capture.mode]);

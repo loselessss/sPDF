@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 10;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 11;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {

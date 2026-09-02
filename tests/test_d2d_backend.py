@@ -9,9 +9,42 @@ from pdfeditor.d2d_backend import (ABI_VERSION, D2DSurface, _NativeInfo,
                                   probe_d2d_backend)
 
 
+def pdf_component_blend(mode, backdrop, source):
+    """Independent PDF SetLum/SetSat reference, in unpremultiplied RGB."""
+    def lum(color):
+        return sum(c * w for c, w in zip(color, (.3, .59, .11)))
+
+    def set_lum(color, target):
+        delta = target - lum(color)
+        result = [c + delta for c in color]
+        low, high = min(result), max(result)
+        if low < 0:
+            result = [target + (c - target) * target / (target - low)
+                      for c in result]
+        if high > 1:
+            result = [target + (c - target) * (1 - target) / (high - target)
+                      for c in result]
+        return result
+
+    def set_sat(color, target):
+        low, high = min(color), max(color)
+        return ([(c - low) * target / (high - low) for c in color]
+                if high > low else [0, 0, 0])
+
+    if mode == 12:
+        return set_lum(set_sat(source, max(backdrop) - min(backdrop)), lum(backdrop))
+    if mode == 13:
+        return set_lum(set_sat(backdrop, max(source) - min(source)), lum(backdrop))
+    if mode == 14:
+        return set_lum(source, lum(backdrop))
+    if mode == 15:
+        return set_lum(backdrop, lum(source))
+    raise ValueError(mode)
+
+
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 10)
+        self.assertEqual(ABI_VERSION, 11)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -152,6 +185,47 @@ class D2DBackendTests(unittest.TestCase):
                         self.assertEqual(tuple(pixels[:4]), (96, 64, 32, 128))
                         surface.end_composite_group()
                         surface.end_frame()
+                # Nonseparable modes combine RGB components, not independent
+                # channels. Exercise all hue sectors, achromatic inputs, gamut
+                # clipping, transparent inputs, and group opacity separately.
+                color_pairs = (
+                    (0x4080c0, 0xc04080), (0xff0000, 0x00ff00),
+                    (0x00ff00, 0x0000ff), (0x0000ff, 0xff0000),
+                    (0xffff00, 0x00ffff), (0x00ffff, 0xff00ff),
+                    (0xff00ff, 0xffff00), (0x808080, 0xc08020),
+                    (0x2040c0, 0x808080), (0x000000, 0xffffff),
+                    (0xffffff, 0x000000), (0x808080, 0x404040))
+                for mode in range(12, 16):
+                    for backdrop, source in color_pairs:
+                        for ab, af, opacity in ((255, 255, 1), (128, 192, .6),
+                                                (0, 255, 1), (255, 0, 1)):
+                            with self.subTest(component_mode=mode, backdrop=backdrop,
+                                              source=source, alpha=(ab, af, opacity)):
+                                surface.begin_frame()
+                                surface.begin_composite_group(0, 1)
+                                surface.fill_rect(0, 0, 64, 64, (ab << 24) | backdrop)
+                                surface.begin_composite_group(mode, opacity)
+                                surface.fill_rect(8, 8, 56, 56, (af << 24) | source)
+                                surface.end_composite_group()
+                                pixels = surface.read_pixels_bgra(64, 64)
+                                offset = (32 * 64 + 32) * 4
+                                actual = tuple(pixels[offset:offset + 4])
+                                cb = [((backdrop >> shift) & 255) / 255
+                                      for shift in (16, 8, 0)]
+                                cf = [((source >> shift) & 255) / 255
+                                      for shift in (16, 8, 0)]
+                                mixed = pdf_component_blend(mode, cb, cf)
+                                ad, source_alpha = ab / 255, af / 255 * opacity
+                                expected_rgb = [round(255 * (
+                                    b * ad * source_alpha + s * source_alpha * (1 - ad) +
+                                    d * ad * (1 - source_alpha)))
+                                    for b, s, d in zip(mixed, cf, cb)]
+                                expected = list(reversed(expected_rgb)) + [
+                                    round(255 * (source_alpha + ad * (1 - source_alpha)))]
+                                self.assertTrue(all(abs(a - b) <= 4 for a, b in
+                                    zip(actual, expected)), (actual, expected))
+                                surface.end_composite_group()
+                                surface.end_frame()
                 # End-to-end: parse actual PDF blend groups, replay the native
                 # scene, and compare interior pixels with MuPDF's CPU render.
                 import pymupdf
@@ -161,7 +235,8 @@ class D2DBackendTests(unittest.TestCase):
                 from tests.test_gpu_raster import isolated_group_pdf_bytes
                 for name in ("Multiply", "Screen", "Overlay", "Darken", "Lighten",
                              "ColorDodge", "ColorBurn", "HardLight", "SoftLight",
-                             "Difference", "Exclusion"):
+                             "Difference", "Exclusion", "Hue", "Saturation",
+                             "Color", "Luminosity"):
                     with self.subTest(pdf_blend=name), pymupdf.open(
                             stream=isolated_group_pdf_bytes(name, background=True),
                             filetype="pdf") as pdf:
@@ -220,6 +295,9 @@ class D2DBackendTests(unittest.TestCase):
                     zip(actual[inside:inside + 3], expected)))
                 surface.end_frame()
                 surface.begin_frame()
+                for invalid_mode in (16, 99, -1):
+                    with self.subTest(invalid_mode=invalid_mode), self.assertRaises(OSError):
+                        surface.begin_composite_group(invalid_mode, 1)
                 surface.push_clip_path(path)
                 with self.assertRaises(OSError):
                     surface.begin_composite_group(9, 1)

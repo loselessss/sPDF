@@ -4,14 +4,16 @@
 
 상태: Direct2D 타일 합성 및 제한형 PDF 벡터·글자 GPU 래스터화 적용
 
-### 현재 단계: 1.28.0 / ABI v10
+### 현재 단계: 1.28.1 / ABI v11
 
 - 1.26~1.27의 소프트/이미지 마스크, 사용자 선 스타일, 윤곽선 글자와 stroked clip geometry에 이어 격리 그룹의 **11개 separable 혼합 모드**를 실제 표시 경로에 연결했다. Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion이 대상이다.
+- 1.28.1은 Hue/Saturation/Color/Luminosity도 Direct2D Blend effect에 연결하여 Normal 외 표준 PDF 혼합 모드 15개를 지원한다. PDF의 SetLum/SetSat·색 범위 보정과 같은 RGB 성분 혼합을 사용하며, 일반 HSL 색상 변환으로 대체하지 않는다. 구형 DLL이 확장된 모드 번호를 받지 않도록 ABI v11로 구분한다.
 - 혼합 장면은 일반 그룹까지 명시적인 GPU 중간 bitmap에 그린다. 그룹을 닫을 때 소스 불투명도를 적용하고 배경 snapshot과 Direct2D Blend effect로 합성한 결과를 이전 target에 복사한다. 배경을 두 번 source-over하지 않으며, 페이지 좌표·DPI 변환은 그대로 유지한다. [Microsoft Blend effect의 입력·알파 합성 정의](https://learn.microsoft.com/en-us/windows/win32/direct2d/blend)를 따른다.
 - 임시 bitmap은 PDF 전체 확대 크기가 아닌 viewport 크기이며, 소스와 배경 각 1개를 중첩 깊이별로 예약하여 표면별 256 MiB 상한을 적용한다. 그룹 종료·실패·표면 해제 시 회수한다. 현재는 프레임별 임시 버퍼이며 풀 재사용·부분 갱신은 후속 최적화다.
 - 장면에 혼합 모드가 있을 때 모든 그룹은 격리되어야 하고, 그룹 진입 시 활성 clip/mask가 없어야 한다. 그룹에 들어간 뒤 자체 clip을 열고 닫는 것은 지원한다. 앞선 clip/mask를 가로지르는 그룹은 사전 검증에서 페이지 전체 CPU 경로로 보낸다. 이 제한을 제거할 때는 부모 배경·clip·마스크가 중복 적용되지 않도록 별도 검증한다.
-- Hue/Saturation/Color/Luminosity, knockout·비격리 그룹, 타일 패턴, 마스크 transfer function과 기타 미지원 명령은 아직 남아 있다. **요소/그룹 단위 CPU 대체 구조까지 완료한 것은 아니다.** shading 생성과 이미지 디코딩도 현재 CPU 작업이다.
+- knockout·비격리 그룹, 타일 패턴, 마스크 transfer function과 기타 미지원 명령은 아직 남아 있다. **요소/그룹 단위 CPU 대체 구조까지 완료한 것은 아니다.** shading 생성과 이미지 디코딩도 현재 CPU 작업이다.
 - 실제 Direct2D 출력 픽셀을 읽는 명시적 진단 API를 추가했다. 11개 모드의 반투명 배경·소스·그룹 opacity 결과를 수식과 비교하고, 실제 PDF의 GPU 장면을 CPU 렌더의 내부 픽셀과 비교한다. 픽셀 readback은 테스트용 호출에만 사용하며 일반 repaint 경로에는 넣지 않는다. 임의 포스터·색 관리·모든 중첩 조합의 품질이나 속도 우위를 이 테스트만으로 보장하지 않는다.
+- 추가한 성분 혼합 4개는 12가지 배경/소스 색 쌍(6개 색조 영역, 회색, 흑백)과 4가지 알파/불투명도 조건의 192개 조합을 독립 SetLum/SetSat 수식과 비교한다. 실제 PDF 비교도 15개 모드로 확장한다. 활성 clip 안의 성분 혼합과 비격리 그룹은 지원 범위를 넓히지 않고 전체 CPU 대체를 검증한다.
 
 ### 1.25.0 구현 이력
 

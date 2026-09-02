@@ -145,11 +145,12 @@ def soft_mask_pdf_bytes():
 
 
 class GpuRasterSceneTests(unittest.TestCase):
-    def test_supported_separable_blends_remain_gpu_scenes(self):
+    def test_all_standard_pdf_blends_remain_gpu_scenes(self):
         from pdfeditor.gpu_raster import GroupPush, vector_page_from_pymupdf
         modes = ("Multiply", "Screen", "Overlay", "Darken", "Lighten",
                  "ColorDodge", "ColorBurn", "HardLight", "SoftLight",
-                 "Difference", "Exclusion")
+                 "Difference", "Exclusion", "Hue", "Saturation", "Color",
+                 "Luminosity")
         for mode, name in enumerate(modes, 1):
             with self.subTest(mode=name), fitz.open(
                     stream=isolated_group_pdf_bytes(name), filetype="pdf") as pdf:
@@ -159,12 +160,16 @@ class GpuRasterSceneTests(unittest.TestCase):
                 self.assertTrue(any(isinstance(item, GroupPush) and
                     item.blend_mode == mode for item in scene.drawables))
 
-    def test_nonseparable_blend_keeps_complete_fallback(self):
+    def test_nonseparable_blend_inside_clip_keeps_complete_fallback(self):
         from pdfeditor.gpu_raster import vector_page_from_pymupdf
         with fitz.open(stream=isolated_group_pdf_bytes("Hue"), filetype="pdf") as pdf:
+            page = pdf[0]
+            xref = page.get_contents()[0]
+            pdf.update_stream(xref, b"q 30 30 180 180 re W n\n" +
+                              pdf.xref_stream(xref) + b"\nQ")
             scene = vector_page_from_pymupdf(pdf[0])
         self.assertFalse(scene.supported)
-        self.assertIn("nonseparable", scene.reason)
+        self.assertIn("clip/mask", scene.reason)
 
     def test_blended_scene_rejects_groups_inside_active_clips(self):
         from pdfeditor.gpu_raster import (ClipPush, ClipPop, GroupPush,
@@ -174,6 +179,16 @@ class GpuRasterSceneTests(unittest.TestCase):
             (clip, GroupPush(.5, 9), GroupPop(), ClipPop())))
         self.assertEqual("", _validate_composite_context(
             (GroupPush(.5, 9), clip, ClipPop(), GroupPop())))
+
+    def test_color_component_blends_reject_nonisolated_groups(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        for name in ("Hue", "Saturation", "Color", "Luminosity"):
+            with self.subTest(mode=name), fitz.open(
+                    stream=isolated_group_pdf_bytes(name), filetype="pdf") as pdf:
+                pdf.xref_set_key(5, "Group/I", "false")
+                scene = vector_page_from_pymupdf(pdf[0])
+                self.assertFalse(scene.supported)
+                self.assertIn("non-isolated", scene.reason)
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

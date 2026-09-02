@@ -89,8 +89,6 @@ def _render_diagnostic_summary(info):
     reason_labels = (
         (("blend group inside clip/mask",),
          localize("blend inside clip/mask", "클리핑·마스크 안의 혼합")),
-        (("nonseparable blend",),
-         localize("color-component blend", "색상 성분 혼합")),
         (("begin-mask", "end-mask"), localize("soft mask", "소프트 마스크")),
         (("clip-image-mask",), localize("clip mask", "클리핑 마스크")),
         (("non-uniform stroked text transform",),

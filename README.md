@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.28.0** · English and Korean interface · Windows
+**Current version: 1.28.1** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -147,10 +147,11 @@ Press **F1** in the application for the complete localized guide.
   decoded images there. Nested vector and text clipping, colored stencil images,
   ordinary isolated transparency groups, soft and image clip masks, and complex
   stroke styles, stroked text, and stroked clipping paths are supported.
-  Isolated groups can use 11 blend modes including Soft Light, Multiply, Screen,
-  and Overlay through GPU effects. Groups entered inside an existing clip/mask,
-  non-isolated or knockout groups, and Hue/Saturation/Color/Luminosity blends
-  still use the CPU fallback in blended scenes. Shadings are rendered into a
+  Isolated groups can use all 15 standard non-Normal PDF blend modes, including
+  Soft Light, Multiply, Screen, Overlay, Hue, Saturation, Color, and Luminosity,
+  through GPU effects. Groups entered inside an existing clip/mask and
+  non-isolated or knockout groups still use the CPU fallback in blended scenes.
+  Shadings are rendered into a
   bounded high-quality image and then composed by Direct2D. Non-uniformly
   transformed stroked text and other unsupported effects retain the complete
   PyMuPDF path, so this is not yet a GPU-only PDF engine. Blend scratch buffers

@@ -396,7 +396,9 @@ class ReaderViewTests(unittest.TestCase):
     def test_blended_scene_uses_explicit_composite_groups(self):
         from pdfeditor.gpu_raster import GroupPush, GroupPop, VectorPage
         scene = VectorPage(True, items=(
-            GroupPush(1), GroupPush(.5, 9), GroupPop(), GroupPop()))
+            GroupPush(1), GroupPush(.5, 9), GroupPop(),
+            GroupPush(.5, 12), GroupPop(), GroupPush(.5, 13), GroupPop(),
+            GroupPush(.5, 14), GroupPop(), GroupPush(.5, 15), GroupPop(), GroupPop()))
         surface = Mock()
         self.view._d2d_surface = surface
         ratio = max(1.0, self.view.viewport().devicePixelRatioF())
@@ -405,8 +407,9 @@ class ReaderViewTests(unittest.TestCase):
         self.view._vector_pages[0] = scene
         self.view._paint_d2d()
         self.assertEqual([call.args for call in
-            surface.begin_composite_group.call_args_list], [(0, 1), (9, .5)])
-        self.assertEqual(surface.end_composite_group.call_count, 2)
+            surface.begin_composite_group.call_args_list],
+            [(0, 1), (9, .5), (12, .5), (13, .5), (14, .5), (15, .5)])
+        self.assertEqual(surface.end_composite_group.call_count, 6)
         surface.push_opacity_layer.assert_not_called()
         surface.create_bitmap_bgra.assert_not_called()
         self.view._d2d_surface = None
