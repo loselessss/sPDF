@@ -230,13 +230,14 @@ class ReaderPageView(QGraphicsView):
         if cached is not None:
             for path in cached[2]:
                 path.close()
-        from .gpu_raster import ClipPop, ClipPush, VectorImage, VectorPath
+        from .gpu_raster import (ClipPop, ClipPush, GroupPop, GroupPush,
+                                 VectorImage, VectorPath)
 
         items = scene.drawables
         unique = {}
         native_items = []
         for item in items:
-            if isinstance(item, ClipPop):
+            if isinstance(item, (ClipPop, GroupPush, GroupPop)):
                 native_items.append(None)
                 continue
             if isinstance(item, VectorImage):
@@ -263,6 +264,14 @@ class ReaderPageView(QGraphicsView):
                 continue
             if isinstance(item, ClipPop):
                 draws.append(("clip_pop", None))
+                index += 1
+                continue
+            if isinstance(item, GroupPush):
+                draws.append(("group_push", item.opacity))
+                index += 1
+                continue
+            if isinstance(item, GroupPop):
+                draws.append(("group_pop", None))
                 index += 1
                 continue
             if isinstance(item, VectorImage):
@@ -314,6 +323,13 @@ class ReaderPageView(QGraphicsView):
                 continue
             if kind == "clip_pop":
                 self._d2d_surface.pop_clip()
+                continue
+            if kind == "group_push":
+                self._set_item_transform(page_transform, None)
+                self._d2d_surface.push_opacity_layer(resource)
+                continue
+            if kind == "group_pop":
+                self._d2d_surface.pop_layer()
                 continue
             if kind == "image":
                 opacity, transform = values

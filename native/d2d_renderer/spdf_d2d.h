@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 5;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 6;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -106,6 +106,10 @@ SPDF_D2D_API std::int32_t spdf_d2d_push_clip_path(
     void* surface,
     void* path) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_pop_clip(void* surface) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_push_opacity_layer(
+    void* surface,
+    float opacity) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_pop_layer(void* surface) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_draw_bitmap(
     void* surface,
     void* bitmap,

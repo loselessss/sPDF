@@ -444,6 +444,42 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
 
+    def test_transparency_group_uses_opacity_layer_in_order(self):
+        from pdfeditor.gpu_raster import (GroupPop, GroupPush, VectorPage,
+                                          VectorPath)
+
+        commands = (("move", 0, 0), ("line", 100, 0),
+                    ("line", 100, 80), ("close",))
+        drawing = VectorPath(commands, fill_argb=0xff0080ff)
+        scene = VectorPage(
+            True, (drawing,),
+            items=(GroupPush(0.6), drawing, GroupPop()))
+        path = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = path
+        calls = []
+        surface.push_opacity_layer.side_effect = \
+            lambda opacity: calls.append(("push-group", opacity))
+        surface.fill_path.side_effect = \
+            lambda resource, color: calls.append(("fill", resource, color))
+        surface.pop_layer.side_effect = lambda: calls.append(("pop-group",))
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+
+        self.view._paint_d2d()
+        self.assertEqual(calls, [
+            ("push-group", 0.6),
+            ("fill", path, 0xff0080ff),
+            ("pop-group",),
+        ])
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
     def test_same_page_refresh_asks_document_for_invalidated_vector_scene(self):
         from pdfeditor.gpu_raster import VectorPage, VectorPath
 

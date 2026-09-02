@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.24.0** · English and Korean interface · Windows
+**Current version: 1.25.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -144,10 +144,12 @@ Press **F1** in the application for the complete localized guide.
 - Standalone reader and editor workspaces use viewport-sized Direct2D surfaces on
   supported Windows systems, with Qt/OpenGL and CPU display fallback. Supported
   pages rasterize vectors and exact glyph outlines through Direct2D and compose
-  decoded images there. Nested vector-path clipping and colored stencil images
-  are supported; text clipping, soft/clip masks, shading, transparency groups,
-  and complex stroke styles keep the complete PyMuPDF CPU path, so this is not a
-  GPU-only PDF engine. The embedded display path is unchanged.
+  decoded images there. Nested vector and text clipping, colored stencil images,
+  and ordinary isolated transparency groups are supported. Shadings are rendered
+  into a bounded high-quality image and then composed by Direct2D. Soft/clip
+  masks, special blend modes, non-isolated translucent groups, and complex stroke
+  styles keep the complete PyMuPDF CPU path, so this is not a GPU-only PDF engine.
+  The embedded display path is unchanged.
 - Reader and editor previews cover only the current one or two pages. Detailed
   tiles use a 64 MiB cache per tab; this is not a limit on total application memory.
 - Margin cropping changes the visible page area; it does not erase the hidden

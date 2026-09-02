@@ -38,6 +38,73 @@ def image_mask_pdf_bytes():
     return bytes(data)
 
 
+def linear_gradient_pdf_bytes():
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /Shading << /Sh1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length 38 >>\nstream\n"
+        b"q 20 20 260 200 re W n /Sh1 sh Q\nendstream",
+        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [20 20 280 20] "
+        b"/Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] "
+        b"/C1 [0 0 1] /N 1 >> /Extend [true true] >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
+def isolated_group_pdf_bytes():
+    page_content = b"q /GS1 gs /Fm1 Do Q\n"
+    form_content = (
+        b"1 0 0 rg 20 20 180 140 re f "
+        b"0 0 1 rg 100 80 180 140 re f\n")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /XObject << /Fm1 5 0 R >> "
+        b"/ExtGState << /GS1 6 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+        b"<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
+        b"/Resources << >> /Group << /S /Transparency /I true "
+        b"/CS /DeviceRGB >> /Length " + str(len(form_content)).encode() +
+        b" >>\nstream\n" + form_content + b"endstream",
+        b"<< /Type /ExtGState /ca 0.5 /CA 0.5 >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 class GpuRasterSceneTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -71,6 +138,23 @@ class GpuRasterSceneTests(unittest.TestCase):
                 stream + b"\nQ Q")
             with fitz.open(stream=image_mask_pdf_bytes(), filetype="pdf") as mask:
                 pdf.insert_pdf(mask)
+            text_clip = pdf.new_page(width=300, height=240)
+            text_clip.insert_text((30, 90), "MASK", fontsize=48)
+            xref = text_clip.get_contents()[0]
+            stream = pdf.xref_stream(xref)
+            stream = stream.replace(b"BT", b"BT\n7 Tr", 1)
+            head, tail = stream.rsplit(b"Q", 1)
+            pdf.update_stream(
+                xref,
+                head + b"0 0 1 rg 0 0 300 240 re f\nQ" + tail)
+            with fitz.open(
+                    stream=linear_gradient_pdf_bytes(),
+                    filetype="pdf") as gradient:
+                pdf.insert_pdf(gradient)
+            with fitz.open(
+                    stream=isolated_group_pdf_bytes(),
+                    filetype="pdf") as group:
+                pdf.insert_pdf(group)
             pdf.save(self.path)
         self.document = Document(str(self.path), read_only=True)
 
@@ -165,6 +249,63 @@ class GpuRasterSceneTests(unittest.TestCase):
                          (100.0, 0.0, 0.0, 100.0, 20.0, 120.0))
         self.assertEqual(image.pixels[:4], bytes((0, 0, 0, 0)))
         self.assertEqual(image.pixels[4 * 4:4 * 5], bytes((255, 0, 0, 255)))
+
+    def test_text_clip_uses_combined_exact_glyph_outlines(self):
+        from pdfeditor.gpu_raster import ClipPop, ClipPush, VectorPath
+
+        scene = self.document.gpu_vector_page(6)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIsInstance(scene.drawables[0], ClipPush)
+        self.assertIsNone(scene.drawables[0].transform)
+        self.assertTrue(any(command[0] == "cubic"
+                            for command in scene.drawables[0].commands))
+        self.assertTrue(any(isinstance(item, VectorPath)
+                            for item in scene.drawables[1:-1]))
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
+
+    def test_linear_gradient_keeps_gpu_scene_with_bounded_bitmap(self):
+        from pdfeditor.gpu_raster import (ClipPop, ClipPush,
+                                          SHADE_RASTER_SCALE, VectorImage)
+
+        scene = self.document.gpu_vector_page(7)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIsInstance(scene.drawables[0], ClipPush)
+        image = scene.drawables[1]
+        self.assertIsInstance(image, VectorImage)
+        self.assertEqual(
+            (image.width, image.height),
+            (round(300 * SHADE_RASTER_SCALE),
+             round(240 * SHADE_RASTER_SCALE)))
+        self.assertEqual(image.transform, (300.0, 0.0, 0.0, 240.0, 0.0, 0.0))
+        self.assertEqual(image.pixels[:4], bytes((0, 0, 255, 255)))
+        self.assertEqual(image.pixels[-4:], bytes((255, 0, 0, 255)))
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
+
+    def test_oversized_gradient_scene_uses_complete_cpu_fallback(self):
+        self.document.invalidate_render(7)
+        with patch("pdfeditor.gpu_raster.MAX_GPU_IMAGE_BYTES", 1):
+            scene = self.document.gpu_vector_page(7)
+        self.assertFalse(scene.supported)
+        self.assertIn("shading data exceeds GPU scene limit", scene.reason)
+
+    def test_isolated_normal_transparency_group_uses_opacity_layer(self):
+        from pdfeditor.gpu_raster import (ClipPop, ClipPush, GroupPop,
+                                          GroupPush, VectorPath)
+
+        scene = self.document.gpu_vector_page(8)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIsInstance(scene.drawables[0], GroupPush)
+        self.assertAlmostEqual(scene.drawables[0].opacity, 1.0)
+        self.assertIsInstance(scene.drawables[1], GroupPush)
+        self.assertAlmostEqual(scene.drawables[1].opacity, 0.5)
+        self.assertIsInstance(scene.drawables[2], ClipPush)
+        paths = [item for item in scene.drawables
+                 if isinstance(item, VectorPath)]
+        self.assertEqual(len(paths), 2)
+        self.assertTrue(all((item.fill_argb >> 24) == 255 for item in paths))
+        self.assertIsInstance(scene.drawables[-3], ClipPop)
+        self.assertIsInstance(scene.drawables[-2], GroupPop)
+        self.assertIsInstance(scene.drawables[-1], GroupPop)
 
     def test_oversized_image_scene_uses_complete_cpu_fallback(self):
         self.document.invalidate_render(2)

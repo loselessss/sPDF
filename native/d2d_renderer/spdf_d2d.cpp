@@ -2,6 +2,7 @@
 #include "spdf_d2d.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <iterator>
 #include <new>
@@ -220,7 +221,7 @@ public:
     }
 
     HRESULT begin_frame(std::uint32_t argb) noexcept {
-        if (!d2d_context_ || !target_ || drawing_ || clip_depth_ != 0) {
+        if (!d2d_context_ || !target_ || drawing_ || layer_depth_ != 0) {
             return E_UNEXPECTED;
         }
         const auto alpha = static_cast<float>((argb >> 24) & 0xff) / 255.0f;
@@ -438,16 +439,38 @@ public:
             nullptr,
             D2D1_LAYER_OPTIONS1_NONE);
         d2d_context_->PushLayer(parameters, nullptr);
-        ++clip_depth_;
+        ++layer_depth_;
         return S_OK;
     }
 
     HRESULT pop_clip() noexcept {
-        if (!drawing_ || clip_depth_ == 0) {
+        return pop_layer();
+    }
+
+    HRESULT push_opacity_layer(float opacity) noexcept {
+        if (!drawing_ || !std::isfinite(opacity) || opacity < 0.0f ||
+                opacity > 1.0f) {
+            return E_INVALIDARG;
+        }
+        const auto parameters = D2D1::LayerParameters1(
+            D2D1::InfiniteRect(),
+            nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(),
+            opacity,
+            nullptr,
+            D2D1_LAYER_OPTIONS1_NONE);
+        d2d_context_->PushLayer(parameters, nullptr);
+        ++layer_depth_;
+        return S_OK;
+    }
+
+    HRESULT pop_layer() noexcept {
+        if (!drawing_ || layer_depth_ == 0) {
             return E_UNEXPECTED;
         }
         d2d_context_->PopLayer();
-        --clip_depth_;
+        --layer_depth_;
         return S_OK;
     }
 
@@ -546,10 +569,10 @@ public:
         if (!d2d_context_ || !swap_chain_ || !drawing_) {
             return E_UNEXPECTED;
         }
-        if (clip_depth_ != 0) {
-            while (clip_depth_ != 0) {
+        if (layer_depth_ != 0) {
+            while (layer_depth_ != 0) {
                 d2d_context_->PopLayer();
-                --clip_depth_;
+                --layer_depth_;
             }
             drawing_ = false;
             d2d_context_->EndDraw();
@@ -638,7 +661,7 @@ private:
     ComPtr<ID2D1Bitmap1> target_;
     ComPtr<IDWriteFactory> dwrite_factory_;
     std::unordered_map<std::uint32_t, ComPtr<ID2D1SolidColorBrush>> brushes_;
-    std::uint32_t clip_depth_ = 0;
+    std::uint32_t layer_depth_ = 0;
     bool drawing_ = false;
 };
 
@@ -852,6 +875,24 @@ std::int32_t spdf_d2d_pop_clip(void* surface) noexcept {
     }
     return static_cast<std::int32_t>(
         static_cast<Surface*>(surface)->pop_clip());
+}
+
+std::int32_t spdf_d2d_push_opacity_layer(
+    void* surface,
+    float opacity) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->push_opacity_layer(opacity));
+}
+
+std::int32_t spdf_d2d_pop_layer(void* surface) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->pop_layer());
 }
 
 std::int32_t spdf_d2d_draw_bitmap(

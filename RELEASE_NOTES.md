@@ -1,15 +1,15 @@
-# sPDF 1.24.0 Release Notes
+# sPDF 1.25.0 Release Notes
 
 Release date: 2026-09-02
 
-## 1.24.0 - 2026-09-02
+## 1.25.0 - 2026-09-02
 
 ### Performance improvements
 
-- Pages using nested vector clipping can remain on the direct GPU path, improving redraw responsiveness for more ordinary PDFs.
-- Colored stencil images such as simple one-color logos and icons can remain on the GPU path with their original color and transparency.
+- PDFs that clip content with exact glyph outlines can now zoom and pan through Direct2D without switching the whole page to the CPU fallback.
+- Axial, radial, function-based, and mesh shadings are rendered into a bounded high-quality image and composed with the rest of the page through Direct2D.
+- Isolated transparency groups using normal blending are handled with Direct2D opacity layers.
 
 ### Improvements
 
-- Clipped text, shapes, and placed images preserve their original clipping boundaries while zooming, rotating, and panning.
-- Text clipping, soft/clip masks, shading, transparency groups, and complex stroke styles continue to use the complete PyMuPDF path to preserve display quality.
+- Soft/clip masks, special blend modes, non-isolated translucent groups, and complex stroke styles continue to use the complete PyMuPDF path to preserve display quality.

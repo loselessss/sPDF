@@ -18,7 +18,7 @@ under `native\bin` and are not committed.
 
 ## Current ABI
 
-ABI version 5 can:
+ABI version 6 can:
 
 - probe a hardware D3D11 device and fall back to WARP;
 - create Direct2D and DirectWrite devices on the same DXGI device;
@@ -30,11 +30,13 @@ ABI version 5 can:
 - create transformed geometry groups and cached fill realizations for repeated
   embedded-font glyph outlines;
 - push and pop nested antialiased vector-path clipping layers;
+- push and pop opacity layers for supported isolated transparency groups;
 - clear/present, resize, and destroy the surface and bitmap resources.
 
 PyMuPDF still parses PDF content, extracts exact glyph outlines, and decodes
-images and colored stencil masks on the CPU. Supported page scenes are
-rasterized and composed through Direct2D; unsupported page features keep the
+images, colored stencil masks, and bounded shading bitmaps on the CPU. Supported
+page scenes, exact glyph clips, and ordinary isolated transparency groups are
+rasterized or composed through Direct2D; unsupported page features keep the
 bounded 512 px CPU-tile path.
 Native resources are released with the tab, and page image scene data is capped
 at 64 MiB before falling back.

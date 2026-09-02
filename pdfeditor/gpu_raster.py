@@ -6,12 +6,14 @@ represented exactly makes the whole page use the existing PyMuPDF tile path.
 """
 
 from dataclasses import dataclass, replace
+import math
 
 import pymupdf
 from pymupdf import mupdf as _mupdf
 
 
 MAX_GPU_IMAGE_BYTES = 64 * 1024 * 1024
+SHADE_RASTER_SCALE = 2.0
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,16 @@ class ClipPush:
 
 @dataclass(frozen=True)
 class ClipPop:
+    pass
+
+
+@dataclass(frozen=True)
+class GroupPush:
+    opacity: float
+
+
+@dataclass(frozen=True)
+class GroupPop:
     pass
 
 
@@ -102,6 +114,32 @@ def _matrix(value):
             float(matrix.d), float(matrix.e), float(matrix.f))
 
 
+def _transform_commands(commands, transform):
+    a, b, c, d, e, f = transform
+
+    def point(x, y):
+        return (a * x + c * y + e, b * x + d * y + f)
+
+    transformed = []
+    for command in commands:
+        kind = command[0]
+        if kind == "close":
+            transformed.append(command)
+            continue
+        if kind in ("move", "line"):
+            transformed.append((kind, *point(command[1], command[2])))
+            continue
+        if kind == "cubic":
+            transformed.append((
+                kind,
+                *point(command[1], command[2]),
+                *point(command[3], command[4]),
+                *point(command[5], command[6])))
+            continue
+        raise ValueError("unsupported vector path command")
+    return tuple(transformed)
+
+
 def _argb(color, opacity):
     values = tuple(color)
     if len(values) < 3:
@@ -131,7 +169,7 @@ def _device_color(colorspace, color, opacity, color_params):
 class _DisplayListDevice(_mupdf.FzDevice2):
     """Record only operations with an exact Direct2D representation."""
 
-    def __init__(self):
+    def __init__(self, page_rect):
         super().__init__()
         for name in (
                 "fill_path", "stroke_path", "clip_path", "pop_clip",
@@ -145,6 +183,8 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self._glyphs = {}
         self._image_bytes = 0
         self._clip_depth = 0
+        self._group_depth = 0
+        self._page_rect = tuple(float(value) for value in page_rect)
 
     def _fail(self, operation):
         if not self.failure:
@@ -201,46 +241,52 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self.items.append(ClipPop())
         self._clip_depth -= 1
 
+    def _text_outlines(self, text, ctm):
+        outlines = []
+        span_ptr = text.head
+        while span_ptr:
+            next_span = span_ptr.next
+            span = _mupdf.FzTextSpan(span_ptr)
+            span.thisown = False
+            font = span.font()
+            base = span.trm()
+            page_matrix = _mupdf.FzMatrix(ctm)
+            for index in range(span.m_internal.len):
+                item = span.items(index)
+                if item.gid < 0:
+                    raise ValueError("text glyph has no usable glyph id")
+                matrix = _mupdf.FzMatrix(
+                    base.a, base.b, base.c, base.d, base.e, base.f)
+                matrix.e = item.x
+                matrix.f = item.y
+                matrix = _mupdf.fz_concat(matrix, page_matrix)
+                key = (font.m_internal_value(), item.gid)
+                commands = self._glyphs.get(key)
+                if commands is None:
+                    outline = font.fz_outline_glyph(
+                        item.gid, _mupdf.FzMatrix())
+                    if not outline:
+                        if chr(item.ucs).isspace():
+                            self._glyphs[key] = ()
+                            continue
+                        raise ValueError("font glyph has no vector outline")
+                    commands = _path_commands(outline, allow_empty=True)
+                    if not commands and not chr(item.ucs).isspace():
+                        raise ValueError("font glyph has no vector outline")
+                    self._glyphs[key] = commands
+                if commands:
+                    outlines.append((commands, _matrix(matrix)))
+            span_ptr = next_span
+        return outlines
+
     def fill_text(self, _context, text, ctm, colorspace, color,
                   alpha, color_params):
         try:
             argb = _device_color(colorspace, color, alpha, color_params)
-            span_ptr = text.head
-            while span_ptr:
-                next_span = span_ptr.next
-                span = _mupdf.FzTextSpan(span_ptr)
-                span.thisown = False
-                font = span.font()
-                base = span.trm()
-                page_matrix = _mupdf.FzMatrix(ctm)
-                for index in range(span.m_internal.len):
-                    item = span.items(index)
-                    if item.gid < 0:
-                        raise ValueError("text glyph has no usable glyph id")
-                    matrix = _mupdf.FzMatrix(
-                        base.a, base.b, base.c, base.d, base.e, base.f)
-                    matrix.e = item.x
-                    matrix.f = item.y
-                    matrix = _mupdf.fz_concat(matrix, page_matrix)
-                    key = (font.m_internal_value(), item.gid)
-                    commands = self._glyphs.get(key)
-                    if commands is None:
-                        outline = font.fz_outline_glyph(
-                            item.gid, _mupdf.FzMatrix())
-                        if not outline:
-                            if chr(item.ucs).isspace():
-                                self._glyphs[key] = ()
-                                continue
-                            raise ValueError("font glyph has no vector outline")
-                        commands = _path_commands(outline, allow_empty=True)
-                        if not commands and not chr(item.ucs).isspace():
-                            raise ValueError("font glyph has no vector outline")
-                        self._glyphs[key] = commands
-                    if commands:
-                        self.items.append(VectorPath(
-                            commands, fill_argb=argb,
-                            transform=_matrix(matrix), groupable=True))
-                span_ptr = next_span
+            for commands, transform in self._text_outlines(text, ctm):
+                self.items.append(VectorPath(
+                    commands, fill_argb=argb,
+                    transform=transform, groupable=True))
         except Exception as error:
             self.failure = str(error)
 
@@ -279,8 +325,17 @@ class _DisplayListDevice(_mupdf.FzDevice2):
     def stroke_text(self, *_args):
         self._fail("stroke-text")
 
-    def clip_text(self, *_args):
-        self._fail("clip-text")
+    def clip_text(self, _context, text, ctm, _scissor):
+        try:
+            commands = []
+            for outline, transform in self._text_outlines(text, ctm):
+                commands.extend(_transform_commands(outline, transform))
+            if not commands:
+                raise ValueError("text clip has no vector outline")
+            self.items.append(ClipPush(tuple(commands)))
+            self._clip_depth += 1
+        except Exception as error:
+            self.failure = str(error)
 
     def clip_stroke_text(self, *_args):
         self._fail("clip-stroke-text")
@@ -325,8 +380,70 @@ class _DisplayListDevice(_mupdf.FzDevice2):
     def clip_image_mask(self, *_args):
         self._fail("clip-image-mask")
 
-    def fill_shade(self, *_args):
-        self._fail("fill-shade")
+    def fill_shade(self, _context, shade_ptr, ctm, alpha, color_params):
+        try:
+            shade = _mupdf.FzShade(shade_ptr)
+            shade.thisown = False
+            matrix = _mupdf.FzMatrix(ctm)
+            bound = shade.fz_bound_shade(matrix)
+            page_x0, page_y0, page_x1, page_y1 = self._page_rect
+            values = (float(bound.x0), float(bound.y0),
+                      float(bound.x1), float(bound.y1))
+            if all(math.isfinite(value) for value in values):
+                x0 = max(page_x0, values[0])
+                y0 = max(page_y0, values[1])
+                x1 = min(page_x1, values[2])
+                y1 = min(page_y1, values[3])
+            else:
+                x0, y0, x1, y1 = self._page_rect
+            if x1 <= x0 or y1 <= y0:
+                return
+            scale = SHADE_RASTER_SCALE
+            left = math.floor(x0 * scale)
+            top = math.floor(y0 * scale)
+            right = math.ceil(x1 * scale)
+            bottom = math.ceil(y1 * scale)
+            width = right - left
+            height = bottom - top
+            estimated = width * height * 4
+            if estimated > MAX_GPU_IMAGE_BYTES or \
+                    self._image_bytes + estimated > MAX_GPU_IMAGE_BYTES:
+                raise ValueError("page shading data exceeds GPU scene limit")
+            target = _mupdf.fz_device_rgb()
+            target.thisown = False
+            bbox = _mupdf.FzIrect(left, top, right, bottom)
+            pixmap = _mupdf.fz_new_pixmap_with_bbox(
+                target, bbox, _mupdf.FzSeparations(), 1)
+            _mupdf.fz_clear_pixmap(pixmap)
+            render_matrix = _mupdf.fz_concat(
+                matrix, _mupdf.FzMatrix(scale, 0, 0, scale, 0, 0))
+            shade.fz_paint_shade(
+                _mupdf.FzColorspace(), render_matrix, pixmap,
+                _mupdf.FzColorParams(color_params), bbox,
+                _mupdf.FzOverprint())
+            image = pymupdf.Pixmap(pixmap)
+            if image.n != 4 or not image.alpha:
+                raise ValueError("rasterized shading is not RGBA")
+            cost = width * height * 4
+            rgba = image.samples
+            if len(rgba) < cost:
+                raise ValueError("rasterized shading data is incomplete")
+            bgra = bytearray(cost)
+            for offset in range(0, cost, 4):
+                red, green, blue, opacity = rgba[offset:offset + 4]
+                if opacity != 255:
+                    red = (red * opacity + 127) // 255
+                    green = (green * opacity + 127) // 255
+                    blue = (blue * opacity + 127) // 255
+                bgra[offset:offset + 4] = blue, green, red, opacity
+            self.items.append(VectorImage(
+                bytes(bgra), width, height, width * 4,
+                (width / scale, 0.0, 0.0, height / scale,
+                 left / scale, top / scale),
+                max(0.0, min(1.0, float(alpha)))))
+            self._image_bytes += cost
+        except Exception as error:
+            self.failure = str(error)
 
     def begin_mask(self, *_args):
         self._fail("begin-mask")
@@ -334,11 +451,34 @@ class _DisplayListDevice(_mupdf.FzDevice2):
     def end_mask(self, *_args):
         self._fail("end-mask")
 
-    def begin_group(self, *_args):
-        self._fail("begin-group")
+    def begin_group(self, _context, _area, colorspace, isolated, knockout,
+                    blendmode, alpha):
+        try:
+            opacity = float(alpha)
+            if int(blendmode) != int(_mupdf.FZ_BLEND_NORMAL) or knockout:
+                raise ValueError("unsupported transparency group")
+            if colorspace:
+                source = _mupdf.FzColorspace(colorspace)
+                source.thisown = False
+                if not _mupdf.fz_colorspace_is_device(source) or \
+                        source.fz_colorspace_n() != 3:
+                    raise ValueError("unsupported transparency group colorspace")
+            if not isolated and opacity < 1.0 - 1e-6:
+                raise ValueError("unsupported non-isolated transparency group")
+            if not math.isfinite(opacity) or opacity < 0.0 or opacity > 1.0:
+                raise ValueError("invalid transparency group opacity")
+            self.items.append(GroupPush(opacity))
+            self._group_depth += 1
+        except Exception as error:
+            self.failure = str(error)
 
-    def end_group(self, *_args):
-        self._fail("end-group")
+    def end_group(self, _context):
+        if self._group_depth <= 0:
+            if not self.failure:
+                self.failure = "unbalanced transparency group stack"
+            return
+        self.items.append(GroupPop())
+        self._group_depth -= 1
 
     def begin_tile(self, *_args):
         self._fail("begin-tile")
@@ -349,12 +489,15 @@ class _DisplayListDevice(_mupdf.FzDevice2):
 
 def vector_page_from_pymupdf(page):
     """Return a complete GPU scene only when every operation is supported."""
-    device = _DisplayListDevice()
+    rect = page.rect
+    device = _DisplayListDevice((rect.x0, rect.y0, rect.x1, rect.y1))
     try:
         _mupdf.fz_run_page(
             page.this, device, _mupdf.FzMatrix(), _mupdf.FzCookie())
         if device._clip_depth:
             device.failure = "unbalanced clip stack"
+        if device._group_depth:
+            device.failure = "unbalanced transparency group stack"
     except Exception as error:
         device.failure = str(error)
     finally:
