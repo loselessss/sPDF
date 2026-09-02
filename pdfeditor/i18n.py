@@ -611,6 +611,12 @@ def install(app, language_code=None):
     from PyQt5.QtCore import QEvent, QObject, QTimer
     from PyQt5.QtWidgets import QComboBox, QListWidget, QTabWidget
 
+    def translate_source_text(text):
+        translated = tr(text)
+        if translated != text:
+            return translated
+        return localize_qt_standard_button(text)
+
     def translate_object(obj):
         if sip.isdeleted(obj):
             return
@@ -624,9 +630,13 @@ def install(app, language_code=None):
             if callable(get) and callable(put):
                 try:
                     old = get()
-                    new = localize_qt_standard_button(tr(old))
+                    property_name = "_spdf_i18n_source_" + getter
+                    source = obj.property(property_name) or old
+                    new = translate_source_text(source)
                     if new != old:
                         put(new)
+                    if obj.property(property_name) is None:
+                        obj.setProperty(property_name, source)
                 except (RuntimeError, TypeError):
                     pass
         if isinstance(obj, QComboBox):
@@ -665,16 +675,25 @@ def install(app, language_code=None):
 
         def schedule(self, root):
             key = id(root)
-            if key in self.pending:
+            already_pending = key in self.pending
+            self.pending[key] = (weakref.ref(root), language())
+            if already_pending:
                 return
-            self.pending[key] = weakref.ref(root)
             QTimer.singleShot(0, lambda: self.flush(key))
 
         def flush(self, key):
-            reference = self.pending.pop(key, None)
-            root = reference() if reference is not None else None
+            pending = self.pending.pop(key, None)
+            if pending is None:
+                return
+            reference, scheduled_language = pending
+            root = reference()
             if root is not None and not sip.isdeleted(root):
-                translate_tree(root)
+                current_language = language()
+                try:
+                    set_language(scheduled_language)
+                    translate_tree(root)
+                finally:
+                    set_language(current_language)
 
         def eventFilter(self, watched, event):
             # Qt can emit Polish/ChildAdded from inside a widget constructor.

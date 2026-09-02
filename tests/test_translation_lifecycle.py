@@ -49,6 +49,21 @@ class TranslationLifecycleTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(sip.isdeleted(button))
 
+    def test_retranslation_uses_original_source_text(self):
+        button = QPushButton("저장")
+        self.translator.schedule(button)
+        self.app.processEvents()
+        self.assertEqual(button.text(), "Save")
+        set_language("ko")
+        self.translator.schedule(button)
+        self.app.processEvents()
+        self.assertEqual(button.text(), "저장")
+        set_language("en")
+        self.translator.schedule(button)
+        self.app.processEvents()
+        self.assertEqual(button.text(), "Save")
+        sip.delete(button)
+
 
 if __name__ == "__main__":
     unittest.main()
