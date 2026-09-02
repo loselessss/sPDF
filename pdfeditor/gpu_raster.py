@@ -241,6 +241,65 @@ def _is_identity_transfer_function(function):
     return True
 
 
+def _multiply_argb_opacity(argb, opacity):
+    alpha = (argb >> 24) & 0xff
+    alpha = max(0, min(255, round(alpha * opacity)))
+    return (argb & 0x00ffffff) | (alpha << 24)
+
+
+def _with_group_opacity(item, opacity):
+    if isinstance(item, VectorImage):
+        return replace(item, opacity=item.opacity * opacity)
+    if isinstance(item, VectorPath):
+        if item.fill_argb is not None and item.stroke_argb is not None:
+            raise ValueError("non-isolated group opacity has combined fill and stroke")
+        fill = (_multiply_argb_opacity(item.fill_argb, opacity)
+                if item.fill_argb is not None else None)
+        stroke = (_multiply_argb_opacity(item.stroke_argb, opacity)
+                  if item.stroke_argb is not None else None)
+        return replace(item, fill_argb=fill, stroke_argb=stroke)
+    raise ValueError("non-isolated group opacity contains unsupported drawing")
+
+
+def _flatten_nonisolated_groups(items):
+    def parse(index, stop_at_group=False):
+        flattened = []
+        while index < len(items):
+            item = items[index]
+            if isinstance(item, GroupPop):
+                if not stop_at_group:
+                    raise ValueError("unbalanced transparency group stack")
+                return flattened, index + 1
+            if isinstance(item, GroupPush):
+                children, index = parse(index + 1, True)
+                if item.isolated:
+                    flattened.append(item)
+                    flattened.extend(children)
+                    flattened.append(GroupPop())
+                    continue
+                if item.blend_mode != 0:
+                    raise ValueError(
+                        "unsupported non-isolated transparency group blend mode")
+                drawing_indexes = [
+                    position for position, child in enumerate(children)
+                    if isinstance(child, (VectorPath, VectorImage))]
+                if len(drawing_indexes) != 1:
+                    raise ValueError(
+                        "unsupported non-isolated transparency group contents")
+                position = drawing_indexes[0]
+                children[position] = _with_group_opacity(
+                    children[position], item.opacity)
+                flattened.extend(children)
+                continue
+            flattened.append(item)
+            index += 1
+        if stop_at_group:
+            raise ValueError("unbalanced transparency group stack")
+        return flattened, index
+
+    return tuple(parse(0)[0])
+
+
 class _DisplayListDevice(_mupdf.FzDevice2):
     """Record only operations with an exact Direct2D representation."""
 
@@ -259,6 +318,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self._image_bytes = 0
         self._clip_depth = 0
         self._group_depth = 0
+        self._group_passthrough = []
         self._mask_depth = 0
         self._page_rect = tuple(float(value) for value in page_rect)
         self._features = set()
@@ -628,6 +688,9 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             self._features.add("transparency-group")
             opacity = float(alpha)
             mode = int(blendmode)
+            passthrough = (
+                not isolated and not knockout and mode == 0 and
+                opacity >= 1.0 - 1e-6)
             if knockout:
                 raise ValueError("unsupported knockout transparency group")
             if not 0 <= mode <= 15:
@@ -644,14 +707,15 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 pass_through_group = (
                     bool(isolated) and mode == 0 and
                     opacity >= 1.0 - 1e-6)
-                if not valid_device_space and not pass_through_group:
+                if not valid_device_space and not (
+                        pass_through_group or passthrough):
                     raise ValueError("unsupported transparency group colorspace")
-            if not isolated and (mode or opacity < 1.0 - 1e-6):
-                raise ValueError("unsupported non-isolated transparency group")
             if not math.isfinite(opacity) or opacity < 0.0 or opacity > 1.0:
                 raise ValueError("invalid transparency group opacity")
-            self.items.append(GroupPush(opacity, mode, bool(isolated)))
+            if not passthrough:
+                self.items.append(GroupPush(opacity, mode, bool(isolated)))
             self._group_depth += 1
+            self._group_passthrough.append(passthrough)
         except Exception as error:
             self._set_failure(str(error))
 
@@ -659,7 +723,10 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         if self._group_depth <= 0:
             self._set_failure("unbalanced transparency group stack")
             return
-        self.items.append(GroupPop())
+        passthrough = self._group_passthrough.pop() \
+            if self._group_passthrough else False
+        if not passthrough:
+            self.items.append(GroupPop())
         self._group_depth -= 1
 
     def begin_tile(self, *_args):
@@ -709,6 +776,12 @@ def vector_page_from_pymupdf(page):
             device.failure = "unbalanced transparency group stack"
         if not device.failure and device._mask_depth:
             device.failure = "unbalanced soft mask stack"
+        if not device.failure:
+            try:
+                device.items = list(_flatten_nonisolated_groups(
+                    tuple(device.items)))
+            except Exception as error:
+                device._set_failure(str(error))
         if not device.failure and ("blend-mode" in device._features or
                                    any(isinstance(item, MaskBegin) for item in device.items)):
             device.failure = _validate_composite_context(device.items)

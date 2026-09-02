@@ -256,6 +256,42 @@ def cmyk_group_pdf_bytes(alpha=1.0, blend_mode="Normal"):
     return bytes(data)
 
 
+def nonisolated_single_path_pdf_bytes(alpha=0.4):
+    page_content = b"0.2 0.4 0.6 rg 0 0 300 240 re f\nq /GS1 gs /Fm1 Do Q\n"
+    form_content = b"1 0 0 rg 20 20 180 140 re f\n"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /XObject << /Fm1 5 0 R >> "
+        b"/ExtGState << /GS1 6 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+        b"<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
+        b"/Resources << >> /Group << /S /Transparency /I false "
+        b"/CS /DeviceRGB >> /Length " + str(len(form_content)).encode() +
+        b" >>\nstream\n" + form_content + b"endstream",
+        b"<< /Type /ExtGState /ca " + str(alpha).encode("ascii") +
+        b" /CA " + str(alpha).encode("ascii") + b" /BM /Normal >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 class GpuRasterSceneTests(unittest.TestCase):
     def test_all_standard_pdf_blends_remain_gpu_scenes(self):
         from pdfeditor.gpu_raster import GroupPush, vector_page_from_pymupdf
@@ -415,6 +451,44 @@ class GpuRasterSceneTests(unittest.TestCase):
                 scene = vector_page_from_pymupdf(pdf[0])
                 self.assertFalse(scene.supported)
                 self.assertIn("non-isolated", scene.reason)
+
+    def test_opaque_normal_nonisolated_group_is_passthrough(self):
+        from pdfeditor.gpu_raster import GroupPush, vector_page_from_pymupdf
+        with fitz.open(stream=isolated_group_pdf_bytes(background=True),
+                       filetype="pdf") as pdf:
+            pdf.xref_set_key(5, "Group/I", "false")
+            pdf.xref_set_key(6, "ca", "1")
+            pdf.xref_set_key(6, "CA", "1")
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("transparency-group", scene.features)
+        self.assertFalse(any(isinstance(item, GroupPush) and
+                             not item.isolated
+                             for item in scene.drawables))
+
+    def test_nonisolated_group_opacity_still_falls_back(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        with fitz.open(stream=isolated_group_pdf_bytes(background=True),
+                       filetype="pdf") as pdf:
+            pdf.xref_set_key(5, "Group/I", "false")
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertFalse(scene.supported)
+        self.assertIn("non-isolated", scene.reason)
+
+    def test_single_draw_nonisolated_opacity_group_is_flattened(self):
+        from pdfeditor.gpu_raster import GroupPush, VectorPath, vector_page_from_pymupdf
+        with fitz.open(stream=nonisolated_single_path_pdf_bytes(0.4),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("transparency-group", scene.features)
+        self.assertFalse(any(isinstance(item, GroupPush) and
+                             not item.isolated
+                             for item in scene.drawables))
+        translucent = [
+            item for item in scene.drawables
+            if isinstance(item, VectorPath) and item.fill_argb == 0x66ff0000]
+        self.assertEqual(len(translucent), 1)
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
