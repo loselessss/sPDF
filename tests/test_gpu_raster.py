@@ -105,6 +105,42 @@ def isolated_group_pdf_bytes():
     return bytes(data)
 
 
+def soft_mask_pdf_bytes():
+    page_content = b"q /GS1 gs 1 0 0 rg 20 20 260 200 re f Q\n"
+    mask_content = b"0.5 g 50 50 200 140 re f\n"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /ExtGState << /GS1 6 0 R >> >> "
+        b"/Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+        b"<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
+        b"/Resources << >> /Group << /S /Transparency /I true "
+        b"/CS /DeviceGray >> /Length " + str(len(mask_content)).encode() +
+        b" >>\nstream\n" + mask_content + b"endstream",
+        b"<< /Type /ExtGState /SMask << /S /Luminosity /G 5 0 R "
+        b"/BC [0] >> >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 class GpuRasterSceneTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -155,6 +191,16 @@ class GpuRasterSceneTests(unittest.TestCase):
                     stream=isolated_group_pdf_bytes(),
                     filetype="pdf") as group:
                 pdf.insert_pdf(group)
+            with fitz.open(
+                    stream=soft_mask_pdf_bytes(),
+                    filetype="pdf") as masked:
+                pdf.insert_pdf(masked)
+            stroked = pdf.new_page(width=300, height=240)
+            stroked.insert_text((20, 20), "stroke source")
+            pdf.update_stream(
+                stroked.get_contents()[0],
+                b"q 4 w 1 J 2 j [6 3] 2 d 1 0 0 RG "
+                b"20 40 m 140 40 l 180 120 l S Q\n")
             pdf.save(self.path)
         self.document = Document(str(self.path), read_only=True)
 
@@ -175,6 +221,17 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIn("line", kinds)
         self.assertIn("cubic", kinds)
         self.assertIn("close", kinds)
+
+    def test_complex_stroke_style_stays_on_direct2d_path(self):
+        scene = self.document.gpu_vector_page(10)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("stroke-style", scene.features)
+        path = scene.paths[0]
+        self.assertEqual(path.stroke_width, 4)
+        self.assertEqual(path.stroke_style[:4], (1, 1, 1, 2))
+        self.assertEqual(path.stroke_style[4], 10)
+        self.assertAlmostEqual(path.stroke_style[5], 0.5)
+        self.assertEqual(path.stroke_style[6], (1.5, 0.75))
 
     def test_text_page_uses_exact_glyph_outlines(self):
         scene = self.document.gpu_vector_page(1)
@@ -269,6 +326,8 @@ class GpuRasterSceneTests(unittest.TestCase):
 
         scene = self.document.gpu_vector_page(7)
         self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("shading", scene.features)
+        self.assertIn("vector-clip", scene.features)
         self.assertIsInstance(scene.drawables[0], ClipPush)
         image = scene.drawables[1]
         self.assertIsInstance(image, VectorImage)
@@ -294,6 +353,7 @@ class GpuRasterSceneTests(unittest.TestCase):
 
         scene = self.document.gpu_vector_page(8)
         self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("transparency-group", scene.features)
         self.assertIsInstance(scene.drawables[0], GroupPush)
         self.assertAlmostEqual(scene.drawables[0].opacity, 1.0)
         self.assertIsInstance(scene.drawables[1], GroupPush)
@@ -306,6 +366,24 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIsInstance(scene.drawables[-3], ClipPop)
         self.assertIsInstance(scene.drawables[-2], GroupPop)
         self.assertIsInstance(scene.drawables[-1], GroupPop)
+
+    def test_luminosity_soft_mask_stays_in_gpu_scene(self):
+        from pdfeditor.gpu_raster import (ClipPop, GroupPop, GroupPush,
+                                          MaskBegin, MaskEnd, VectorPath)
+
+        scene = self.document.gpu_vector_page(9)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("soft-mask", scene.features)
+        self.assertIsInstance(scene.drawables[0], MaskBegin)
+        self.assertTrue(scene.drawables[0].luminosity)
+        self.assertEqual(scene.drawables[0].area, (20.0, 20.0, 280.0, 220.0))
+        self.assertIsInstance(scene.drawables[1], GroupPush)
+        self.assertTrue(any(isinstance(item, VectorPath)
+                            for item in scene.drawables[2:]))
+        mask_end = next(index for index, item in enumerate(scene.drawables)
+                        if isinstance(item, MaskEnd))
+        self.assertIsInstance(scene.drawables[mask_end - 1], GroupPop)
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
 
     def test_oversized_image_scene_uses_complete_cpu_fallback(self):
         self.document.invalidate_render(2)

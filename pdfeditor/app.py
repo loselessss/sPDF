@@ -75,6 +75,60 @@ class _TranslatedStatusBar(QStatusBar):
         super().showMessage(tr(message), timeout)
 
 
+def _render_diagnostic_summary(info):
+    mode = info.get("mode", "cpu")
+    reason = str(info.get("reason", "") or "")
+    features = tuple(info.get("features", ()))
+    labels = {
+        "direct": localize("GPU direct", "GPU 직접"),
+        "composite": localize("GPU composite", "GPU 합성"),
+        "fallback": localize("CPU fallback", "CPU 대체"),
+        "pending": localize("GPU preparing", "GPU 준비 중"),
+        "cpu": "CPU",
+    }
+    reason_labels = (
+        (("begin-mask", "end-mask"), localize("soft mask", "소프트 마스크")),
+        (("clip-image-mask",), localize("clip mask", "클리핑 마스크")),
+        (("clip-stroke-path",),
+         localize("complex stroke", "복잡한 선")),
+        (("stroke-text", "clip-stroke-text"),
+         localize("stroked text", "윤곽선 글자")),
+        (("transparency group", "begin-group", "end-group"),
+         localize("blend/transparency", "혼합·투명도")),
+        (("GPU scene limit", "shading data exceeds"),
+         localize("scene memory limit", "장면 메모리 상한")),
+    )
+    short_reason = ""
+    for needles, label in reason_labels:
+        if any(needle in reason for needle in needles):
+            short_reason = label
+            break
+    text = labels.get(mode, labels["cpu"])
+    if mode == "fallback" and short_reason:
+        text += " · " + short_reason
+    feature_names = {
+        "vector": localize("vector", "벡터"),
+        "vector-clip": localize("vector clip", "벡터 클리핑"),
+        "text": localize("text", "글자"),
+        "text-clip": localize("text clip", "글자 클리핑"),
+        "image": localize("decoded image", "디코딩 이미지"),
+        "stencil": localize("stencil image", "스텐실 이미지"),
+        "shading": localize("shading", "그라데이션"),
+        "transparency-group": localize(
+            "transparency group", "투명도 그룹"),
+        "soft-mask": localize("soft mask", "소프트 마스크"),
+        "clip-mask": localize("clip mask", "클리핑 마스크"),
+        "stroke-style": localize("stroke style", "선 스타일"),
+    }
+    tooltip = localize("Page rendering: ", "페이지 렌더링: ") + text
+    if features:
+        tooltip += "\n" + localize("Features: ", "기능: ") + ", ".join(
+            feature_names.get(feature, feature) for feature in features)
+    if reason:
+        tooltip += "\n" + localize("Detail: ", "상세: ") + reason
+    return text, tooltip
+
+
 def _show_default_app_settings(parent):
     from .defaultapp import (
         browser_external_pdf_enabled, friendly_handler_name, is_spdf_default,
@@ -384,7 +438,7 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
             self.view.render_failed.connect(lambda error: self.statusBar().showMessage(
                 localize("Detailed rendering failed: ", "선명한 화면 표시 실패: ") + error, 6000))
             self.view.render_device_changed.connect(
-                lambda _device: self._update_title())
+                lambda _device: self._on_render_device_changed())
         else:
             self.view = PageView()
 
@@ -445,8 +499,13 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
 
         self._page_label = QLabel("")
         self._page_size_label = QLabel("")
+        self._render_diagnostic_label = QLabel("")
+        self._render_diagnostic_label.setProperty("role", "secondary")
+        self._render_diagnostic_label.setVisible(
+            settings.render_diagnostics())
         self._page_size_label.setProperty("role", "secondary")
         self._page_size_label.setVisible(self._shell.workspace_mode == "editor")
+        self.statusBar().addPermanentWidget(self._render_diagnostic_label)
         self.statusBar().addPermanentWidget(self._page_size_label)
         self.statusBar().addPermanentWidget(self._page_label)
         self._zoom_input = QSpinBox()
@@ -1134,6 +1193,23 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         # 갱신하도록 신호를 쏜다.
         self.title_changed.emit()
 
+    def _on_render_device_changed(self):
+        self._update_title()
+        self._update_render_diagnostic()
+
+    def _update_render_diagnostic(self):
+        visible = settings.render_diagnostics()
+        self._render_diagnostic_label.setVisible(visible)
+        if not visible or self.doc is None or not hasattr(
+                self.view, "render_diagnostic"):
+            self._render_diagnostic_label.setText("")
+            self._render_diagnostic_label.setToolTip("")
+            return
+        text, tooltip = _render_diagnostic_summary(
+            self.view.render_diagnostic(self.page_index))
+        self._render_diagnostic_label.setText(text)
+        self._render_diagnostic_label.setToolTip(tooltip)
+
     def _update_page_label(self):
         if self.doc is None:
             self._page_label.setText("")
@@ -1154,6 +1230,8 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
                 self._zoom_input.blockSignals(True)
                 self._zoom_input.setValue(round(self.view.zoom * 100))
                 self._zoom_input.blockSignals(False)
+        if hasattr(self, "_render_diagnostic_label"):
+            self._update_render_diagnostic()
 
     def open_current_location(self):
         """현재 PDF를 선택한 상태로 Windows 탐색기를 연다."""
@@ -1699,6 +1777,15 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
                 action.triggered.connect(
                     lambda _checked=False, selected=mode:
                     self._select_render_backend(selected))
+            renderer.addSeparator()
+            diagnostic = renderer.addAction(localize(
+                "Rendering diagnostics", "렌더링 진단 표시"))
+            diagnostic.setCheckable(True)
+            diagnostic.setChecked(settings.render_diagnostics())
+            diagnostic.setToolTip(localize(
+                "Show the actual rendering path and CPU fallback reason for the current page.",
+                "현재 페이지의 실제 렌더링 경로와 CPU 대체 사유를 표시합니다."))
+            diagnostic.triggered.connect(self._set_render_diagnostics)
         menu = parent_menu.addMenu(tr("언어"))
         menu.setIcon(fluent_icon("settings"))
         group = QActionGroup(menu)
@@ -1733,6 +1820,17 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         QMessageBox.information(
             self, tr("화면 렌더러 변경"),
             tr("화면 렌더러 변경 사항은 sPDF를 다시 실행하면 적용됩니다."))
+
+    def _set_render_diagnostics(self, enabled):
+        try:
+            settings.set_render_diagnostics(enabled)
+        except OSError as error:
+            self.statusBar().showMessage(str(error), 8000)
+            return
+        for index in range(self._tabs.count()):
+            tab = self._tabs.widget(index)
+            if isinstance(tab, DocumentTab):
+                tab._update_render_diagnostic()
 
     def _select_ui_language(self, language_code):
         if language_code == settings.ui_language():

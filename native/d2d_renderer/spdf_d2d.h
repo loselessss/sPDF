@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 6;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 8;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -102,6 +102,17 @@ SPDF_D2D_API std::int32_t spdf_d2d_create_geometry_group(
     std::uint32_t path_count,
     std::uint32_t even_odd,
     void** group) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_create_stroke_style(
+    void* surface,
+    std::uint32_t start_cap,
+    std::uint32_t dash_cap,
+    std::uint32_t end_cap,
+    std::uint32_t line_join,
+    float miter_limit,
+    float dash_offset,
+    const float* dashes,
+    std::uint32_t dash_count,
+    void** stroke_style) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_push_clip_path(
     void* surface,
     void* path) noexcept;
@@ -110,6 +121,15 @@ SPDF_D2D_API std::int32_t spdf_d2d_push_opacity_layer(
     void* surface,
     float opacity) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_pop_layer(void* surface) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_begin_mask(
+    void* surface,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    std::uint32_t luminosity,
+    std::uint32_t background_argb) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_end_mask(void* surface) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_draw_bitmap(
     void* surface,
     void* bitmap,
@@ -142,7 +162,14 @@ SPDF_D2D_API std::int32_t spdf_d2d_stroke_path(
     void* path,
     std::uint32_t argb,
     float width) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_stroke_path_styled(
+    void* surface,
+    void* path,
+    std::uint32_t argb,
+    float width,
+    void* stroke_style) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_end_frame(void* surface) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_bitmap(void* bitmap) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_path(void* path) noexcept;
+SPDF_D2D_API void spdf_d2d_destroy_stroke_style(void* stroke_style) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_surface(void* surface) noexcept;

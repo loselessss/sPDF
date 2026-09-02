@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.25.0** · English and Korean interface · Windows
+**Current version: 1.26.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -145,10 +145,11 @@ Press **F1** in the application for the complete localized guide.
   supported Windows systems, with Qt/OpenGL and CPU display fallback. Supported
   pages rasterize vectors and exact glyph outlines through Direct2D and compose
   decoded images there. Nested vector and text clipping, colored stencil images,
-  and ordinary isolated transparency groups are supported. Shadings are rendered
-  into a bounded high-quality image and then composed by Direct2D. Soft/clip
-  masks, special blend modes, non-isolated translucent groups, and complex stroke
-  styles keep the complete PyMuPDF CPU path, so this is not a GPU-only PDF engine.
+  ordinary isolated transparency groups, soft and image clip masks, and complex
+  stroke styles are supported. Shadings are rendered into a bounded high-quality
+  image and then composed by Direct2D. Special blend modes, non-isolated
+  translucent groups, stroked clipping paths, and a few uncommon effects keep the
+  complete PyMuPDF CPU path, so this is not yet a GPU-only PDF engine.
   The embedded display path is unchanged.
 - Reader and editor previews cover only the current one or two pages. Detailed
   tiles use a 64 MiB cache per tab; this is not a limit on total application memory.
@@ -187,6 +188,9 @@ Standalone users can also choose **Auto**, **GPU (Direct2D)**, or **CPU
 (PyMuPDF)** in the display-renderer menu; restart sPDF after changing it. The
 document window title shows the active `[GPU]` or `[CPU]` path, and the GPU
 choice is disabled when Direct2D hardware rendering is unavailable.
+Enable **Rendering diagnostics** in the same menu to show whether the current
+page is using direct GPU drawing, GPU composition, or the CPU fallback, including
+the fallback reason.
 
 ```bash
 pip install PyQt5 PyMuPDF rapidocr onnxruntime

@@ -23,6 +23,7 @@ class VectorPath:
     fill_argb: int = None
     stroke_argb: int = None
     stroke_width: float = 1.0
+    stroke_style: tuple = None
     transform: tuple = None
     groupable: bool = False
 
@@ -60,11 +61,24 @@ class GroupPop:
 
 
 @dataclass(frozen=True)
+class MaskBegin:
+    area: tuple
+    luminosity: bool
+    background_argb: int
+
+
+@dataclass(frozen=True)
+class MaskEnd:
+    pass
+
+
+@dataclass(frozen=True)
 class VectorPage:
     supported: bool
     paths: tuple = ()
     reason: str = ""
     items: tuple = ()
+    features: tuple = ()
 
     @property
     def drawables(self):
@@ -184,7 +198,9 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self._image_bytes = 0
         self._clip_depth = 0
         self._group_depth = 0
+        self._mask_depth = 0
         self._page_rect = tuple(float(value) for value in page_rect)
+        self._features = set()
 
     def _fail(self, operation):
         if not self.failure:
@@ -193,6 +209,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
     def fill_path(self, _context, path, even_odd, ctm, colorspace, color,
                   alpha, color_params):
         try:
+            self._features.add("vector")
             self.items.append(VectorPath(
                 _path_commands(path), bool(even_odd),
                 fill_argb=_device_color(
@@ -204,30 +221,47 @@ class _DisplayListDevice(_mupdf.FzDevice2):
     def stroke_path(self, _context, path, stroke, ctm, colorspace, color,
                     alpha, color_params):
         try:
-            if stroke.dash_len or stroke.start_cap or stroke.dash_cap or \
-                    stroke.end_cap or stroke.linejoin or \
-                    abs(float(stroke.miterlimit) - 10.0) > 1e-5:
-                raise ValueError("unsupported stroke style")
+            self._features.add("vector")
             commands = _path_commands(path)
             transform = _matrix(ctm)
             argb = _device_color(colorspace, color, alpha, color_params)
             width = float(stroke.linewidth)
+            dash_count = int(stroke.dash_len)
+            dashes = tuple(float(_mupdf.floats_getitem(
+                stroke.dash_list, index)) for index in range(dash_count))
+            if any(not math.isfinite(value) or value < 0 for value in dashes):
+                raise ValueError("invalid stroke dash pattern")
+            if dashes and width <= 0:
+                raise ValueError("dashed hairline stroke is not supported")
+            dash_scale = width if dashes else 1.0
+            style = (
+                int(stroke.start_cap), int(stroke.dash_cap),
+                int(stroke.end_cap), int(stroke.linejoin),
+                float(stroke.miterlimit),
+                float(stroke.dash_phase) / dash_scale,
+                tuple(value / dash_scale for value in dashes))
+            if style == (0, 0, 0, 0, 10.0, 0.0, ()):
+                style = None
+            else:
+                self._features.add("stroke-style")
             if self.items and isinstance(self.items[-1], VectorPath):
                 previous = self.items[-1]
                 if previous.commands == commands and \
                         previous.transform == transform and \
                         previous.stroke_argb is None:
                     self.items[-1] = replace(
-                        previous, stroke_argb=argb, stroke_width=width)
+                        previous, stroke_argb=argb, stroke_width=width,
+                        stroke_style=style)
                     return
             self.items.append(VectorPath(
                 commands, stroke_argb=argb, stroke_width=width,
-                transform=transform))
+                stroke_style=style, transform=transform))
         except Exception as error:
             self.failure = str(error)
 
     def clip_path(self, _context, path, even_odd, ctm, _scissor):
         try:
+            self._features.add("vector-clip")
             self.items.append(ClipPush(
                 _path_commands(path), bool(even_odd), _matrix(ctm)))
             self._clip_depth += 1
@@ -282,6 +316,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
     def fill_text(self, _context, text, ctm, colorspace, color,
                   alpha, color_params):
         try:
+            self._features.add("text")
             argb = _device_color(colorspace, color, alpha, color_params)
             for commands, transform in self._text_outlines(text, ctm):
                 self.items.append(VectorPath(
@@ -292,6 +327,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
 
     def fill_image(self, _context, image, ctm, alpha, _color_params):
         try:
+            self._features.add("image")
             source = _mupdf.FzImage(image)
             source.thisown = False
             estimated = int(source.w()) * int(source.h()) * 4
@@ -327,6 +363,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
 
     def clip_text(self, _context, text, ctm, _scissor):
         try:
+            self._features.add("text-clip")
             commands = []
             for outline, transform in self._text_outlines(text, ctm):
                 commands.extend(_transform_commands(outline, transform))
@@ -346,6 +383,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
     def fill_image_mask(self, _context, image, ctm, colorspace, color,
                         alpha, color_params):
         try:
+            self._features.add("stencil")
             source = _mupdf.FzImage(image)
             source.thisown = False
             estimated = int(source.w()) * int(source.h()) * 4
@@ -377,11 +415,38 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         except Exception as error:
             self.failure = str(error)
 
-    def clip_image_mask(self, *_args):
-        self._fail("clip-image-mask")
+    def clip_image_mask(self, _context, image, ctm, _scissor):
+        try:
+            source = _mupdf.FzImage(image)
+            source.thisown = False
+            estimated = int(source.w()) * int(source.h()) * 4
+            if estimated > MAX_GPU_IMAGE_BYTES or \
+                    self._image_bytes + estimated > MAX_GPU_IMAGE_BYTES:
+                raise ValueError("page clip mask data exceeds GPU scene limit")
+            pixmap = pymupdf.Pixmap(
+                source.fz_get_unscaled_pixmap_from_image())
+            if pixmap.n != 1 or not pixmap.alpha:
+                raise ValueError("decoded clip mask is not an alpha mask")
+            bgra = bytearray(pixmap.width * pixmap.height * 4)
+            for index, opacity in enumerate(pixmap.samples):
+                offset = index * 4
+                bgra[offset:offset + 4] = opacity, opacity, opacity, opacity
+            cost = len(bgra)
+            self.items.extend((
+                MaskBegin(self._page_rect, False, 0),
+                VectorImage(
+                    bytes(bgra), pixmap.width, pixmap.height,
+                    pixmap.width * 4, _matrix(ctm)),
+                MaskEnd()))
+            self._clip_depth += 1
+            self._image_bytes += cost
+            self._features.add("clip-mask")
+        except Exception as error:
+            self.failure = str(error)
 
     def fill_shade(self, _context, shade_ptr, ctm, alpha, color_params):
         try:
+            self._features.add("shading")
             shade = _mupdf.FzShade(shade_ptr)
             shade.thisown = False
             matrix = _mupdf.FzMatrix(ctm)
@@ -445,23 +510,49 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         except Exception as error:
             self.failure = str(error)
 
-    def begin_mask(self, *_args):
-        self._fail("begin-mask")
+    def begin_mask(self, _context, area, luminosity, colorspace, background,
+                   color_params):
+        try:
+            if luminosity:
+                background_argb = _device_color(
+                    colorspace, background, 1.0, color_params)
+            else:
+                background_argb = 0
+            self.items.append(MaskBegin(
+                (float(area.x0), float(area.y0),
+                 float(area.x1), float(area.y1)),
+                bool(luminosity), background_argb))
+            self._mask_depth += 1
+            self._features.add("soft-mask")
+        except Exception as error:
+            self.failure = str(error)
 
-    def end_mask(self, *_args):
-        self._fail("end-mask")
+    def end_mask(self, _context, function):
+        if self._mask_depth <= 0:
+            if not self.failure:
+                self.failure = "unbalanced soft mask stack"
+            return
+        if function:
+            self._fail("soft-mask-transfer-function")
+        self.items.append(MaskEnd())
+        self._mask_depth -= 1
+        self._clip_depth += 1
 
     def begin_group(self, _context, _area, colorspace, isolated, knockout,
                     blendmode, alpha):
         try:
+            self._features.add("transparency-group")
             opacity = float(alpha)
             if int(blendmode) != int(_mupdf.FZ_BLEND_NORMAL) or knockout:
                 raise ValueError("unsupported transparency group")
             if colorspace:
                 source = _mupdf.FzColorspace(colorspace)
                 source.thisown = False
-                if not _mupdf.fz_colorspace_is_device(source) or \
-                        source.fz_colorspace_n() != 3:
+                channels = source.fz_colorspace_n()
+                valid_device_space = (
+                    _mupdf.fz_colorspace_is_device(source) and
+                    (channels == 3 or (self._mask_depth and channels == 1)))
+                if not valid_device_space:
                     raise ValueError("unsupported transparency group colorspace")
             if not isolated and opacity < 1.0 - 1e-6:
                 raise ValueError("unsupported non-isolated transparency group")
@@ -498,12 +589,18 @@ def vector_page_from_pymupdf(page):
             device.failure = "unbalanced clip stack"
         if device._group_depth:
             device.failure = "unbalanced transparency group stack"
+        if device._mask_depth:
+            device.failure = "unbalanced soft mask stack"
     except Exception as error:
         device.failure = str(error)
     finally:
         _mupdf.fz_close_device(device)
     if device.failure:
-        return VectorPage(False, reason=device.failure)
+        return VectorPage(
+            False, reason=device.failure,
+            features=tuple(sorted(device._features)))
     items = tuple(device.items)
     paths = tuple(item for item in items if isinstance(item, VectorPath))
-    return VectorPage(True, paths, items=items)
+    return VectorPage(
+        True, paths, items=items,
+        features=tuple(sorted(device._features)))

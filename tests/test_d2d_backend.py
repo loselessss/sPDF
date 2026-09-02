@@ -10,7 +10,7 @@ from pdfeditor.d2d_backend import (ABI_VERSION, D2DSurface, _NativeInfo,
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 6)
+        self.assertEqual(ABI_VERSION, 8)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -66,6 +66,8 @@ class D2DBackendTests(unittest.TestCase):
                     (path, (0.5, 0, 0, 0.5, 4, 4)),
                     (path, (0.25, 0, 0, 0.25, 40, 40)),
                 ])
+                stroke_style = surface.create_stroke_style(
+                    (1, 1, 1, 2, 10.0, 0.5, (1.5, 0.75)))
                 surface.begin_frame(0xff202020)
                 surface.draw_bitmap(bitmap, 8, 8, 56, 56)
                 surface.set_transform(1, 0, 0, 1, 0, 0)
@@ -73,12 +75,19 @@ class D2DBackendTests(unittest.TestCase):
                 surface.stroke_rect(2, 2, 62, 62, 0xff00a05a, 1.0)
                 surface.fill_path(path, 0x600078d7)
                 surface.stroke_path(path, 0xff00a05a, 2.0)
+                surface.stroke_path(path, 0xffff8000, 4.0, stroke_style)
                 surface.push_clip_path(path)
                 surface.push_clip_path(group)
                 surface.push_opacity_layer(0.65)
                 surface.fill_path(group, 0x800000ff)
                 surface.pop_layer()
                 surface.pop_clip()
+                surface.pop_clip()
+                surface.set_transform(1, 0, 0, 1, 0, 0)
+                surface.begin_mask((0, 0, 64, 64), True, 0xff000000)
+                surface.fill_rect(8, 8, 56, 56, 0xffffffff)
+                surface.end_mask()
+                surface.fill_rect(0, 0, 64, 64, 0xffff0000)
                 surface.pop_clip()
                 surface.end_frame()
                 surface.resize(96, 80, 120.0)
@@ -90,6 +99,8 @@ class D2DBackendTests(unittest.TestCase):
                 self.assertTrue(path.closed)
                 group.close()
                 self.assertTrue(group.closed)
+                stroke_style.close()
+                self.assertTrue(stroke_style.closed)
             self.assertTrue(surface.closed)
         finally:
             user32.DestroyWindow(hwnd)

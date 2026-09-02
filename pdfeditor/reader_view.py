@@ -142,6 +142,30 @@ class ReaderPageView(QGraphicsView):
             return "gpu"
         return "cpu"
 
+    def render_diagnostic(self, page):
+        """Return the actual per-page display path for optional UI diagnostics."""
+        if self._d2d_surface is not None and self.render_device != "gpu":
+            return {"mode": "cpu", "reason": "Direct2D WARP",
+                    "features": ()}
+        if self._d2d_requested:
+            scene = self._vector_pages.get(page)
+            if scene is None:
+                return {"mode": "pending", "reason": "scene pending",
+                        "features": ()}
+            if not scene.supported:
+                return {"mode": "fallback", "reason": scene.reason,
+                        "features": scene.features}
+            bitmap_features = {"image", "stencil", "shading", "clip-mask"}
+            mode = ("composite" if bitmap_features.intersection(scene.features)
+                    else "direct")
+            return {"mode": mode, "reason": "",
+                    "features": scene.features}
+        if self.composition_backend == "opengl":
+            return {"mode": "composite", "reason": "OpenGL CPU tiles",
+                    "features": ()}
+        return {"mode": "cpu", "reason": "PyMuPDF",
+                "features": ()}
+
     def _notify_render_device(self):
         device = self.render_device
         if device != self._reported_render_device:
@@ -231,13 +255,14 @@ class ReaderPageView(QGraphicsView):
             for path in cached[2]:
                 path.close()
         from .gpu_raster import (ClipPop, ClipPush, GroupPop, GroupPush,
-                                 VectorImage, VectorPath)
+                                 MaskBegin, MaskEnd, VectorImage, VectorPath)
 
         items = scene.drawables
         unique = {}
         native_items = []
         for item in items:
-            if isinstance(item, (ClipPop, GroupPush, GroupPop)):
+            if isinstance(item, (ClipPop, GroupPush, GroupPop,
+                                 MaskBegin, MaskEnd)):
                 native_items.append(None)
                 continue
             if isinstance(item, VectorImage):
@@ -253,6 +278,7 @@ class ReaderPageView(QGraphicsView):
             native_items.append(path)
         resources = {resource for resource in native_items
                      if resource is not None}
+        stroke_styles = {}
         draws = []
         index = 0
         while index < len(items):
@@ -272,6 +298,15 @@ class ReaderPageView(QGraphicsView):
                 continue
             if isinstance(item, GroupPop):
                 draws.append(("group_pop", None))
+                index += 1
+                continue
+            if isinstance(item, MaskBegin):
+                draws.append(("mask_begin", item.area, item.luminosity,
+                              item.background_argb))
+                index += 1
+                continue
+            if isinstance(item, MaskEnd):
+                draws.append(("mask_end", None))
                 index += 1
                 continue
             if isinstance(item, VectorImage):
@@ -301,11 +336,20 @@ class ReaderPageView(QGraphicsView):
                     even_odd=item.even_odd)
                 resources.add(group)
                 draws.append(("path", group, item.fill_argb, None,
-                              item.stroke_width, None))
+                              item.stroke_width, None, None))
                 index = end
                 continue
+            native_style = None
+            if item.stroke_style is not None:
+                native_style = stroke_styles.get(item.stroke_style)
+                if native_style is None:
+                    native_style = self._d2d_surface.create_stroke_style(
+                        item.stroke_style)
+                    stroke_styles[item.stroke_style] = native_style
+                    resources.add(native_style)
             draws.append(("path", native_items[index], item.fill_argb,
-                          item.stroke_argb, item.stroke_width, item.transform))
+                          item.stroke_argb, item.stroke_width, item.transform,
+                          native_style))
             index += 1
         draws = tuple(draws)
         self._d2d_vector_paths[page] = (scene, draws, resources)
@@ -331,19 +375,34 @@ class ReaderPageView(QGraphicsView):
             if kind == "group_pop":
                 self._d2d_surface.pop_layer()
                 continue
+            if kind == "mask_begin":
+                area, luminosity, background_argb = resource, *values
+                self._set_item_transform(page_transform, None)
+                self._d2d_surface.begin_mask(
+                    area, luminosity, background_argb)
+                continue
+            if kind == "mask_end":
+                self._d2d_surface.set_transform(1, 0, 0, 1, 0, 0)
+                self._d2d_surface.end_mask()
+                continue
             if kind == "image":
                 opacity, transform = values
                 self._set_item_transform(page_transform, transform)
                 self._d2d_surface.draw_bitmap(
                     resource, 0, 0, 1, 1, opacity)
                 continue
-            fill_argb, stroke_argb, stroke_width, transform = values
+            fill_argb, stroke_argb, stroke_width, transform, stroke_style = \
+                values
             self._set_item_transform(page_transform, transform)
             if fill_argb is not None:
                 self._d2d_surface.fill_path(resource, fill_argb)
             if stroke_argb is not None:
-                self._d2d_surface.stroke_path(
-                    resource, stroke_argb, stroke_width)
+                if stroke_style is None:
+                    self._d2d_surface.stroke_path(
+                        resource, stroke_argb, stroke_width)
+                else:
+                    self._d2d_surface.stroke_path(
+                        resource, stroke_argb, stroke_width, stroke_style)
         self._set_page_transform(page_transform)
 
     def _draw_d2d_overlays(self):

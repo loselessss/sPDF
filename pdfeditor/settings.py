@@ -145,6 +145,17 @@ def set_render_backend(mode):
     return True
 
 
+def render_diagnostics():
+    return bool(_load().get("render_diagnostics", False))
+
+
+def set_render_diagnostics(enabled):
+    data = _load()
+    data["render_diagnostics"] = bool(enabled)
+    _save(data)
+    return True
+
+
 # --- 문서 보기 ----------------------------------------------------------
 
 def thumbnail_width():

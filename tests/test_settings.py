@@ -40,6 +40,13 @@ class AutomaticUpdateScheduleTests(unittest.TestCase):
         with patch.object(settings, "_load", return_value={"render_backend": "bad"}):
             self.assertEqual(settings.render_backend(), "auto")
 
+    def test_render_diagnostics_defaults_off_and_persists(self):
+        self.assertFalse(settings.render_diagnostics())
+        self.assertTrue(settings.set_render_diagnostics(True))
+        self.assertTrue(settings.render_diagnostics())
+        self.assertTrue(settings.set_render_diagnostics(False))
+        self.assertFalse(settings.render_diagnostics())
+
     def test_automatic_check_is_limited_to_once_per_24_hours(self):
         settings.mark_automatic_update_check(now=1000)
 

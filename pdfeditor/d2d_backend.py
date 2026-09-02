@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 6
+ABI_VERSION = 8
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -90,6 +90,10 @@ def _load_library(path):
         c_void_p, POINTER(c_void_p), POINTER(_Transform), c_uint32,
         c_uint32, POINTER(c_void_p)]
     library.spdf_d2d_create_geometry_group.restype = c_int32
+    library.spdf_d2d_create_stroke_style.argtypes = [
+        c_void_p, c_uint32, c_uint32, c_uint32, c_uint32, c_float, c_float,
+        POINTER(c_float), c_uint32, POINTER(c_void_p)]
+    library.spdf_d2d_create_stroke_style.restype = c_int32
     library.spdf_d2d_push_clip_path.argtypes = [c_void_p, c_void_p]
     library.spdf_d2d_push_clip_path.restype = c_int32
     library.spdf_d2d_pop_clip.argtypes = [c_void_p]
@@ -98,6 +102,11 @@ def _load_library(path):
     library.spdf_d2d_push_opacity_layer.restype = c_int32
     library.spdf_d2d_pop_layer.argtypes = [c_void_p]
     library.spdf_d2d_pop_layer.restype = c_int32
+    library.spdf_d2d_begin_mask.argtypes = [
+        c_void_p, c_float, c_float, c_float, c_float, c_uint32, c_uint32]
+    library.spdf_d2d_begin_mask.restype = c_int32
+    library.spdf_d2d_end_mask.argtypes = [c_void_p]
+    library.spdf_d2d_end_mask.restype = c_int32
     library.spdf_d2d_draw_bitmap.argtypes = [
         c_void_p, c_void_p, c_float, c_float, c_float, c_float, c_float]
     library.spdf_d2d_draw_bitmap.restype = c_int32
@@ -112,12 +121,17 @@ def _load_library(path):
     library.spdf_d2d_stroke_path.argtypes = [
         c_void_p, c_void_p, c_uint32, c_float]
     library.spdf_d2d_stroke_path.restype = c_int32
+    library.spdf_d2d_stroke_path_styled.argtypes = [
+        c_void_p, c_void_p, c_uint32, c_float, c_void_p]
+    library.spdf_d2d_stroke_path_styled.restype = c_int32
     library.spdf_d2d_end_frame.argtypes = [c_void_p]
     library.spdf_d2d_end_frame.restype = c_int32
     library.spdf_d2d_destroy_bitmap.argtypes = [c_void_p]
     library.spdf_d2d_destroy_bitmap.restype = None
     library.spdf_d2d_destroy_path.argtypes = [c_void_p]
     library.spdf_d2d_destroy_path.restype = None
+    library.spdf_d2d_destroy_stroke_style.argtypes = [c_void_p]
+    library.spdf_d2d_destroy_stroke_style.restype = None
     library.spdf_d2d_destroy_surface.argtypes = [c_void_p]
     library.spdf_d2d_destroy_surface.restype = None
     return library
@@ -138,6 +152,7 @@ class D2DSurface:
         self._handle = c_void_p()
         self._bitmaps = set()
         self._paths = set()
+        self._stroke_styles = set()
         native = _NativeInfo()
         native.struct_size = ctypes.sizeof(_NativeInfo)
         result = self._library.spdf_d2d_create_surface(
@@ -244,6 +259,25 @@ class D2DSurface:
         self._paths.add(group)
         return group
 
+    def create_stroke_style(self, style):
+        """Create a Direct2D cap, join and custom-dash resource."""
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        start_cap, dash_cap, end_cap, line_join, miter_limit, dash_offset, \
+            dash_values = style
+        dash_values = tuple(float(value) for value in dash_values)
+        dash_array = ((c_float * len(dash_values))(*dash_values)
+                      if dash_values else None)
+        handle = c_void_p()
+        result = self._library.spdf_d2d_create_stroke_style(
+            self._handle, int(start_cap), int(dash_cap), int(end_cap),
+            int(line_join), float(miter_limit), float(dash_offset),
+            dash_array, len(dash_values), byref(handle))
+        _check_hresult(result, "Direct2D stroke style creation")
+        created = D2DStrokeStyle(self, handle)
+        self._stroke_styles.add(created)
+        return created
+
     def begin_frame(self, argb=0xffe8e8e8):
         if self.closed:
             raise RuntimeError("Direct2D surface is closed")
@@ -281,6 +315,24 @@ class D2DSurface:
         _check_hresult(
             self._library.spdf_d2d_pop_layer(self._handle),
             "Direct2D layer pop")
+
+    def begin_mask(self, area, luminosity, background_argb):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        left, top, right, bottom = area
+        _check_hresult(
+            self._library.spdf_d2d_begin_mask(
+                self._handle, float(left), float(top), float(right),
+                float(bottom), int(bool(luminosity)),
+                int(background_argb) & 0xffffffff),
+            "Direct2D mask capture start")
+
+    def end_mask(self):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        _check_hresult(
+            self._library.spdf_d2d_end_mask(self._handle),
+            "Direct2D mask capture end")
 
     def draw_bitmap(self, bitmap, left, top, right, bottom, opacity=1.0):
         if bitmap.closed or bitmap._surface is not self:
@@ -326,14 +378,21 @@ class D2DSurface:
                 self._handle, path._handle, int(argb) & 0xffffffff),
             "Direct2D path fill")
 
-    def stroke_path(self, path, argb, width=1.0):
+    def stroke_path(self, path, argb, width=1.0, style=None):
         if path.closed or path._surface is not self:
             raise ValueError("path does not belong to this Direct2D surface")
-        _check_hresult(
-            self._library.spdf_d2d_stroke_path(
+        if style is None:
+            result = self._library.spdf_d2d_stroke_path(
                 self._handle, path._handle, int(argb) & 0xffffffff,
-                float(width)),
-            "Direct2D path stroke")
+                float(width))
+        else:
+            if style.closed or style._surface is not self:
+                raise ValueError(
+                    "stroke style does not belong to this Direct2D surface")
+            result = self._library.spdf_d2d_stroke_path_styled(
+                self._handle, path._handle, int(argb) & 0xffffffff,
+                float(width), style._handle)
+        _check_hresult(result, "Direct2D path stroke")
 
     def end_frame(self):
         if self.closed:
@@ -348,6 +407,8 @@ class D2DSurface:
                 bitmap.close()
             for path in tuple(self._paths):
                 path.close()
+            for style in tuple(self._stroke_styles):
+                style.close()
             self._library.spdf_d2d_destroy_surface(self._handle)
             self._handle = c_void_p()
 
@@ -402,6 +463,28 @@ class D2DPath:
             self._surface._library.spdf_d2d_destroy_path(self._handle)
             self._handle = c_void_p()
             self._surface._paths.discard(self)
+
+    def __del__(self):
+        try:
+            self.close()
+        except (AttributeError, OSError):
+            pass
+
+
+class D2DStrokeStyle:
+    def __init__(self, surface, handle):
+        self._surface = surface
+        self._handle = handle
+
+    @property
+    def closed(self):
+        return not bool(self._handle)
+
+    def close(self):
+        if not self.closed:
+            self._surface._library.spdf_d2d_destroy_stroke_style(self._handle)
+            self._handle = c_void_p()
+            self._surface._stroke_styles.discard(self)
 
     def __del__(self):
         try:

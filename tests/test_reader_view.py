@@ -234,6 +234,25 @@ class ReaderViewTests(unittest.TestCase):
         self.assertEqual(self.view.render_device, "cpu")
         self.view._d2d_surface = None
 
+    def test_page_diagnostic_distinguishes_direct_composite_and_fallback(self):
+        from pdfeditor.gpu_raster import VectorPage, VectorPath
+
+        commands = (("move", 0, 0), ("line", 10, 10))
+        self.view._d2d_requested = True
+        self.view._vector_pages = {
+            0: VectorPage(True, (VectorPath(
+                commands, stroke_argb=0xff000000),), features=("vector",)),
+            1: VectorPage(True, features=("image", "vector")),
+            2: VectorPage(False, reason="unsupported operation: begin-mask",
+                          features=("vector",)),
+        }
+        self.assertEqual(self.view.render_diagnostic(0)["mode"], "direct")
+        self.assertEqual(self.view.render_diagnostic(1)["mode"], "composite")
+        fallback = self.view.render_diagnostic(2)
+        self.assertEqual(fallback["mode"], "fallback")
+        self.assertEqual(fallback["reason"], "unsupported operation: begin-mask")
+        self.view._d2d_requested = False
+
     def test_forced_gpu_mode_rejects_direct2d_warp(self):
         from types import SimpleNamespace
         from pdfeditor import reader_view
@@ -474,6 +493,48 @@ class ReaderViewTests(unittest.TestCase):
             ("push-group", 0.6),
             ("fill", path, 0xff0080ff),
             ("pop-group",),
+        ])
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_soft_mask_captures_then_applies_before_page_drawing(self):
+        from pdfeditor.gpu_raster import (ClipPop, MaskBegin, MaskEnd,
+                                          VectorPage, VectorPath)
+
+        commands = (("move", 0, 0), ("line", 100, 0),
+                    ("line", 100, 80), ("close",))
+        mask_path = VectorPath(commands, fill_argb=0xffffffff)
+        content = VectorPath(commands, fill_argb=0xffff0000)
+        scene = VectorPage(
+            True, (mask_path, content),
+            items=(MaskBegin((0, 0, 100, 80), True, 0xff000000),
+                   mask_path, MaskEnd(), content, ClipPop()),
+            features=("soft-mask", "vector"))
+        path = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = path
+        calls = []
+        surface.begin_mask.side_effect = lambda *args: calls.append(
+            ("begin-mask", *args))
+        surface.fill_path.side_effect = lambda resource, color: calls.append(
+            ("fill", resource, color))
+        surface.end_mask.side_effect = lambda: calls.append(("end-mask",))
+        surface.pop_clip.side_effect = lambda: calls.append(("pop-mask",))
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+
+        self.view._paint_d2d()
+        self.assertEqual(calls, [
+            ("begin-mask", (0, 0, 100, 80), True, 0xff000000),
+            ("fill", path, 0xffffffff),
+            ("end-mask",),
+            ("fill", path, 0xffff0000),
+            ("pop-mask",),
         ])
 
         self.view._d2d_surface = None

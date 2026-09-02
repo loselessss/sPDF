@@ -11,6 +11,7 @@
 
 #include <d2d1_1.h>
 #include <d2d1_2.h>
+#include <d2d1effects.h>
 #include <d3d11_1.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
@@ -103,6 +104,11 @@ public:
         Surface* owner;
         ComPtr<ID2D1Geometry> resource;
         ComPtr<ID2D1GeometryRealization> fill_realization;
+    };
+
+    struct StrokeStyle {
+        Surface* owner;
+        ComPtr<ID2D1StrokeStyle1> resource;
     };
 
     HRESULT initialize(
@@ -221,7 +227,8 @@ public:
     }
 
     HRESULT begin_frame(std::uint32_t argb) noexcept {
-        if (!d2d_context_ || !target_ || drawing_ || layer_depth_ != 0) {
+        if (!d2d_context_ || !target_ || drawing_ || layer_depth_ != 0 ||
+                !mask_captures_.empty()) {
             return E_UNEXPECTED;
         }
         const auto alpha = static_cast<float>((argb >> 24) & 0xff) / 255.0f;
@@ -425,6 +432,75 @@ public:
         return S_OK;
     }
 
+    HRESULT create_stroke_style(
+        std::uint32_t start_cap,
+        std::uint32_t dash_cap,
+        std::uint32_t end_cap,
+        std::uint32_t line_join,
+        float miter_limit,
+        float dash_offset,
+        const float* dashes,
+        std::uint32_t dash_count,
+        StrokeStyle** stroke_style) noexcept {
+        if (!d2d_factory_ || stroke_style == nullptr ||
+                !std::isfinite(miter_limit) || miter_limit < 1.0f ||
+                !std::isfinite(dash_offset) ||
+                (dash_count != 0 && dashes == nullptr)) {
+            return E_INVALIDARG;
+        }
+        const auto cap = [](std::uint32_t value, D2D1_CAP_STYLE* result) {
+            switch (value) {
+            case 0: *result = D2D1_CAP_STYLE_FLAT; return true;
+            case 1: *result = D2D1_CAP_STYLE_ROUND; return true;
+            case 2: *result = D2D1_CAP_STYLE_SQUARE; return true;
+            case 3: *result = D2D1_CAP_STYLE_TRIANGLE; return true;
+            default: return false;
+            }
+        };
+        D2D1_CAP_STYLE start{};
+        D2D1_CAP_STYLE dash{};
+        D2D1_CAP_STYLE end{};
+        if (!cap(start_cap, &start) || !cap(dash_cap, &dash) ||
+                !cap(end_cap, &end)) {
+            return E_INVALIDARG;
+        }
+        D2D1_LINE_JOIN join{};
+        switch (line_join) {
+        case 0: join = D2D1_LINE_JOIN_MITER; break;
+        case 1: join = D2D1_LINE_JOIN_ROUND; break;
+        case 2: join = D2D1_LINE_JOIN_BEVEL; break;
+        case 3: join = D2D1_LINE_JOIN_MITER_OR_BEVEL; break;
+        default: return E_INVALIDARG;
+        }
+        for (std::uint32_t index = 0; index < dash_count; ++index) {
+            if (!std::isfinite(dashes[index]) || dashes[index] < 0.0f) {
+                return E_INVALIDARG;
+            }
+        }
+        auto created = new (std::nothrow) StrokeStyle{this, nullptr};
+        if (created == nullptr) {
+            return E_OUTOFMEMORY;
+        }
+        D2D1_STROKE_STYLE_PROPERTIES1 properties{};
+        properties.startCap = start;
+        properties.endCap = end;
+        properties.dashCap = dash;
+        properties.lineJoin = join;
+        properties.miterLimit = miter_limit;
+        properties.dashStyle = dash_count == 0
+            ? D2D1_DASH_STYLE_SOLID : D2D1_DASH_STYLE_CUSTOM;
+        properties.dashOffset = dash_offset;
+        properties.transformType = D2D1_STROKE_TRANSFORM_TYPE_NORMAL;
+        const auto result = d2d_factory_->CreateStrokeStyle(
+            properties, dashes, dash_count, &created->resource);
+        if (FAILED(result)) {
+            delete created;
+            return result;
+        }
+        *stroke_style = created;
+        return S_OK;
+    }
+
     HRESULT push_clip_path(Path* path) noexcept {
         if (!drawing_ || path == nullptr || path->owner != this ||
                 !path->resource) {
@@ -440,6 +516,7 @@ public:
             D2D1_LAYER_OPTIONS1_NONE);
         d2d_context_->PushLayer(parameters, nullptr);
         ++layer_depth_;
+        layer_brushes_.emplace_back();
         return S_OK;
     }
 
@@ -462,6 +539,104 @@ public:
             D2D1_LAYER_OPTIONS1_NONE);
         d2d_context_->PushLayer(parameters, nullptr);
         ++layer_depth_;
+        layer_brushes_.emplace_back();
+        return S_OK;
+    }
+
+    HRESULT begin_mask(
+        float left,
+        float top,
+        float right,
+        float bottom,
+        bool luminosity,
+        std::uint32_t background_argb) noexcept {
+        if (!drawing_ || !std::isfinite(left) || !std::isfinite(top) ||
+                !std::isfinite(right) || !std::isfinite(bottom) ||
+                right <= left || bottom <= top) {
+            return E_INVALIDARG;
+        }
+        MaskCapture capture;
+        capture.luminosity = luminosity;
+        capture.layer_depth = layer_depth_;
+        d2d_context_->GetTarget(&capture.previous_target);
+        auto result = d2d_context_->CreateCommandList(&capture.commands);
+        if (FAILED(result)) {
+            return result;
+        }
+        d2d_context_->SetTarget(capture.commands.Get());
+        mask_captures_.push_back(capture);
+        if (luminosity || ((background_argb >> 24) & 0xff) != 0) {
+            ComPtr<ID2D1SolidColorBrush> brush;
+            result = create_brush(background_argb, &brush);
+            if (FAILED(result)) {
+                d2d_context_->SetTarget(capture.previous_target.Get());
+                mask_captures_.pop_back();
+                return result;
+            }
+            d2d_context_->FillRectangle(
+                D2D1::RectF(left, top, right, bottom), brush.Get());
+        }
+        return S_OK;
+    }
+
+    HRESULT end_mask() noexcept {
+        if (!drawing_ || mask_captures_.empty()) {
+            return E_UNEXPECTED;
+        }
+        auto capture = mask_captures_.back();
+        mask_captures_.pop_back();
+        if (layer_depth_ != capture.layer_depth) {
+            d2d_context_->SetTarget(capture.previous_target.Get());
+            return E_UNEXPECTED;
+        }
+        d2d_context_->SetTarget(capture.previous_target.Get());
+        auto result = capture.commands->Close();
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1Image> image = capture.commands;
+        ComPtr<ID2D1Effect> luminance;
+        if (capture.luminosity) {
+            result = d2d_context_->CreateEffect(
+                CLSID_D2D1LuminanceToAlpha, &luminance);
+            if (FAILED(result)) {
+                return result;
+            }
+            luminance->SetInput(0, capture.commands.Get());
+            luminance->GetOutput(&image);
+        }
+        D2D1_RECT_F bounds{};
+        result = d2d_context_->GetImageLocalBounds(image.Get(), &bounds);
+        if (FAILED(result) || bounds.right <= bounds.left ||
+                bounds.bottom <= bounds.top) {
+            return FAILED(result) ? result : E_INVALIDARG;
+        }
+        ComPtr<ID2D1ImageBrush> brush;
+        const auto brush_properties = D2D1::BrushProperties(
+            1.0f,
+            D2D1::Matrix3x2F::Translation(bounds.left, bounds.top));
+        result = d2d_context_->CreateImageBrush(
+            image.Get(),
+            D2D1::ImageBrushProperties(
+                bounds, D2D1_EXTEND_MODE_CLAMP,
+                D2D1_EXTEND_MODE_CLAMP,
+                D2D1_INTERPOLATION_MODE_LINEAR),
+            brush_properties,
+            &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        const auto parameters = D2D1::LayerParameters1(
+            D2D1::InfiniteRect(),
+            nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(),
+            1.0f,
+            brush.Get(),
+            D2D1_LAYER_OPTIONS1_NONE);
+        d2d_context_->PushLayer(parameters, nullptr);
+        ++layer_depth_;
+        layer_brushes_.push_back(brush);
         return S_OK;
     }
 
@@ -471,6 +646,9 @@ public:
         }
         d2d_context_->PopLayer();
         --layer_depth_;
+        if (!layer_brushes_.empty()) {
+            layer_brushes_.pop_back();
+        }
         return S_OK;
     }
 
@@ -530,9 +708,15 @@ public:
         return S_OK;
     }
 
-    HRESULT stroke_path(Path* path, std::uint32_t argb, float width) noexcept {
+    HRESULT stroke_path(
+        Path* path,
+        std::uint32_t argb,
+        float width,
+        StrokeStyle* stroke_style = nullptr) noexcept {
         if (!drawing_ || path == nullptr || path->owner != this ||
-                !path->resource || width <= 0.0f) {
+                !path->resource || width < 0.0f ||
+                (stroke_style != nullptr &&
+                 (stroke_style->owner != this || !stroke_style->resource))) {
             return E_INVALIDARG;
         }
         ComPtr<ID2D1SolidColorBrush> brush;
@@ -540,7 +724,9 @@ public:
         if (FAILED(result)) {
             return result;
         }
-        d2d_context_->DrawGeometry(path->resource.Get(), brush.Get(), width);
+        d2d_context_->DrawGeometry(
+            path->resource.Get(), brush.Get(), width,
+            stroke_style == nullptr ? nullptr : stroke_style->resource.Get());
         return S_OK;
     }
 
@@ -569,11 +755,20 @@ public:
         if (!d2d_context_ || !swap_chain_ || !drawing_) {
             return E_UNEXPECTED;
         }
+        if (!mask_captures_.empty()) {
+            d2d_context_->SetTarget(
+                mask_captures_.front().previous_target.Get());
+            mask_captures_.clear();
+            drawing_ = false;
+            d2d_context_->EndDraw();
+            return E_UNEXPECTED;
+        }
         if (layer_depth_ != 0) {
             while (layer_depth_ != 0) {
                 d2d_context_->PopLayer();
                 --layer_depth_;
             }
+            layer_brushes_.clear();
             drawing_ = false;
             d2d_context_->EndDraw();
             return E_UNEXPECTED;
@@ -596,6 +791,13 @@ public:
     }
 
 private:
+    struct MaskCapture {
+        ComPtr<ID2D1Image> previous_target;
+        ComPtr<ID2D1CommandList> commands;
+        std::uint32_t layer_depth = 0;
+        bool luminosity = false;
+    };
+
     void realize_path(Path* path) noexcept {
         if (d2d_context1_ && path != nullptr && path->resource) {
             // 0.05 PDF points stays below half a pixel at the 800% UI limit.
@@ -661,6 +863,8 @@ private:
     ComPtr<ID2D1Bitmap1> target_;
     ComPtr<IDWriteFactory> dwrite_factory_;
     std::unordered_map<std::uint32_t, ComPtr<ID2D1SolidColorBrush>> brushes_;
+    std::vector<ComPtr<ID2D1Brush>> layer_brushes_;
+    std::vector<MaskCapture> mask_captures_;
     std::uint32_t layer_depth_ = 0;
     bool drawing_ = false;
 };
@@ -860,6 +1064,27 @@ std::int32_t spdf_d2d_create_geometry_group(
             reinterpret_cast<Surface::Path**>(group)));
 }
 
+std::int32_t spdf_d2d_create_stroke_style(
+    void* surface,
+    std::uint32_t start_cap,
+    std::uint32_t dash_cap,
+    std::uint32_t end_cap,
+    std::uint32_t line_join,
+    float miter_limit,
+    float dash_offset,
+    const float* dashes,
+    std::uint32_t dash_count,
+    void** stroke_style) noexcept {
+    if (surface == nullptr || stroke_style == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->create_stroke_style(
+            start_cap, dash_cap, end_cap, line_join, miter_limit, dash_offset,
+            dashes, dash_count,
+            reinterpret_cast<Surface::StrokeStyle**>(stroke_style)));
+}
+
 std::int32_t spdf_d2d_push_clip_path(void* surface, void* path) noexcept {
     if (surface == nullptr || path == nullptr) {
         return static_cast<std::int32_t>(E_INVALIDARG);
@@ -893,6 +1118,30 @@ std::int32_t spdf_d2d_pop_layer(void* surface) noexcept {
     }
     return static_cast<std::int32_t>(
         static_cast<Surface*>(surface)->pop_layer());
+}
+
+std::int32_t spdf_d2d_begin_mask(
+    void* surface,
+    float left,
+    float top,
+    float right,
+    float bottom,
+    std::uint32_t luminosity,
+    std::uint32_t background_argb) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->begin_mask(
+            left, top, right, bottom, luminosity != 0, background_argb));
+}
+
+std::int32_t spdf_d2d_end_mask(void* surface) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->end_mask());
 }
 
 std::int32_t spdf_d2d_draw_bitmap(
@@ -967,6 +1216,20 @@ std::int32_t spdf_d2d_stroke_path(
         static_cast<Surface::Path*>(path), argb, width));
 }
 
+std::int32_t spdf_d2d_stroke_path_styled(
+    void* surface,
+    void* path,
+    std::uint32_t argb,
+    float width,
+    void* stroke_style) noexcept {
+    if (surface == nullptr || stroke_style == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->stroke_path(
+        static_cast<Surface::Path*>(path), argb, width,
+        static_cast<Surface::StrokeStyle*>(stroke_style)));
+}
+
 std::int32_t spdf_d2d_end_frame(void* surface) noexcept {
     if (surface == nullptr) {
         return static_cast<std::int32_t>(E_INVALIDARG);
@@ -980,6 +1243,10 @@ void spdf_d2d_destroy_bitmap(void* bitmap) noexcept {
 
 void spdf_d2d_destroy_path(void* path) noexcept {
     delete static_cast<Surface::Path*>(path);
+}
+
+void spdf_d2d_destroy_stroke_style(void* stroke_style) noexcept {
+    delete static_cast<Surface::StrokeStyle*>(stroke_style);
 }
 
 void spdf_d2d_destroy_surface(void* surface) noexcept {
