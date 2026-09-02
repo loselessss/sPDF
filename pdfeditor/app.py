@@ -87,8 +87,8 @@ def _render_diagnostic_summary(info):
         "cpu": "CPU",
     }
     reason_labels = (
-        (("blend group inside clip/mask",),
-         localize("blend inside clip/mask", "클리핑·마스크 안의 혼합")),
+        (("blend group inside mask", "clip group inside mask"),
+         localize("blend/clip inside mask", "마스크 안의 혼합·클리핑")),
         (("begin-mask", "end-mask"), localize("soft mask", "소프트 마스크")),
         (("clip-image-mask",), localize("clip mask", "클리핑 마스크")),
         (("non-uniform stroked text transform",),

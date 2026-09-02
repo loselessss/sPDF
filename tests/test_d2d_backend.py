@@ -1,4 +1,5 @@
 import ctypes
+import itertools
 import math
 import os
 from pathlib import Path
@@ -44,7 +45,7 @@ def pdf_component_blend(mode, backdrop, source):
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 11)
+        self.assertEqual(ABI_VERSION, 12)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -233,12 +234,12 @@ class D2DBackendTests(unittest.TestCase):
                     ClipPush, ClipPop, GroupPush, GroupPop, VectorPath,
                     vector_page_from_pymupdf)
                 from tests.test_gpu_raster import isolated_group_pdf_bytes
-                for name in ("Multiply", "Screen", "Overlay", "Darken", "Lighten",
+                for name, clipped in itertools.product(("Multiply", "Screen", "Overlay", "Darken", "Lighten",
                              "ColorDodge", "ColorBurn", "HardLight", "SoftLight",
                              "Difference", "Exclusion", "Hue", "Saturation",
-                             "Color", "Luminosity"):
-                    with self.subTest(pdf_blend=name), pymupdf.open(
-                            stream=isolated_group_pdf_bytes(name, background=True),
+                             "Color", "Luminosity"), (False, True)):
+                    with self.subTest(pdf_blend=name, clipped=clipped), pymupdf.open(
+                            stream=isolated_group_pdf_bytes(name, background=True, clip=clipped),
                             filetype="pdf") as pdf:
                         scene = vector_page_from_pymupdf(pdf[0])
                         self.assertTrue(scene.supported, scene.reason)
@@ -251,7 +252,7 @@ class D2DBackendTests(unittest.TestCase):
                             elif isinstance(item, GroupPop):
                                 surface.end_composite_group()
                             elif isinstance(item, ClipPop):
-                                surface.pop_clip()
+                                surface.end_clip_group()
                             elif isinstance(item, (VectorPath, ClipPush)):
                                 matrix = item.transform or (1, 0, 0, 1, 0, 0)
                                 surface.set_transform(*(value * .2 for value in matrix))
@@ -259,7 +260,7 @@ class D2DBackendTests(unittest.TestCase):
                                     item.commands, even_odd=item.even_odd)
                                 frame_paths.append(geometry)
                                 if isinstance(item, ClipPush):
-                                    surface.push_clip_path(geometry)
+                                    surface.begin_clip_group(geometry)
                                 else:
                                     if item.fill_argb is not None:
                                         surface.fill_path(geometry, item.fill_argb)
@@ -267,7 +268,8 @@ class D2DBackendTests(unittest.TestCase):
                                         surface.stroke_path(geometry, item.stroke_argb,
                                                             item.stroke_width)
                         actual = surface.read_pixels_bgra(64, 64)
-                        for x, y in ((2, 2), (10, 20), (25, 25), (50, 10)):
+                        for x, y in ((2, 2), (10, 20), (25, 25), (50, 10),
+                                     (6, 25), (20, 20), (35, 30), (50, 40)):
                             offset = (y * 64 + x) * 4
                             native_rgb = tuple(reversed(actual[offset:offset + 3]))
                             reference_rgb = reference.pixel(x, y)
@@ -277,6 +279,65 @@ class D2DBackendTests(unittest.TestCase):
                         surface.end_frame()
                         for geometry in frame_paths:
                             geometry.close()
+                # Fractional clip edges must interpolate once, even with
+                # translucent backdrops and nested captures at non-default DPI.
+                fractional = surface.create_path([
+                    ("move", 10.25, 9.75), ("line", 43.75, 9.75),
+                    ("line", 43.75, 51.25), ("line", 10.25, 51.25), ("close",)])
+                for dpi in (96.0, 120.0):
+                    surface.resize(80, 80, dpi)
+                    for transform in ((1, 0, 0, 1, 0, 0), (0, 1, -1, 0, 64, 0)):
+                        with self.subTest(clip_dpi=dpi, transform=transform):
+                            surface.begin_frame()
+                            surface.begin_composite_group(0, 1)
+                            surface.set_transform(*transform)
+                            surface.push_clip_path(fractional)
+                            surface.set_transform(1, 0, 0, 1, 0, 0)
+                            surface.fill_rect(0, 0, 80, 80, 0xffffffff)
+                            surface.pop_clip()
+                            coverage = surface.read_pixels_bgra(80, 80)[3::4]
+                            self.assertTrue(any(0 < a < 255 for a in coverage))
+                            surface.end_composite_group()
+                            surface.end_frame()
+
+                            def blended_frame(clip_count):
+                                surface.begin_frame()
+                                surface.begin_composite_group(0, 1)
+                                surface.set_transform(1, 0, 0, 1, 0, 0)
+                                surface.fill_rect(0, 0, 80, 80, 0x804080c0)
+                                for _ in range(clip_count):
+                                    surface.set_transform(*transform)
+                                    surface.begin_clip_group(fractional)
+                                surface.set_transform(1, 0, 0, 1, 0, 0)
+                                surface.fill_rect(0, 0, 80, 80, 0x4080c040)
+                                surface.begin_composite_group(9, .6)
+                                surface.fill_rect(0, 0, 80, 80, 0xc0c04080)
+                                surface.end_composite_group()
+                                for _ in range(clip_count):
+                                    surface.end_clip_group()
+                                result = surface.read_pixels_bgra(80, 80)
+                                surface.end_composite_group()
+                                surface.end_frame()
+                                return result
+
+                            full = blended_frame(0)
+                            backdrop = (96, 64, 32, 128)
+                            for nesting in (1, 2):
+                                actual = blended_frame(nesting)
+                                worst = 0
+                                worst_pixel = None
+                                for pixel, alpha in enumerate(coverage):
+                                    weight = (alpha / 255) ** nesting
+                                    for channel, base in enumerate(backdrop):
+                                        index = pixel * 4 + channel
+                                        expected = round(base + (full[index] - base) * weight)
+                                        error = abs(actual[index] - expected)
+                                        if error > worst:
+                                            worst = error
+                                            worst_pixel = (pixel % 80, pixel // 80, channel,
+                                                           alpha, full[index], actual[index], expected)
+                                self.assertLessEqual(worst, 3, (dpi, transform, nesting, worst_pixel))
+                fractional.close()
                 surface.resize(96, 80, 120.0)
                 surface.begin_frame(0xff4080c0)
                 surface.begin_composite_group(9, .6)
@@ -307,6 +368,13 @@ class D2DBackendTests(unittest.TestCase):
                 surface.begin_composite_group(9, 1)
                 with self.assertRaises(OSError):
                     surface.end_frame()  # Reject and unwind an incomplete capture.
+                surface.clear(0xfff7f7f7)
+                surface.begin_frame()
+                surface.begin_clip_group(path)
+                with self.assertRaises(OSError):
+                    surface.end_composite_group()  # Wrong capture type must not pop.
+                with self.assertRaises(OSError):
+                    surface.end_frame()  # Unwind an unfinished clip capture too.
                 surface.clear(0xfff7f7f7)
                 self.assertFalse(surface.closed)
                 bitmap.close()

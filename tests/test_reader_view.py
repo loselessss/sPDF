@@ -416,6 +416,36 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
 
+    def test_blended_scene_routes_geometry_clips_through_backdrop_captures(self):
+        from pdfeditor.gpu_raster import (ClipPush, ClipStrokePush, ClipPop,
+                                         GroupPush, GroupPop, VectorPage)
+        commands = (("move", 0, 0), ("line", 50, 0), ("line", 50, 50), ("close",))
+        scene = VectorPage(True, items=(
+            GroupPush(1), ClipPush(commands, transform=(1, 0, 0, 1, 10, 20)),
+            GroupPush(.5, 9), ClipStrokePush(commands, 2.0), ClipPop(),
+            GroupPop(), ClipPop(), GroupPop()))
+        surface = Mock()
+        self.view._d2d_surface = surface
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        try:
+            self.view._paint_d2d()
+            events = [call[0] for call in surface.mock_calls if call[0] in (
+                "begin_clip_group", "end_clip_group", "begin_composite_group",
+                "end_composite_group")]
+            self.assertEqual(events, ["begin_composite_group", "begin_clip_group",
+                "begin_composite_group", "begin_clip_group", "end_clip_group",
+                "end_composite_group", "end_clip_group", "end_composite_group"])
+            surface.create_stroked_path.assert_called_once()
+            surface.push_clip_path.assert_not_called()
+            surface.pop_clip.assert_not_called()
+        finally:
+            self.view._d2d_surface = None
+            self.view._d2d_vector_paths.clear()
+            self.view._d2d_requested = False
+
     def test_supported_image_scene_uploads_bitmap_and_preserves_transform(self):
         from pdfeditor.gpu_raster import VectorImage, VectorPage
 

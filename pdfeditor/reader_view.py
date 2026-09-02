@@ -302,21 +302,19 @@ class ReaderPageView(QGraphicsView):
         draws = []
         composite_groups = any(
             isinstance(item, GroupPush) and item.blend_mode for item in items)
+        clip_groups = []
         index = 0
         while index < len(items):
             item = items[index]
-            if isinstance(item, ClipPush):
-                draws.append(("clip_push", native_items[index],
-                              item.transform))
-                index += 1
-                continue
-            if isinstance(item, ClipStrokePush):
-                draws.append(("clip_push", native_items[index],
-                              item.transform))
+            if isinstance(item, (ClipPush, ClipStrokePush)):
+                clip_groups.append(composite_groups)
+                kind = "clip_group_push" if composite_groups else "clip_push"
+                draws.append((kind, native_items[index], item.transform))
                 index += 1
                 continue
             if isinstance(item, ClipPop):
-                draws.append(("clip_pop", None))
+                kind = "clip_group_pop" if clip_groups.pop() else "clip_pop"
+                draws.append((kind, None))
                 index += 1
                 continue
             if isinstance(item, GroupPush):
@@ -336,6 +334,7 @@ class ReaderPageView(QGraphicsView):
                 index += 1
                 continue
             if isinstance(item, MaskEnd):
+                clip_groups.append(False)
                 draws.append(("mask_end", None))
                 index += 1
                 continue
@@ -391,6 +390,13 @@ class ReaderPageView(QGraphicsView):
         draws = self._native_vector_draws(page, scene)
         page_transform = self._page_transforms[page]
         for kind, resource, *values in draws:
+            if kind == "clip_group_push":
+                self._set_item_transform(page_transform, values[0])
+                self._d2d_surface.begin_clip_group(resource)
+                continue
+            if kind == "clip_group_pop":
+                self._d2d_surface.end_clip_group()
+                continue
             if kind == "clip_push":
                 self._set_item_transform(page_transform, values[0])
                 self._d2d_surface.push_clip_path(resource)

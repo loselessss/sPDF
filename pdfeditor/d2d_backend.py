@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 11
+ABI_VERSION = 12
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -114,6 +114,10 @@ def _load_library(path):
     library.spdf_d2d_begin_composite_group.restype = c_int32
     library.spdf_d2d_end_composite_group.argtypes = [c_void_p]
     library.spdf_d2d_end_composite_group.restype = c_int32
+    library.spdf_d2d_begin_clip_group.argtypes = [c_void_p, c_void_p]
+    library.spdf_d2d_begin_clip_group.restype = c_int32
+    library.spdf_d2d_end_clip_group.argtypes = [c_void_p]
+    library.spdf_d2d_end_clip_group.restype = c_int32
     library.spdf_d2d_read_pixels.argtypes = [c_void_p, c_void_p, c_size_t]
     library.spdf_d2d_read_pixels.restype = c_int32
     library.spdf_d2d_draw_bitmap.argtypes = [
@@ -371,6 +375,18 @@ class D2DSurface:
             raise RuntimeError("Direct2D surface is closed")
         _check_hresult(self._library.spdf_d2d_end_composite_group(
             self._handle), "Direct2D blend group end")
+
+    def begin_clip_group(self, path):
+        if self.closed or path.closed or path._surface is not self:
+            raise ValueError("clip path does not belong to this Direct2D surface")
+        _check_hresult(self._library.spdf_d2d_begin_clip_group(
+            self._handle, path._handle), "Direct2D clip group start")
+
+    def end_clip_group(self):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        _check_hresult(self._library.spdf_d2d_end_clip_group(
+            self._handle), "Direct2D clip group end")
 
     def read_pixels_bgra(self, width, height):
         """Explicit test/diagnostic readback, never part of ordinary repaint."""

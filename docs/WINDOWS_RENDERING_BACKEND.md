@@ -4,16 +4,17 @@
 
 상태: Direct2D 타일 합성 및 제한형 PDF 벡터·글자 GPU 래스터화 적용
 
-### 현재 단계: 1.28.1 / ABI v11
+### 현재 단계: 1.28.2 / ABI v12
 
 - 1.26~1.27의 소프트/이미지 마스크, 사용자 선 스타일, 윤곽선 글자와 stroked clip geometry에 이어 격리 그룹의 **11개 separable 혼합 모드**를 실제 표시 경로에 연결했다. Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion이 대상이다.
 - 1.28.1은 Hue/Saturation/Color/Luminosity도 Direct2D Blend effect에 연결하여 Normal 외 표준 PDF 혼합 모드 15개를 지원한다. PDF의 SetLum/SetSat·색 범위 보정과 같은 RGB 성분 혼합을 사용하며, 일반 HSL 색상 변환으로 대체하지 않는다. 구형 DLL이 확장된 모드 번호를 받지 않도록 ABI v11로 구분한다.
 - 혼합 장면은 일반 그룹까지 명시적인 GPU 중간 bitmap에 그린다. 그룹을 닫을 때 소스 불투명도를 적용하고 배경 snapshot과 Direct2D Blend effect로 합성한 결과를 이전 target에 복사한다. 배경을 두 번 source-over하지 않으며, 페이지 좌표·DPI 변환은 그대로 유지한다. [Microsoft Blend effect의 입력·알파 합성 정의](https://learn.microsoft.com/en-us/windows/win32/direct2d/blend)를 따른다.
-- 임시 bitmap은 PDF 전체 확대 크기가 아닌 viewport 크기이며, 소스와 배경 각 1개를 중첩 깊이별로 예약하여 표면별 256 MiB 상한을 적용한다. 그룹 종료·실패·표면 해제 시 회수한다. 현재는 프레임별 임시 버퍼이며 풀 재사용·부분 갱신은 후속 최적화다.
-- 장면에 혼합 모드가 있을 때 모든 그룹은 격리되어야 하고, 그룹 진입 시 활성 clip/mask가 없어야 한다. 그룹에 들어간 뒤 자체 clip을 열고 닫는 것은 지원한다. 앞선 clip/mask를 가로지르는 그룹은 사전 검증에서 페이지 전체 CPU 경로로 보낸다. 이 제한을 제거할 때는 부모 배경·clip·마스크가 중복 적용되지 않도록 별도 검증한다.
+- 임시 bitmap은 PDF 전체 확대 크기가 아닌 viewport 크기다. 혼합 그룹은 소스·배경 각 1개, 명시적 클리핑은 소스·배경·coverage mask 각 1개를 중첩 깊이별로 예약하여 표면별 256 MiB 상한을 적용한다. 이는 명시적 bitmap 예약 한도이며 드라이버·effect 내부 메모리까지 포함한 총 VRAM 한도는 아니다. 그룹 종료·실패·표면 해제 시 회수한다. 현재는 프레임별 임시 버퍼이며 풀 재사용·부분 갱신은 후속 최적화다.
+- 1.28.2는 혼합 장면의 geometry/text/stroked clip을 ABI v12의 명시적 clip capture로 처리한다. 기존 배경을 복사한 target에서 자식 혼합을 처리하고, 종료 시 `result * coverage + backdrop * (1 - coverage)`를 GPU 효과로 계산해 SOURCE_COPY한다. 이로써 클리핑 밖의 배경과 반투명 알파를 보존하며 경계 coverage를 해당 clip당 한 번 적용한다. coverage는 일반 Direct2D clip layer와 같은 래스터화 경로를 사용한다. [Microsoft Composite effect 입력 순서와 연산 정의](https://learn.microsoft.com/en-us/windows/win32/direct2d/composite)를 따른다.
+- 장면에 혼합 모드가 있을 때 모든 PDF 투명도 그룹은 여전히 격리되어야 한다. 활성 geometry clip 안의 그룹은 지원하지만, 소프트/이미지 마스크 캡처 또는 적용 범위 안에 그룹이나 geometry clip이 들어가면 사전 검증에서 페이지 전체 CPU 경로로 보낸다. 소프트/이미지 마스크와 혼합의 교차 지원은 다음 작업이다.
 - knockout·비격리 그룹, 타일 패턴, 마스크 transfer function과 기타 미지원 명령은 아직 남아 있다. **요소/그룹 단위 CPU 대체 구조까지 완료한 것은 아니다.** shading 생성과 이미지 디코딩도 현재 CPU 작업이다.
 - 실제 Direct2D 출력 픽셀을 읽는 명시적 진단 API를 추가했다. 11개 모드의 반투명 배경·소스·그룹 opacity 결과를 수식과 비교하고, 실제 PDF의 GPU 장면을 CPU 렌더의 내부 픽셀과 비교한다. 픽셀 readback은 테스트용 호출에만 사용하며 일반 repaint 경로에는 넣지 않는다. 임의 포스터·색 관리·모든 중첩 조합의 품질이나 속도 우위를 이 테스트만으로 보장하지 않는다.
-- 추가한 성분 혼합 4개는 12가지 배경/소스 색 쌍(6개 색조 영역, 회색, 흑백)과 4가지 알파/불투명도 조건의 192개 조합을 독립 SetLum/SetSat 수식과 비교한다. 실제 PDF 비교도 15개 모드로 확장한다. 활성 clip 안의 성분 혼합과 비격리 그룹은 지원 범위를 넓히지 않고 전체 CPU 대체를 검증한다.
+- 추가한 성분 혼합 4개는 12가지 배경/소스 색 쌍(6개 색조 영역, 회색, 흑백)과 4가지 알파/불투명도 조건의 192개 조합을 독립 SetLum/SetSat 수식과 비교한다. 실제 PDF 15개 모드를 일반 장면과 중첩/even-odd 클리핑 장면에서 CPU 내부 픽셀과 비교한다. 반투명 배경·소수점 clip 경계·중첩·회전·96/120 DPI를 별도로 비교하고, 잘못된 capture 종료와 미완료 프레임 정리도 검증한다. 마스크 안의 그룹/clip과 비격리 그룹은 전체 CPU 대체를 유지한다.
 
 ### 1.25.0 구현 이력
 
@@ -53,6 +54,7 @@ PDF 저장, 실행 취소, OCR, 페이지 구성과 파일 잠금은 네이티�
 5. 벡터·텍스트 클리핑의 중첩 push/pop을 Direct2D layer로 적용하고 색상 스텐실 마스크를 GPU 이미지로 합성한다. shading은 제한된 고품질 이미지로 만들고 일반 격리 투명도 그룹은 opacity layer로 처리한다. 소프트/클리핑 마스크와 특수 혼합 모드는 지원 범위에 넣기 전 CPU 대체 경로와 800% 확대 품질을 비교한다.
 6. PDFium/Skia GPU canvas는 별도 비교 시제품 후보로 유지한다.
 7. 편집 개체의 이동·크기 조절·회전은 변경 영역만 다시 표시한다. CPU PDF 해석 지연과 GPU 래스터·합성 지연을 따로 기록한다.
+8. GPU 래스터화 지원과 메모리 정책이 안정화되면 현재 800% 확대 상한을 높인다. 새 상한은 고배율 글자·곡선·그라데이션 품질, 좌표 정밀도, 뷰포트 단위 메모리 사용량을 측정한 뒤 결정한다. 숫자 제한만 먼저 해제하지 않으며 CPU 안전 경로의 고배율 처리도 함께 검증한다.
 
 ## 완료 기준
 

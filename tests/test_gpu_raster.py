@@ -68,8 +68,15 @@ def linear_gradient_pdf_bytes():
     return bytes(data)
 
 
-def isolated_group_pdf_bytes(blend_mode="Normal", background=False):
+def isolated_group_pdf_bytes(blend_mode="Normal", background=False, clip=False):
     page_content = b"q /GS1 gs /Fm1 Do Q\n"
+    if clip:
+        # Nested clips, including an even-odd hole, before the blended group.
+        # A preceding mark exercises backdrop preservation.
+        page_content = (b"q 35 35 230 180 re W n "
+                        b"q 40 40 220 170 re 110 95 50 50 re W* n "
+                        b"0.8 0.6 0.2 rg 40 40 80 160 re f\n" +
+                        page_content + b"Q Q\n")
     if background:
         page_content = b"0.2 0.4 0.6 rg 0 0 300 240 re f\n" + page_content
     form_content = (
@@ -160,7 +167,7 @@ class GpuRasterSceneTests(unittest.TestCase):
                 self.assertTrue(any(isinstance(item, GroupPush) and
                     item.blend_mode == mode for item in scene.drawables))
 
-    def test_nonseparable_blend_inside_clip_keeps_complete_fallback(self):
+    def test_nonseparable_blend_inside_clip_stays_on_gpu(self):
         from pdfeditor.gpu_raster import vector_page_from_pymupdf
         with fitz.open(stream=isolated_group_pdf_bytes("Hue"), filetype="pdf") as pdf:
             page = pdf[0]
@@ -168,17 +175,38 @@ class GpuRasterSceneTests(unittest.TestCase):
             pdf.update_stream(xref, b"q 30 30 180 180 re W n\n" +
                               pdf.xref_stream(xref) + b"\nQ")
             scene = vector_page_from_pymupdf(pdf[0])
-        self.assertFalse(scene.supported)
-        self.assertIn("clip/mask", scene.reason)
+        self.assertTrue(scene.supported, scene.reason)
 
-    def test_blended_scene_rejects_groups_inside_active_clips(self):
+    def test_blended_scene_supports_groups_inside_active_clips(self):
         from pdfeditor.gpu_raster import (ClipPush, ClipPop, GroupPush,
                                          GroupPop, _validate_composite_context)
         clip = ClipPush((("move", 0, 0), ("line", 1, 1)))
-        self.assertIn("clip/mask", _validate_composite_context(
+        self.assertEqual("", _validate_composite_context(
             (clip, GroupPush(.5, 9), GroupPop(), ClipPop())))
         self.assertEqual("", _validate_composite_context(
             (GroupPush(.5, 9), clip, ClipPop(), GroupPop())))
+
+    def test_blended_scene_still_rejects_groups_and_clips_in_soft_masks(self):
+        from pdfeditor.gpu_raster import (ClipPush, ClipPop, GroupPush, GroupPop,
+                                         MaskBegin, MaskEnd, _validate_composite_context)
+        mask = MaskBegin((0, 0, 100, 100), True, 0xff000000)
+        clip = ClipPush((("move", 0, 0), ("line", 1, 1)))
+        for items in ((mask, GroupPush(1), GroupPop(), MaskEnd(), ClipPop()),
+                      (mask, MaskEnd(), GroupPush(1, 9), GroupPop(), ClipPop()),
+                      (mask, MaskEnd(), clip, ClipPop(), ClipPop())):
+            with self.subTest(items=items):
+                self.assertIn("inside mask", _validate_composite_context(items))
+
+    def test_nested_geometry_clips_with_all_blends_stay_on_gpu(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        for name in ("Multiply", "Screen", "Overlay", "Darken", "Lighten",
+                     "ColorDodge", "ColorBurn", "HardLight", "SoftLight",
+                     "Difference", "Exclusion", "Hue", "Saturation", "Color",
+                     "Luminosity"):
+            with self.subTest(mode=name), fitz.open(stream=isolated_group_pdf_bytes(
+                    name, background=True, clip=True), filetype="pdf") as pdf:
+                scene = vector_page_from_pymupdf(pdf[0])
+                self.assertTrue(scene.supported, scene.reason)
 
     def test_color_component_blends_reject_nonisolated_groups(self):
         from pdfeditor.gpu_raster import vector_page_from_pymupdf

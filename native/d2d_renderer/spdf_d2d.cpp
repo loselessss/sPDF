@@ -694,11 +694,13 @@ public:
         return S_OK;
     }
 
-    HRESULT begin_composite_group(std::uint32_t mode, float opacity) noexcept {
+    HRESULT begin_composite_group(
+        std::uint32_t mode, float opacity, Path* clip = nullptr) noexcept {
         // No implicit layer may cross a target switch. The scene validator
         // rejects these combinations before any page drawing starts.
         if (!drawing_ || layer_depth_ != 0 || !mask_captures_.empty() ||
-                mode > 15 || !std::isfinite(opacity) || opacity < 0 || opacity > 1) {
+                mode > 15 || !std::isfinite(opacity) || opacity < 0 || opacity > 1 ||
+                (clip != nullptr && (clip->owner != this || !clip->resource))) {
             return E_INVALIDARG;
         }
         CompositeCapture capture;
@@ -707,10 +709,11 @@ public:
         auto result = current.As(&capture.previous);
         if (FAILED(result)) return result;
         const auto size = capture.previous->GetPixelSize();
-        capture.bytes = static_cast<std::uint64_t>(size.width) * size.height * 4;
-        // Reserve one source and one temporary backdrop per nesting level.
+        // Source + temporary backdrop, plus a coverage mask for explicit clips.
+        capture.bytes = static_cast<std::uint64_t>(size.width) * size.height * 4 *
+            (clip == nullptr ? 2 : 3);
         constexpr std::uint64_t budget = 256ULL * 1024 * 1024;
-        if (capture.bytes == 0 || composite_bytes_ + capture.bytes * 2 > budget) {
+        if (capture.bytes == 0 || composite_bytes_ + capture.bytes > budget) {
             return E_OUTOFMEMORY;
         }
         const auto properties = D2D1::BitmapProperties1(
@@ -720,28 +723,64 @@ public:
         result = d2d_context_->CreateBitmap(
             size, nullptr, 0, properties, &capture.source);
         if (FAILED(result)) return result;
+        if (clip != nullptr) {
+            result = d2d_context_->CreateBitmap(
+                size, nullptr, 0, properties, &capture.mask);
+            ComPtr<ID2D1SolidColorBrush> white;
+            if (SUCCEEDED(result)) result = create_brush(0xffffffff, &white);
+            if (SUCCEEDED(result)) result = d2d_context_->Flush();
+            if (FAILED(result)) return result;
+            // A clip is not an isolated transparency group: its children must
+            // blend against the existing backdrop. Apply coverage only on exit.
+            d2d_context_->SetTarget(nullptr);
+            result = capture.source->CopyFromBitmap(nullptr, capture.previous.Get(), nullptr);
+            if (SUCCEEDED(result)) {
+                d2d_context_->SetTarget(capture.mask.Get());
+                d2d_context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+                // Use the same coverage rasterizer as ordinary clip layers.
+                // Filled geometry realizations have different fractional-edge AA.
+                const auto parameters = D2D1::LayerParameters1(
+                    D2D1::InfiniteRect(), clip->resource.Get(),
+                    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                    D2D1::Matrix3x2F::Identity(), 1.0f, nullptr,
+                    D2D1_LAYER_OPTIONS1_NONE);
+                d2d_context_->PushLayer(parameters, nullptr);
+                D2D1_MATRIX_3X2_F clip_transform;
+                d2d_context_->GetTransform(&clip_transform);
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                const auto dip_size = capture.mask->GetSize();
+                d2d_context_->FillRectangle(
+                    D2D1::RectF(0, 0, dip_size.width, dip_size.height), white.Get());
+                d2d_context_->PopLayer();
+                d2d_context_->SetTransform(clip_transform);
+                result = d2d_context_->Flush();
+            }
+            d2d_context_->SetTarget(capture.previous.Get());
+            if (FAILED(result)) return result;
+        }
         capture.mode = mode;
         capture.opacity = opacity;
-        composite_bytes_ += capture.bytes * 2;
+        composite_bytes_ += capture.bytes;
         composite_captures_.push_back(capture);
         d2d_context_->SetTarget(capture.source.Get());
-        d2d_context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+        if (clip == nullptr) d2d_context_->Clear(D2D1::ColorF(0, 0, 0, 0));
         return S_OK;
     }
 
-    HRESULT end_composite_group() noexcept {
+    HRESULT end_composite_group(bool clip = false) noexcept {
         if (!drawing_ || composite_captures_.empty() || layer_depth_ != 0 ||
-                !mask_captures_.empty()) return E_UNEXPECTED;
+                !mask_captures_.empty() ||
+                (composite_captures_.back().mask != nullptr) != clip) return E_UNEXPECTED;
         auto capture = composite_captures_.back();
         composite_captures_.pop_back();
-        composite_bytes_ -= capture.bytes * 2;
+        composite_bytes_ -= capture.bytes;
         auto result = d2d_context_->Flush();
         d2d_context_->SetTarget(capture.previous.Get());
         if (FAILED(result)) return result;
         D2D1_MATRIX_3X2_F transform;
         d2d_context_->GetTransform(&transform);
         d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-        if (capture.mode == 0) {
+        if (capture.mode == 0 && !clip) {
             d2d_context_->DrawBitmap(capture.source.Get(), nullptr,
                 capture.opacity, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
         } else {
@@ -756,6 +795,43 @@ public:
                 d2d_context_->SetTarget(nullptr);
                 result = backdrop->CopyFromBitmap(nullptr, capture.previous.Get(), nullptr);
                 d2d_context_->SetTarget(capture.previous.Get());
+            }
+            if (clip) {
+                // premultiplied output = result * mask + backdrop * (1 - mask).
+                // SOURCE_COPY preserves translucent alpha and untouched pixels.
+                ComPtr<ID2D1Effect> inside, outside, combined;
+                if (SUCCEEDED(result)) result = d2d_context_->CreateEffect(
+                    CLSID_D2D1Composite, &inside);
+                if (SUCCEEDED(result)) result = d2d_context_->CreateEffect(
+                    CLSID_D2D1Composite, &outside);
+                if (SUCCEEDED(result)) result = d2d_context_->CreateEffect(
+                    CLSID_D2D1Composite, &combined);
+                if (SUCCEEDED(result)) {
+                    inside->SetInput(0, capture.mask.Get());
+                    inside->SetInput(1, capture.source.Get());
+                    result = inside->SetValue(D2D1_COMPOSITE_PROP_MODE,
+                                              D2D1_COMPOSITE_MODE_SOURCE_IN);
+                }
+                if (SUCCEEDED(result)) {
+                    outside->SetInput(0, backdrop.Get());
+                    outside->SetInput(1, capture.mask.Get());
+                    result = outside->SetValue(D2D1_COMPOSITE_PROP_MODE,
+                                               D2D1_COMPOSITE_MODE_DESTINATION_OUT);
+                }
+                if (SUCCEEDED(result)) {
+                    combined->SetInputEffect(0, outside.Get());
+                    combined->SetInputEffect(1, inside.Get());
+                    result = combined->SetValue(D2D1_COMPOSITE_PROP_MODE,
+                                                D2D1_COMPOSITE_MODE_PLUS);
+                }
+                if (SUCCEEDED(result)) {
+                    d2d_context_->DrawImage(combined.Get(), D2D1::Point2F(0, 0),
+                        D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                        D2D1_COMPOSITE_MODE_SOURCE_COPY);
+                    result = d2d_context_->Flush();
+                }
+                d2d_context_->SetTransform(transform);
+                return result;
             }
             ComPtr<ID2D1Effect> alpha;
             ComPtr<ID2D1Effect> blend;
@@ -984,6 +1060,7 @@ private:
     struct CompositeCapture {
         ComPtr<ID2D1Bitmap1> previous;
         ComPtr<ID2D1Bitmap1> source;
+        ComPtr<ID2D1Bitmap1> mask;
         std::uint32_t mode = 0;
         float opacity = 1.0f;
         std::uint64_t bytes = 0;
@@ -1369,6 +1446,17 @@ std::int32_t spdf_d2d_begin_composite_group(
 std::int32_t spdf_d2d_end_composite_group(void* surface) noexcept {
     if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
     return static_cast<std::int32_t>(static_cast<Surface*>(surface)->end_composite_group());
+}
+
+std::int32_t spdf_d2d_begin_clip_group(void* surface, void* path) noexcept {
+    if (surface == nullptr || path == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->begin_composite_group(
+        0, 1.0f, static_cast<Surface::Path*>(path)));
+}
+
+std::int32_t spdf_d2d_end_clip_group(void* surface) noexcept {
+    if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->end_composite_group(true));
 }
 
 std::int32_t spdf_d2d_read_pixels(

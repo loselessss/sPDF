@@ -1,4 +1,4 @@
-# sPDF 1.28.1 Release Notes
+# sPDF 1.28.2 Release Notes
 
 Release date: 2026-09-02
 
@@ -11,4 +11,8 @@ Release date: 2026-09-02
 ## 1.28.1 improvements - 2026-09-02
 
 - Hue, Saturation, Color, and Luminosity blends in isolated PDF groups now also use GPU effects, preserving the backdrop and group opacity.
-- Unsupported nested clip/mask combinations and non-isolated/knockout groups continue to use the CPU fallback to preserve display quality.
+
+## 1.28.2 improvements - 2026-09-02
+
+- Blended PDF groups inside nested geometry and text clips now also stay on the GPU path, preserving the backdrop and clipped edges.
+- Unsupported combinations inside soft/image masks and non-isolated/knockout groups continue to use the CPU fallback to preserve display quality.

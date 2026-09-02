@@ -642,24 +642,28 @@ class _DisplayListDevice(_mupdf.FzDevice2):
 
 
 def _validate_composite_context(items):
-    """Target snapshots cannot straddle an implicit clip or mask layer yet."""
-    clip_depth = 0
+    """Geometry clips use explicit captures; soft masks still use layers."""
+    clips = []
     mask_depth = 0
     for item in items:
         if isinstance(item, (ClipPush, ClipStrokePush)):
-            clip_depth += 1
+            if mask_depth or any(clips):
+                return "unsupported clip group inside mask"
+            clips.append(False)
         elif isinstance(item, ClipPop):
-            clip_depth -= 1
+            if not clips:
+                return "unbalanced composite clip stack"
+            clips.pop()
         elif isinstance(item, MaskBegin):
             mask_depth += 1
         elif isinstance(item, MaskEnd):
             mask_depth -= 1
-            clip_depth += 1
+            clips.append(True)
         elif isinstance(item, GroupPush):
             if not item.isolated:
                 return "unsupported non-isolated group in blended scene"
-            if clip_depth or mask_depth:
-                return "unsupported blend group inside clip/mask"
+            if mask_depth or any(clips):
+                return "unsupported blend group inside mask"
     return ""
 
 
