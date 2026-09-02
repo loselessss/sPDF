@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 4
+ABI_VERSION = 5
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -90,6 +90,10 @@ def _load_library(path):
         c_void_p, POINTER(c_void_p), POINTER(_Transform), c_uint32,
         c_uint32, POINTER(c_void_p)]
     library.spdf_d2d_create_geometry_group.restype = c_int32
+    library.spdf_d2d_push_clip_path.argtypes = [c_void_p, c_void_p]
+    library.spdf_d2d_push_clip_path.restype = c_int32
+    library.spdf_d2d_pop_clip.argtypes = [c_void_p]
+    library.spdf_d2d_pop_clip.restype = c_int32
     library.spdf_d2d_draw_bitmap.argtypes = [
         c_void_p, c_void_p, c_float, c_float, c_float, c_float, c_float]
     library.spdf_d2d_draw_bitmap.restype = c_int32
@@ -243,6 +247,21 @@ class D2DSurface:
             self._library.spdf_d2d_begin_frame(
                 self._handle, int(argb) & 0xffffffff),
             "Direct2D frame start")
+
+    def push_clip_path(self, path):
+        if path.closed or path._surface is not self:
+            raise ValueError("path does not belong to this Direct2D surface")
+        _check_hresult(
+            self._library.spdf_d2d_push_clip_path(
+                self._handle, path._handle),
+            "Direct2D clip push")
+
+    def pop_clip(self):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        _check_hresult(
+            self._library.spdf_d2d_pop_clip(self._handle),
+            "Direct2D clip pop")
 
     def draw_bitmap(self, bitmap, left, top, right, bottom, opacity=1.0):
         if bitmap.closed or bitmap._surface is not self:

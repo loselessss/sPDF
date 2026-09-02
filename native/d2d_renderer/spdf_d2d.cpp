@@ -220,7 +220,7 @@ public:
     }
 
     HRESULT begin_frame(std::uint32_t argb) noexcept {
-        if (!d2d_context_ || !target_ || drawing_) {
+        if (!d2d_context_ || !target_ || drawing_ || clip_depth_ != 0) {
             return E_UNEXPECTED;
         }
         const auto alpha = static_cast<float>((argb >> 24) & 0xff) / 255.0f;
@@ -424,6 +424,33 @@ public:
         return S_OK;
     }
 
+    HRESULT push_clip_path(Path* path) noexcept {
+        if (!drawing_ || path == nullptr || path->owner != this ||
+                !path->resource) {
+            return E_INVALIDARG;
+        }
+        const auto parameters = D2D1::LayerParameters1(
+            D2D1::InfiniteRect(),
+            path->resource.Get(),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(),
+            1.0f,
+            nullptr,
+            D2D1_LAYER_OPTIONS1_NONE);
+        d2d_context_->PushLayer(parameters, nullptr);
+        ++clip_depth_;
+        return S_OK;
+    }
+
+    HRESULT pop_clip() noexcept {
+        if (!drawing_ || clip_depth_ == 0) {
+            return E_UNEXPECTED;
+        }
+        d2d_context_->PopLayer();
+        --clip_depth_;
+        return S_OK;
+    }
+
     HRESULT fill_rect(
         float left,
         float top,
@@ -519,6 +546,15 @@ public:
         if (!d2d_context_ || !swap_chain_ || !drawing_) {
             return E_UNEXPECTED;
         }
+        if (clip_depth_ != 0) {
+            while (clip_depth_ != 0) {
+                d2d_context_->PopLayer();
+                --clip_depth_;
+            }
+            drawing_ = false;
+            d2d_context_->EndDraw();
+            return E_UNEXPECTED;
+        }
         drawing_ = false;
         auto result = d2d_context_->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
@@ -602,6 +638,7 @@ private:
     ComPtr<ID2D1Bitmap1> target_;
     ComPtr<IDWriteFactory> dwrite_factory_;
     std::unordered_map<std::uint32_t, ComPtr<ID2D1SolidColorBrush>> brushes_;
+    std::uint32_t clip_depth_ = 0;
     bool drawing_ = false;
 };
 
@@ -798,6 +835,23 @@ std::int32_t spdf_d2d_create_geometry_group(
             reinterpret_cast<Surface::Path* const*>(paths), transforms,
             path_count, even_odd != 0,
             reinterpret_cast<Surface::Path**>(group)));
+}
+
+std::int32_t spdf_d2d_push_clip_path(void* surface, void* path) noexcept {
+    if (surface == nullptr || path == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->push_clip_path(
+            static_cast<Surface::Path*>(path)));
+}
+
+std::int32_t spdf_d2d_pop_clip(void* surface) noexcept {
+    if (surface == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->pop_clip());
 }
 
 std::int32_t spdf_d2d_draw_bitmap(

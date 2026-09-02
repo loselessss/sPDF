@@ -8,6 +8,36 @@ import fitz
 from pdfeditor.core import Document
 
 
+def image_mask_pdf_bytes():
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length 44 >>\nstream\n"
+        b"q 0 0 1 rg 100 0 0 100 20 20 cm /Im1 Do Q\nendstream",
+        b"<< /Type /XObject /Subtype /Image /Width 8 /Height 8 "
+        b"/ImageMask true /BitsPerComponent 1 /Decode [0 1] /Length 8 >>\n"
+        b"stream\n\xf0\x90\x90\xf0\x90\x90\x90\x00\nendstream",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 class GpuRasterSceneTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -25,6 +55,22 @@ class GpuRasterSceneTests(unittest.TestCase):
             pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 2, 2), 0)
             pixmap.clear_with(0x4080c0)
             image.insert_image((20, 20, 120, 120), pixmap=pixmap)
+            clipped = pdf.new_page(width=300, height=240)
+            clipped.insert_text((30, 90), "CLIPPED TEXT", fontsize=24)
+            xref = clipped.get_contents()[0]
+            stream = pdf.xref_stream(xref)
+            pdf.update_stream(
+                xref, b"q 40 130 100 50 re W n\n" + stream + b"\nQ")
+            nested = pdf.new_page(width=300, height=240)
+            nested.insert_text((30, 90), "NESTED CLIP", fontsize=24)
+            xref = nested.get_contents()[0]
+            stream = pdf.xref_stream(xref)
+            pdf.update_stream(
+                xref,
+                b"q 20 120 200 100 re W n q 40 130 100 50 re W n\n" +
+                stream + b"\nQ Q")
+            with fitz.open(stream=image_mask_pdf_bytes(), filetype="pdf") as mask:
+                pdf.insert_pdf(mask)
             pdf.save(self.path)
         self.document = Document(str(self.path), read_only=True)
 
@@ -78,6 +124,47 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIs(first, self.document.gpu_vector_page(0))
         self.document.invalidate_render(0)
         self.assertIsNot(first, self.document.gpu_vector_page(0))
+
+    def test_path_clip_is_recorded_in_display_order(self):
+        from pdfeditor.gpu_raster import ClipPop, ClipPush, VectorPath
+
+        scene = self.document.gpu_vector_page(3)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIsInstance(scene.drawables[0], ClipPush)
+        self.assertTrue(all(isinstance(item, VectorPath)
+                            for item in scene.drawables[1:-1]))
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
+        clip = scene.drawables[0]
+        self.assertEqual(clip.transform, (1.0, 0.0, 0.0, -1.0, 0.0, 240.0))
+        self.assertIn("close", [command[0] for command in clip.commands])
+
+    def test_nested_path_clips_are_balanced(self):
+        from pdfeditor.gpu_raster import ClipPop, ClipPush
+
+        scene = self.document.gpu_vector_page(4)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertEqual(sum(isinstance(item, ClipPush)
+                             for item in scene.drawables), 2)
+        self.assertEqual(sum(isinstance(item, ClipPop)
+                             for item in scene.drawables), 2)
+        self.assertIsInstance(scene.drawables[0], ClipPush)
+        self.assertIsInstance(scene.drawables[1], ClipPush)
+        self.assertIsInstance(scene.drawables[-2], ClipPop)
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
+
+    def test_colored_image_mask_becomes_premultiplied_gpu_bitmap(self):
+        from pdfeditor.gpu_raster import VectorImage
+
+        scene = self.document.gpu_vector_page(5)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertEqual(len(scene.drawables), 1)
+        image = scene.drawables[0]
+        self.assertIsInstance(image, VectorImage)
+        self.assertEqual((image.width, image.height, image.stride), (8, 8, 32))
+        self.assertEqual(image.transform,
+                         (100.0, 0.0, 0.0, 100.0, 20.0, 120.0))
+        self.assertEqual(image.pixels[:4], bytes((0, 0, 0, 0)))
+        self.assertEqual(image.pixels[4 * 4:4 * 5], bytes((255, 0, 0, 255)))
 
     def test_oversized_image_scene_uses_complete_cpu_fallback(self):
         self.document.invalidate_render(2)

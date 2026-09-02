@@ -382,7 +382,8 @@ class ReaderViewTests(unittest.TestCase):
                     ("line", 1, 1), ("close",))
         glyphs = tuple(VectorPath(
             commands, fill_argb=0xff202020,
-            transform=(12, 0, 0, 12, x, 40)) for x in (20, 40, 60))
+            transform=(12, 0, 0, 12, x, 40), groupable=True)
+                       for x in (20, 40, 60))
         scene = VectorPage(True, glyphs, items=glyphs)
         path = Mock(closed=False)
         group = Mock(closed=False)
@@ -402,6 +403,42 @@ class ReaderViewTests(unittest.TestCase):
         surface.fill_path.assert_called_once_with(group, 0xff202020)
         self.assertEqual(surface.set_transform.call_args_list[-2].args[:4],
                          (1.0, 0.0, 0.0, 1.0))
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_clip_scene_pushes_and_pops_native_layer_in_order(self):
+        from pdfeditor.gpu_raster import (ClipPop, ClipPush, VectorPage,
+                                          VectorPath)
+
+        commands = (("move", 0, 0), ("line", 100, 0),
+                    ("line", 100, 80), ("close",))
+        clip = ClipPush(commands, transform=(1, 0, 0, 1, 20, 30))
+        drawing = VectorPath(commands, fill_argb=0xff0080ff)
+        scene = VectorPage(True, (drawing,),
+                           items=(clip, drawing, ClipPop()))
+        clip_path = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = clip_path
+        calls = []
+        surface.push_clip_path.side_effect = \
+            lambda path: calls.append(("push", path))
+        surface.fill_path.side_effect = \
+            lambda path, color: calls.append(("fill", path, color))
+        surface.pop_clip.side_effect = lambda: calls.append(("pop",))
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+
+        self.view._paint_d2d()
+        self.assertEqual(calls, [
+            ("push", clip_path),
+            ("fill", clip_path, 0xff0080ff),
+            ("pop",),
+        ])
 
         self.view._d2d_surface = None
         self.view._d2d_vector_paths.clear()

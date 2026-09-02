@@ -230,12 +230,15 @@ class ReaderPageView(QGraphicsView):
         if cached is not None:
             for path in cached[2]:
                 path.close()
-        from .gpu_raster import VectorImage, VectorPath
+        from .gpu_raster import ClipPop, ClipPush, VectorImage, VectorPath
 
         items = scene.drawables
         unique = {}
         native_items = []
         for item in items:
+            if isinstance(item, ClipPop):
+                native_items.append(None)
+                continue
             if isinstance(item, VectorImage):
                 native_items.append(self._d2d_surface.create_bitmap_bgra(
                     item.pixels, item.width, item.height, item.stride))
@@ -247,11 +250,21 @@ class ReaderPageView(QGraphicsView):
                     item.commands, even_odd=item.even_odd)
                 unique[key] = path
             native_items.append(path)
-        resources = set(native_items)
+        resources = {resource for resource in native_items
+                     if resource is not None}
         draws = []
         index = 0
         while index < len(items):
             item = items[index]
+            if isinstance(item, ClipPush):
+                draws.append(("clip_push", native_items[index],
+                              item.transform))
+                index += 1
+                continue
+            if isinstance(item, ClipPop):
+                draws.append(("clip_pop", None))
+                index += 1
+                continue
             if isinstance(item, VectorImage):
                 draws.append(("image", native_items[index], item.opacity,
                               item.transform))
@@ -259,12 +272,14 @@ class ReaderPageView(QGraphicsView):
                 continue
             if not isinstance(item, VectorPath):
                 raise ValueError("unsupported Direct2D scene item")
-            if item.transform is not None and item.fill_argb is not None and \
+            if item.groupable and item.transform is not None and \
+                    item.fill_argb is not None and \
                     item.stroke_argb is None:
                 end = index + 1
                 while end < len(items):
                     candidate = items[end]
                     if not isinstance(candidate, VectorPath) or \
+                            not candidate.groupable or \
                             candidate.transform is None or \
                             candidate.fill_argb != item.fill_argb or \
                             candidate.stroke_argb is not None or \
@@ -293,6 +308,13 @@ class ReaderPageView(QGraphicsView):
         draws = self._native_vector_draws(page, scene)
         page_transform = self._page_transforms[page]
         for kind, resource, *values in draws:
+            if kind == "clip_push":
+                self._set_item_transform(page_transform, values[0])
+                self._d2d_surface.push_clip_path(resource)
+                continue
+            if kind == "clip_pop":
+                self._d2d_surface.pop_clip()
+                continue
             if kind == "image":
                 opacity, transform = values
                 self._set_item_transform(page_transform, transform)

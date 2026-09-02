@@ -4,7 +4,7 @@
 
 상태: Direct2D 타일 합성 및 제한형 PDF 벡터·글자 GPU 래스터화 적용
 
-구현 현황: sPDF 1.23.0에서 ABI v4 DLL을 독립 실행 리더·편집기의 실제 Qt HWND에 연결했다. Intel Iris Xe의 하드웨어 D3D feature level 11.1에서 D3D11/DXGI 장치, Direct2D device context, DirectWrite factory와 flip-model swap chain을 검증했다. PyMuPDF의 512px BGRA 타일, 페이지 회전 행렬, 검색·선택·편집 테두리를 Direct2D로 합성한다. 지원되는 페이지는 MuPDF가 CPU에서 해석한 선·사각형·베지어와 원래 글꼴 glyph 윤곽을 immutable Direct2D geometry 및 realization으로 만들어 상세 CPU 타일 없이 GPU 래스터화한다. CPU에서 디코딩한 배치 이미지는 원래 PDF 행렬로 Direct2D가 확대·합성한다. 숨김·닫기 때 네이티브 캐시를 해제하며 실패하면 같은 문서와 좌표를 유지한 채 Qt 표시로 전환한다.
+구현 현황: sPDF 1.24.0에서 ABI v5 DLL을 독립 실행 리더·편집기의 실제 Qt HWND에 연결한다. Intel Iris Xe의 하드웨어 D3D feature level 11.1에서 D3D11/DXGI 장치, Direct2D device context, DirectWrite factory와 flip-model swap chain을 검증했다. PyMuPDF의 512px BGRA 타일, 페이지 회전 행렬, 검색·선택·편집 테두리를 Direct2D로 합성한다. 지원되는 페이지는 MuPDF가 CPU에서 해석한 선·사각형·베지어와 원래 글꼴 glyph 윤곽을 immutable Direct2D geometry 및 realization으로 만들어 상세 CPU 타일 없이 GPU 래스터화한다. CPU에서 디코딩한 배치 이미지와 색상 스텐실 마스크는 원래 PDF 행렬로 Direct2D가 확대·합성하며, 중첩된 벡터 경로 클리핑은 표시 순서대로 Direct2D layer에 적용한다. 숨김·닫기 때 네이티브 캐시를 해제하며 실패하면 같은 문서와 좌표를 유지한 채 Qt 표시로 전환한다.
 
 ## 결정
 
@@ -16,7 +16,7 @@ sPDF 독립 실행 리더와 편집기의 Windows 우선 화면 백엔드는 다
 - 리더와 편집기는 같은 백엔드 코드를 사용하되 장치·swap chain·캐시·문서 상태를 각 OS 프로세스가 독립 소유한다.
 - 장치 생성 실패, 원격 데스크톱, 드라이버 reset에는 CPU 표시 경로로 전환한다. 편집 좌표와 저장 결과는 백엔드와 무관해야 한다.
 
-Direct2D는 PDF 파일을 해석하는 엔진이 아니다. PyMuPDF가 CPU에서 PDF 명령을 해석하고 원래 glyph 윤곽과 이미지를 제공하며, Direct2D는 지원되는 장면을 래스터화·합성한다. 기존 PDF 글자를 DirectWrite로 다시 조판하지 않는다. 클리핑·그라데이션·마스크·투명도 그룹·복잡한 선 모양이 있거나 이미지 장면 데이터가 64 MiB를 넘으면 페이지 전체를 기존 CPU 타일 경로로 표시한다.
+Direct2D는 PDF 파일을 해석하는 엔진이 아니다. PyMuPDF가 CPU에서 PDF 명령을 해석하고 원래 glyph 윤곽과 이미지를 제공하며, Direct2D는 지원되는 장면을 래스터화·합성한다. 기존 PDF 글자를 DirectWrite로 다시 조판하지 않는다. 벡터 경로 클리핑과 색상 스텐실 이미지 마스크는 지원하며, 그라데이션·텍스트 클리핑·소프트/클리핑 마스크·투명도 그룹·복잡한 선 모양이 있거나 이미지 장면 데이터가 64 MiB를 넘으면 페이지 전체를 기존 CPU 타일 경로로 표시한다.
 
 Microsoft 문서의 [Direct2D device context 구성](https://learn.microsoft.com/en-us/windows/win32/direct2d/devices-and-device-contexts), [Direct2D·Direct3D 상호 운용](https://learn.microsoft.com/en-us/windows/win32/direct2d/direct2d-and-direct3d-interoperation-overview), [DXGI 개요](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/d3d10-graphics-programming-guide-dxgi)를 기준으로 구현한다.
 
@@ -37,8 +37,9 @@ PDF 저장, 실행 취소, OCR, 페이지 구성과 파일 잠금은 네이티�
 2. 작은 네이티브 시제품에서 HWND, D3D11 BGRA 장치, DXGI flip-model swap chain, Direct2D device context와 DirectWrite factory를 생성한다. 장치 생성·빈 프레임·bitmap 합성·resize·해제를 완료했다.
 3. 현재 512px 타일을 복사해 리더·편집기의 확대·이동과 overlay를 표시한다. 탭당 RAM 캐시 상한, GPU bitmap 연동 폐기, 숨김·닫기 후 자원 회수를 적용했다. 다중 모니터 DPI 전환과 실제 장치 손실 복구 시험은 계속한다.
 4. 단순 벡터·fill text·배치 이미지는 MuPDF 표시 장면에서 추출해 Direct2D로 표시한다. 반복 glyph geometry realization과 64 MiB 이미지 장면 상한을 적용했다.
-5. 클리핑·그라데이션·마스크·투명도 그룹을 지원 범위에 넣기 전 CPU 대체 경로와 800% 확대 품질을 비교한다. PDFium/Skia GPU canvas는 별도 비교 시제품 후보로 유지한다.
-6. 편집 개체의 이동·크기 조절·회전은 변경 영역만 다시 표시한다. CPU PDF 해석 지연과 GPU 래스터·합성 지연을 따로 기록한다.
+5. 벡터 경로 클리핑의 중첩 push/pop을 Direct2D layer로 적용하고 색상 스텐실 마스크를 GPU 이미지로 합성한다. 그라데이션·텍스트 클리핑·소프트/클리핑 마스크·투명도 그룹을 지원 범위에 넣기 전 CPU 대체 경로와 800% 확대 품질을 비교한다.
+6. PDFium/Skia GPU canvas는 별도 비교 시제품 후보로 유지한다.
+7. 편집 개체의 이동·크기 조절·회전은 변경 영역만 다시 표시한다. CPU PDF 해석 지연과 GPU 래스터·합성 지연을 따로 기록한다.
 
 ## 완료 기준
 

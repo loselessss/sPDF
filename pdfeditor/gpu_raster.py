@@ -1,12 +1,11 @@
-"""Conservative MuPDF-display-list to Direct2D scene conversion.
+"""Conservative MuPDF display-list to Direct2D scene conversion.
 
-MuPDF continues to parse PDF content and provide exact glyph outlines and
-decoded images. Direct2D rasterizes the supported page scene. Shading, masks,
-clips, transparency groups, or complex stroke styles keep the whole page on
-the existing pixel-correct PyMuPDF tile renderer.
+MuPDF remains the PDF parser and supplies exact glyph outlines and decoded
+images. Direct2D rasterizes supported drawing commands. Any command that is not
+represented exactly makes the whole page use the existing PyMuPDF tile path.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pymupdf
 from pymupdf import mupdf as _mupdf
@@ -23,6 +22,7 @@ class VectorPath:
     stroke_argb: int = None
     stroke_width: float = 1.0
     transform: tuple = None
+    groupable: bool = False
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,18 @@ class VectorImage:
     stride: int
     transform: tuple
     opacity: float = 1.0
+
+
+@dataclass(frozen=True)
+class ClipPush:
+    commands: tuple
+    even_odd: bool = False
+    transform: tuple = None
+
+
+@dataclass(frozen=True)
+class ClipPop:
+    pass
 
 
 @dataclass(frozen=True)
@@ -47,9 +59,7 @@ class VectorPage:
         return self.items or self.paths
 
 
-class _GlyphOutlineWalker(_mupdf.FzPathWalker2):
-    """Collect one already-transformed MuPDF glyph outline."""
-
+class _PathWalker(_mupdf.FzPathWalker2):
     def __init__(self):
         super().__init__()
         self.use_virtual_moveto()
@@ -73,66 +83,171 @@ class _GlyphOutlineWalker(_mupdf.FzPathWalker2):
         self.commands.append(("close",))
 
 
+def _path_commands(path, *, allow_empty=False):
+    walker = _PathWalker()
+    if isinstance(path, _mupdf.FzPath):
+        resource = path
+    else:
+        resource = _mupdf.FzPath(path)
+        resource.thisown = False
+    _mupdf.fz_walk_path(resource, walker, walker.m_internal)
+    if not walker.commands and not allow_empty:
+        raise ValueError("empty vector path")
+    return tuple(walker.commands)
+
+
+def _matrix(value):
+    matrix = value if isinstance(value, _mupdf.FzMatrix) else _mupdf.FzMatrix(value)
+    return (float(matrix.a), float(matrix.b), float(matrix.c),
+            float(matrix.d), float(matrix.e), float(matrix.f))
+
+
+def _argb(color, opacity):
+    values = tuple(color)
+    if len(values) < 3:
+        raise ValueError("Direct2D scene requires RGB colors")
+    alpha = max(0, min(255, round(float(opacity) * 255)))
+    channels = [max(0, min(255, round(float(value) * 255)))
+                for value in values[:3]]
+    return (alpha << 24) | (channels[0] << 16) | (channels[1] << 8) | channels[2]
+
+
+def _device_color(colorspace, color, opacity, color_params):
+    source = _mupdf.FzColorspace(colorspace)
+    # The callback lends this pointer; the temporary C++ wrapper must not drop
+    # the page/global colorspace when Python releases it.
+    source.thisown = False
+    target = _mupdf.fz_device_rgb()
+    target.thisown = False
+    intermediate = _mupdf.FzColorspace()
+    params = _mupdf.FzColorParams(color_params)
+    source_values = [_mupdf.floats_getitem(color, index)
+                     for index in range(source.fz_colorspace_n())]
+    converted = _mupdf.fz_convert_color(
+        source, source_values, target, intermediate, params)
+    return _argb(converted, opacity)
+
+
 class _DisplayListDevice(_mupdf.FzDevice2):
-    """Extract exact glyph outlines and decoded images from MuPDF."""
+    """Record only operations with an exact Direct2D representation."""
 
     def __init__(self):
         super().__init__()
-        self.use_virtual_fill_text()
-        self.use_virtual_fill_image()
-        self.outlines = []
-        self.images = []
+        for name in (
+                "fill_path", "stroke_path", "clip_path", "pop_clip",
+                "fill_text", "stroke_text", "clip_text", "clip_stroke_text",
+                "clip_stroke_path", "fill_image", "fill_image_mask",
+                "clip_image_mask", "fill_shade", "begin_mask", "end_mask",
+                "begin_group", "end_group", "begin_tile", "end_tile"):
+            getattr(self, "use_virtual_" + name)()
+        self.items = []
         self.failure = ""
         self._glyphs = {}
         self._image_bytes = 0
+        self._clip_depth = 0
 
-    def fill_text(self, _context, text, ctm, _colorspace, _color,
-                  _alpha, _color_params):
-        span_ptr = text.head
-        while span_ptr:
-            next_span = span_ptr.next
-            span = _mupdf.FzTextSpan(span_ptr)
-            font = span.font()
-            base = span.trm()
-            page_matrix = _mupdf.FzMatrix(ctm)
-            glyphs = []
-            for index in range(span.m_internal.len):
-                item = span.items(index)
-                if item.gid < 0:
-                    self.failure = "text glyph has no usable glyph id"
+    def _fail(self, operation):
+        if not self.failure:
+            self.failure = "unsupported operation: " + operation
+
+    def fill_path(self, _context, path, even_odd, ctm, colorspace, color,
+                  alpha, color_params):
+        try:
+            self.items.append(VectorPath(
+                _path_commands(path), bool(even_odd),
+                fill_argb=_device_color(
+                    colorspace, color, alpha, color_params),
+                transform=_matrix(ctm)))
+        except Exception as error:
+            self.failure = str(error)
+
+    def stroke_path(self, _context, path, stroke, ctm, colorspace, color,
+                    alpha, color_params):
+        try:
+            if stroke.dash_len or stroke.start_cap or stroke.dash_cap or \
+                    stroke.end_cap or stroke.linejoin or \
+                    abs(float(stroke.miterlimit) - 10.0) > 1e-5:
+                raise ValueError("unsupported stroke style")
+            commands = _path_commands(path)
+            transform = _matrix(ctm)
+            argb = _device_color(colorspace, color, alpha, color_params)
+            width = float(stroke.linewidth)
+            if self.items and isinstance(self.items[-1], VectorPath):
+                previous = self.items[-1]
+                if previous.commands == commands and \
+                        previous.transform == transform and \
+                        previous.stroke_argb is None:
+                    self.items[-1] = replace(
+                        previous, stroke_argb=argb, stroke_width=width)
                     return
-                matrix = _mupdf.FzMatrix(
-                    base.a, base.b, base.c, base.d, base.e, base.f)
-                matrix.e = item.x
-                matrix.f = item.y
-                matrix = _mupdf.fz_concat(matrix, page_matrix)
-                key = (font.m_internal_value(), item.gid)
-                commands = self._glyphs.get(key)
-                if commands is None:
-                    outline = font.fz_outline_glyph(
-                        item.gid, _mupdf.FzMatrix())
-                    if not outline:
-                        # Spaces and other blank glyphs legitimately have no path.
-                        if chr(item.ucs).isspace():
-                            self._glyphs[key] = ()
-                            continue
-                        self.failure = "font glyph has no vector outline"
-                        return
-                    walker = _GlyphOutlineWalker()
-                    _mupdf.fz_walk_path(
-                        outline, walker, walker.m_internal)
-                    commands = tuple(walker.commands)
-                    self._glyphs[key] = commands
-                if commands:
-                    glyphs.append((commands, (
-                        float(matrix.a), float(matrix.b), float(matrix.c),
-                        float(matrix.d), float(matrix.e), float(matrix.f))))
-            self.outlines.append(tuple(glyphs))
-            span_ptr = next_span
+            self.items.append(VectorPath(
+                commands, stroke_argb=argb, stroke_width=width,
+                transform=transform))
+        except Exception as error:
+            self.failure = str(error)
+
+    def clip_path(self, _context, path, even_odd, ctm, _scissor):
+        try:
+            self.items.append(ClipPush(
+                _path_commands(path), bool(even_odd), _matrix(ctm)))
+            self._clip_depth += 1
+        except Exception as error:
+            self.failure = str(error)
+
+    def pop_clip(self, _context):
+        if self._clip_depth <= 0:
+            self.failure = "unbalanced clip stack"
+            return
+        self.items.append(ClipPop())
+        self._clip_depth -= 1
+
+    def fill_text(self, _context, text, ctm, colorspace, color,
+                  alpha, color_params):
+        try:
+            argb = _device_color(colorspace, color, alpha, color_params)
+            span_ptr = text.head
+            while span_ptr:
+                next_span = span_ptr.next
+                span = _mupdf.FzTextSpan(span_ptr)
+                span.thisown = False
+                font = span.font()
+                base = span.trm()
+                page_matrix = _mupdf.FzMatrix(ctm)
+                for index in range(span.m_internal.len):
+                    item = span.items(index)
+                    if item.gid < 0:
+                        raise ValueError("text glyph has no usable glyph id")
+                    matrix = _mupdf.FzMatrix(
+                        base.a, base.b, base.c, base.d, base.e, base.f)
+                    matrix.e = item.x
+                    matrix.f = item.y
+                    matrix = _mupdf.fz_concat(matrix, page_matrix)
+                    key = (font.m_internal_value(), item.gid)
+                    commands = self._glyphs.get(key)
+                    if commands is None:
+                        outline = font.fz_outline_glyph(
+                            item.gid, _mupdf.FzMatrix())
+                        if not outline:
+                            if chr(item.ucs).isspace():
+                                self._glyphs[key] = ()
+                                continue
+                            raise ValueError("font glyph has no vector outline")
+                        commands = _path_commands(outline, allow_empty=True)
+                        if not commands and not chr(item.ucs).isspace():
+                            raise ValueError("font glyph has no vector outline")
+                        self._glyphs[key] = commands
+                    if commands:
+                        self.items.append(VectorPath(
+                            commands, fill_argb=argb,
+                            transform=_matrix(matrix), groupable=True))
+                span_ptr = next_span
+        except Exception as error:
+            self.failure = str(error)
 
     def fill_image(self, _context, image, ctm, alpha, _color_params):
         try:
             source = _mupdf.FzImage(image)
+            source.thisown = False
             estimated = int(source.w()) * int(source.h()) * 4
             if estimated > MAX_GPU_IMAGE_BYTES or \
                     self._image_bytes + estimated > MAX_GPU_IMAGE_BYTES:
@@ -147,161 +262,105 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     self._image_bytes + cost > MAX_GPU_IMAGE_BYTES:
                 raise ValueError("page image data exceeds GPU scene limit")
             bgra = bytearray(cost)
-            for source in range(0, cost, 4):
-                red, green, blue, opacity = rgba[source:source + 4]
+            for offset in range(0, cost, 4):
+                red, green, blue, opacity = rgba[offset:offset + 4]
                 if opacity != 255:
                     red = (red * opacity + 127) // 255
                     green = (green * opacity + 127) // 255
                     blue = (blue * opacity + 127) // 255
-                bgra[source:source + 4] = blue, green, red, opacity
-            matrix = _mupdf.FzMatrix(ctm)
-            self.images.append(VectorImage(
+                bgra[offset:offset + 4] = blue, green, red, opacity
+            self.items.append(VectorImage(
                 bytes(bgra), pixmap.width, pixmap.height, pixmap.width * 4,
-                (float(matrix.a), float(matrix.b), float(matrix.c),
-                 float(matrix.d), float(matrix.e), float(matrix.f)),
-                max(0.0, min(1.0, float(alpha)))))
+                _matrix(ctm), max(0.0, min(1.0, float(alpha)))))
             self._image_bytes += cost
-        except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+        except Exception as error:
             self.failure = str(error)
 
+    def stroke_text(self, *_args):
+        self._fail("stroke-text")
 
-def _display_resources(page):
+    def clip_text(self, *_args):
+        self._fail("clip-text")
+
+    def clip_stroke_text(self, *_args):
+        self._fail("clip-stroke-text")
+
+    def clip_stroke_path(self, *_args):
+        self._fail("clip-stroke-path")
+
+    def fill_image_mask(self, _context, image, ctm, colorspace, color,
+                        alpha, color_params):
+        try:
+            source = _mupdf.FzImage(image)
+            source.thisown = False
+            estimated = int(source.w()) * int(source.h()) * 4
+            if estimated > MAX_GPU_IMAGE_BYTES or \
+                    self._image_bytes + estimated > MAX_GPU_IMAGE_BYTES:
+                raise ValueError("page image data exceeds GPU scene limit")
+            pixmap = pymupdf.Pixmap(
+                source.fz_get_unscaled_pixmap_from_image())
+            if pixmap.n != 1 or not pixmap.alpha:
+                raise ValueError("decoded stencil is not an alpha mask")
+            argb = _device_color(
+                colorspace, color, 1.0, color_params)
+            red = (argb >> 16) & 0xff
+            green = (argb >> 8) & 0xff
+            blue = argb & 0xff
+            bgra = bytearray(pixmap.width * pixmap.height * 4)
+            for index, opacity in enumerate(pixmap.samples):
+                offset = index * 4
+                bgra[offset:offset + 4] = (
+                    (blue * opacity + 127) // 255,
+                    (green * opacity + 127) // 255,
+                    (red * opacity + 127) // 255,
+                    opacity)
+            cost = len(bgra)
+            self.items.append(VectorImage(
+                bytes(bgra), pixmap.width, pixmap.height, pixmap.width * 4,
+                _matrix(ctm), max(0.0, min(1.0, float(alpha)))))
+            self._image_bytes += cost
+        except Exception as error:
+            self.failure = str(error)
+
+    def clip_image_mask(self, *_args):
+        self._fail("clip-image-mask")
+
+    def fill_shade(self, *_args):
+        self._fail("fill-shade")
+
+    def begin_mask(self, *_args):
+        self._fail("begin-mask")
+
+    def end_mask(self, *_args):
+        self._fail("end-mask")
+
+    def begin_group(self, *_args):
+        self._fail("begin-group")
+
+    def end_group(self, *_args):
+        self._fail("end-group")
+
+    def begin_tile(self, *_args):
+        self._fail("begin-tile")
+
+    def end_tile(self, *_args):
+        self._fail("end-tile")
+
+
+def vector_page_from_pymupdf(page):
+    """Return a complete GPU scene only when every operation is supported."""
     device = _DisplayListDevice()
     try:
         _mupdf.fz_run_page(
             page.this, device, _mupdf.FzMatrix(), _mupdf.FzCookie())
+        if device._clip_depth:
+            device.failure = "unbalanced clip stack"
+    except Exception as error:
+        device.failure = str(error)
     finally:
         _mupdf.fz_close_device(device)
     if device.failure:
-        raise ValueError(device.failure)
-    return tuple(device.outlines), tuple(device.images)
-
-
-def _argb(color, opacity):
-    if color is None:
-        return None
-    values = tuple(color)
-    if len(values) != 3:
-        raise ValueError("Direct2D prototype requires RGB path colors")
-    alpha = max(0, min(255, round(float(opacity) * 255)))
-    channels = [max(0, min(255, round(float(value) * 255))) for value in values]
-    return (alpha << 24) | (channels[0] << 16) | (channels[1] << 8) | channels[2]
-
-
-def _point(value):
-    return float(value[0]), float(value[1])
-
-
-def _same(left, right):
-    return left is not None and abs(left[0] - right[0]) < 1e-5 and \
-        abs(left[1] - right[1]) < 1e-5
-
-
-def _path_commands(items, close_path=False):
-    commands = []
-    current = None
-
-    def move(point):
-        nonlocal current
-        if not _same(current, point):
-            commands.append(("move", point[0], point[1]))
-        current = point
-
-    for item in items:
-        kind = item[0]
-        if kind == "re":
-            rect = item[1]
-            x0, y0, x1, y1 = map(float, rect)
-            points = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-            if len(item) > 2 and item[2] < 0:
-                points.reverse()
-            move(points[0])
-            for point in points[1:]:
-                commands.append(("line", point[0], point[1]))
-            commands.append(("close",))
-            current = points[0]
-        elif kind == "l":
-            start, end = _point(item[1]), _point(item[2])
-            move(start)
-            commands.append(("line", end[0], end[1]))
-            current = end
-        elif kind == "c":
-            start = _point(item[1])
-            control1, control2, end = map(_point, item[2:5])
-            move(start)
-            commands.append(("cubic", control1[0], control1[1],
-                             control2[0], control2[1], end[0], end[1]))
-            current = end
-        elif kind == "qu":
-            points = [_point(point) for point in item[1]]
-            if len(points) != 4:
-                raise ValueError("unsupported quadrilateral path")
-            move(points[0])
-            for point in points[1:]:
-                commands.append(("line", point[0], point[1]))
-            commands.append(("close",))
-            current = points[0]
-        else:
-            raise ValueError("unsupported path operation: %s" % kind)
-    if close_path and commands and commands[-1][0] != "close":
-        commands.append(("close",))
-    if not commands:
-        raise ValueError("empty vector path")
-    return tuple(commands)
-
-
-def vector_page_from_pymupdf(page):
-    """Return a complete GPU scene only when every page operation is supported."""
-    try:
-        bbox_log = page.get_bboxlog()
-        unsupported = [entry[0] for entry in bbox_log
-                       if entry[0] not in (
-                           "fill-path", "stroke-path", "fill-text",
-                           "fill-image")]
-        if unsupported:
-            return VectorPage(False, reason="unsupported operation: %s" % unsupported[0])
-        result = []
-        for drawing in page.get_cdrawings(extended=True):
-            kind = drawing.get("type")
-            if kind not in ("f", "s", "fs") or drawing.get("level", 0) != 0:
-                return VectorPage(False, reason="unsupported path container")
-            if "s" in kind:
-                if tuple(drawing.get("lineCap", (0, 0, 0))) != (0, 0, 0) or \
-                        float(drawing.get("lineJoin", 0)) != 0 or \
-                        str(drawing.get("dashes", "[] 0")).strip() != "[] 0":
-                    return VectorPage(False, reason="unsupported stroke style")
-            commands = _path_commands(
-                drawing.get("items", ()), drawing.get("closePath", False))
-            result.append((drawing.get("seqno", 0), VectorPath(
-                commands=commands,
-                even_odd=bool(drawing.get("even_odd", False)),
-                fill_argb=_argb(drawing.get("fill"),
-                                drawing.get("fill_opacity", 1.0)) if "f" in kind else None,
-                stroke_argb=_argb(drawing.get("color"),
-                                  drawing.get("stroke_opacity", 1.0)) if "s" in kind else None,
-                stroke_width=float(drawing.get("width", 1.0)))))
-        traces = page.get_texttrace()
-        outlines, images = _display_resources(page) if traces or any(
-            entry[0] == "fill-image" for entry in bbox_log) else ((), ())
-        if len(outlines) != len(traces):
-            return VectorPage(False, reason="text outline count mismatch")
-        for trace, glyphs in zip(traces, outlines):
-            if trace.get("type") != 0:
-                return VectorPage(False, reason="unsupported text rendering mode")
-            color = _argb(trace.get("color"), trace.get("opacity", 1.0))
-            for commands, transform in glyphs:
-                result.append((trace.get("seqno", 0), VectorPath(
-                    commands=commands,
-                    fill_argb=color,
-                    transform=transform)))
-        image_seqnos = [index for index, entry in enumerate(bbox_log)
-                        if entry[0] == "fill-image"]
-        if len(images) != len(image_seqnos):
-            return VectorPage(False, reason="image resource count mismatch")
-        result.extend(zip(image_seqnos, images))
-        result.sort(key=lambda item: item[0])
-        items = tuple(item for _seqno, item in result)
-        paths = tuple(item for item in items if isinstance(item, VectorPath))
-        return VectorPage(True, paths, items=items)
-    except (AttributeError, KeyError, TypeError, ValueError) as error:
-        return VectorPage(False, reason=str(error))
+        return VectorPage(False, reason=device.failure)
+    items = tuple(device.items)
+    paths = tuple(item for item in items if isinstance(item, VectorPath))
+    return VectorPage(True, paths, items=items)
