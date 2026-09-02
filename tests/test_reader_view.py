@@ -361,6 +361,38 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
 
+    def test_stroked_clip_path_is_widened_then_pushed_on_gpu(self):
+        from pdfeditor.gpu_raster import ClipPop, ClipStrokePush, VectorPage
+
+        style = (1, 1, 1, 2, 10.0, 0.5, (1.5, 0.75))
+        clip = ClipStrokePush(
+            (("move", 20, 20), ("line", 120, 20)), 4.0, style)
+        scene = VectorPage(True, items=(clip, ClipPop()))
+        source = Mock(closed=False)
+        native_style = Mock(closed=False)
+        widened = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = source
+        surface.create_stroke_style.return_value = native_style
+        surface.create_stroked_path.return_value = widened
+        self.view._d2d_surface = surface
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+
+        self.view._paint_d2d()
+        surface.create_path.assert_called_once_with(clip.commands)
+        surface.create_stroke_style.assert_called_once_with(style)
+        surface.create_stroked_path.assert_called_once_with(
+            source, 4.0, native_style)
+        surface.push_clip_path.assert_called_once_with(widened)
+        surface.pop_clip.assert_called_once_with()
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
     def test_supported_image_scene_uploads_bitmap_and_preserves_transform(self):
         from pdfeditor.gpu_raster import VectorImage, VectorPage
 

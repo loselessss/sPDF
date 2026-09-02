@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 8;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 9;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -113,6 +113,12 @@ SPDF_D2D_API std::int32_t spdf_d2d_create_stroke_style(
     const float* dashes,
     std::uint32_t dash_count,
     void** stroke_style) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_create_stroked_path(
+    void* surface,
+    void* path,
+    float width,
+    void* stroke_style,
+    void** stroked_path) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_push_clip_path(
     void* surface,
     void* path) noexcept;

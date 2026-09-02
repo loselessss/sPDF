@@ -501,6 +501,48 @@ public:
         return S_OK;
     }
 
+    HRESULT create_stroked_path(
+        Path* path,
+        float width,
+        StrokeStyle* stroke_style,
+        Path** stroked_path) noexcept {
+        if (!d2d_factory_ || path == nullptr || path->owner != this ||
+                !path->resource || width < 0.0f || stroked_path == nullptr ||
+                (stroke_style != nullptr &&
+                 (stroke_style->owner != this || !stroke_style->resource))) {
+            return E_INVALIDARG;
+        }
+        *stroked_path = nullptr;
+        auto created = new (std::nothrow) Path{this, nullptr, nullptr};
+        if (created == nullptr) {
+            return E_OUTOFMEMORY;
+        }
+        ComPtr<ID2D1PathGeometry> geometry;
+        auto result = d2d_factory_->CreatePathGeometry(&geometry);
+        ComPtr<ID2D1GeometrySink> sink;
+        if (SUCCEEDED(result)) {
+            result = geometry->Open(&sink);
+        }
+        if (SUCCEEDED(result)) {
+            result = path->resource->Widen(
+                width,
+                stroke_style == nullptr ? nullptr : stroke_style->resource.Get(),
+                nullptr,
+                sink.Get());
+        }
+        if (SUCCEEDED(result)) {
+            result = sink->Close();
+        }
+        if (FAILED(result)) {
+            delete created;
+            return result;
+        }
+        created->resource = geometry;
+        realize_path(created);
+        *stroked_path = created;
+        return S_OK;
+    }
+
     HRESULT push_clip_path(Path* path) noexcept {
         if (!drawing_ || path == nullptr || path->owner != this ||
                 !path->resource) {
@@ -1083,6 +1125,22 @@ std::int32_t spdf_d2d_create_stroke_style(
             start_cap, dash_cap, end_cap, line_join, miter_limit, dash_offset,
             dashes, dash_count,
             reinterpret_cast<Surface::StrokeStyle**>(stroke_style)));
+}
+
+std::int32_t spdf_d2d_create_stroked_path(
+    void* surface,
+    void* path,
+    float width,
+    void* stroke_style,
+    void** stroked_path) noexcept {
+    if (surface == nullptr || path == nullptr || stroked_path == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->create_stroked_path(
+            static_cast<Surface::Path*>(path), width,
+            static_cast<Surface::StrokeStyle*>(stroke_style),
+            reinterpret_cast<Surface::Path**>(stroked_path)));
 }
 
 std::int32_t spdf_d2d_push_clip_path(void* surface, void* path) noexcept {

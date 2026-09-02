@@ -89,10 +89,8 @@ def _render_diagnostic_summary(info):
     reason_labels = (
         (("begin-mask", "end-mask"), localize("soft mask", "소프트 마스크")),
         (("clip-image-mask",), localize("clip mask", "클리핑 마스크")),
-        (("clip-stroke-path",),
-         localize("complex stroke", "복잡한 선")),
-        (("stroke-text", "clip-stroke-text"),
-         localize("stroked text", "윤곽선 글자")),
+        (("non-uniform stroked text transform",),
+         localize("transformed stroked text", "변형된 윤곽선 글자")),
         (("transparency group", "begin-group", "end-group"),
          localize("blend/transparency", "혼합·투명도")),
         (("GPU scene limit", "shading data exceeds"),
@@ -119,6 +117,11 @@ def _render_diagnostic_summary(info):
         "soft-mask": localize("soft mask", "소프트 마스크"),
         "clip-mask": localize("clip mask", "클리핑 마스크"),
         "stroke-style": localize("stroke style", "선 스타일"),
+        "stroked-text": localize("stroked text", "윤곽선 글자"),
+        "stroked-text-clip": localize(
+            "stroked text clip", "윤곽선 글자 클리핑"),
+        "stroked-vector-clip": localize(
+            "stroked vector clip", "선 클리핑"),
     }
     tooltip = localize("Page rendering: ", "페이지 렌더링: ") + text
     if features:

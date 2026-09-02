@@ -254,11 +254,14 @@ class ReaderPageView(QGraphicsView):
         if cached is not None:
             for path in cached[2]:
                 path.close()
-        from .gpu_raster import (ClipPop, ClipPush, GroupPop, GroupPush,
-                                 MaskBegin, MaskEnd, VectorImage, VectorPath)
+        from .gpu_raster import (ClipPop, ClipPush, ClipStrokePush, GroupPop,
+                                 GroupPush, MaskBegin, MaskEnd, VectorImage,
+                                 VectorPath)
 
         items = scene.drawables
         unique = {}
+        stroke_styles = {}
+        auxiliary = set()
         native_items = []
         for item in items:
             if isinstance(item, (ClipPop, GroupPush, GroupPop,
@@ -269,6 +272,24 @@ class ReaderPageView(QGraphicsView):
                 native_items.append(self._d2d_surface.create_bitmap_bgra(
                     item.pixels, item.width, item.height, item.stride))
                 continue
+            if isinstance(item, ClipStrokePush):
+                key = (item.commands, False)
+                source = unique.get(key)
+                if source is None:
+                    source = self._d2d_surface.create_path(item.commands)
+                    unique[key] = source
+                    auxiliary.add(source)
+                native_style = None
+                if item.stroke_style is not None:
+                    native_style = stroke_styles.get(item.stroke_style)
+                    if native_style is None:
+                        native_style = self._d2d_surface.create_stroke_style(
+                            item.stroke_style)
+                        stroke_styles[item.stroke_style] = native_style
+                        auxiliary.add(native_style)
+                native_items.append(self._d2d_surface.create_stroked_path(
+                    source, item.stroke_width, native_style))
+                continue
             key = (item.commands, item.even_odd)
             path = unique.get(key)
             if path is None:
@@ -277,13 +298,17 @@ class ReaderPageView(QGraphicsView):
                 unique[key] = path
             native_items.append(path)
         resources = {resource for resource in native_items
-                     if resource is not None}
-        stroke_styles = {}
+                     if resource is not None} | auxiliary
         draws = []
         index = 0
         while index < len(items):
             item = items[index]
             if isinstance(item, ClipPush):
+                draws.append(("clip_push", native_items[index],
+                              item.transform))
+                index += 1
+                continue
+            if isinstance(item, ClipStrokePush):
                 draws.append(("clip_push", native_items[index],
                               item.transform))
                 index += 1

@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 8
+ABI_VERSION = 9
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -94,6 +94,9 @@ def _load_library(path):
         c_void_p, c_uint32, c_uint32, c_uint32, c_uint32, c_float, c_float,
         POINTER(c_float), c_uint32, POINTER(c_void_p)]
     library.spdf_d2d_create_stroke_style.restype = c_int32
+    library.spdf_d2d_create_stroked_path.argtypes = [
+        c_void_p, c_void_p, c_float, c_void_p, POINTER(c_void_p)]
+    library.spdf_d2d_create_stroked_path.restype = c_int32
     library.spdf_d2d_push_clip_path.argtypes = [c_void_p, c_void_p]
     library.spdf_d2d_push_clip_path.restype = c_int32
     library.spdf_d2d_pop_clip.argtypes = [c_void_p]
@@ -276,6 +279,23 @@ class D2DSurface:
         _check_hresult(result, "Direct2D stroke style creation")
         created = D2DStrokeStyle(self, handle)
         self._stroke_styles.add(created)
+        return created
+
+    def create_stroked_path(self, path, width, style=None):
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        if path.closed or path._surface is not self:
+            raise ValueError("path does not belong to this Direct2D surface")
+        if style is not None and (style.closed or style._surface is not self):
+            raise ValueError(
+                "stroke style does not belong to this Direct2D surface")
+        handle = c_void_p()
+        result = self._library.spdf_d2d_create_stroked_path(
+            self._handle, path._handle, float(width),
+            None if style is None else style._handle, byref(handle))
+        _check_hresult(result, "Direct2D stroked path creation")
+        created = D2DPath(self, handle)
+        self._paths.add(created)
         return created
 
     def begin_frame(self, argb=0xffe8e8e8):

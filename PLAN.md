@@ -178,7 +178,7 @@ run.py / run.pyw
    - 1단계(1.22.0): 독립 실행 리더·편집기에 같은 512px 타일·OpenGL 이미지 합성 경로와 탭당 64 MiB 캐시 상한 적용. 편집 상호작용과 CPU 표시 대체 경로 유지
    - 2단계(1.23.0): 실제 Qt HWND에 ABI v4 D3D11/DXGI/Direct2D 표면 연결. PyMuPDF 512px 타일·회전·검색·선택·편집 테두리 합성, 캐시 연동 폐기, 숨김·닫기 자원 회수와 Qt 대체 경로 적용
    - Windows 목표 백엔드: D3D11 장치 + DXGI flip-model swap chain + Direct2D device context + DirectWrite. [설계·검증 기준](docs/WINDOWS_RENDERING_BACKEND.md)
-   - 네이티브 ABI v8: 하드웨어 D3D11/Direct2D/DirectWrite 초기화, HWND swap chain 프레임·BGRA bitmap·행렬·반투명 overlay·immutable line/Bézier geometry·변환 geometry group·geometry realization·중첩 clip/opacity/mask layer·사용자 선 스타일·resize·해제와 실제 앱 연결 완료
+   - 네이티브 ABI v9: 하드웨어 D3D11/Direct2D/DirectWrite 초기화, HWND swap chain 프레임·BGRA bitmap·행렬·반투명 overlay·immutable line/Bézier geometry·변환 geometry group·geometry realization·중첩 clip/opacity/mask layer·사용자 선 스타일·stroked clip geometry·resize·해제와 실제 앱 연결 완료
    - 3단계 시제품(1.23.0): MuPDF CPU 파서가 반환한 단순 fill/stroke 경로와 원래 글꼴 glyph 윤곽을 Direct2D geometry로 캐시해 GPU rasterize하고, CPU에서 디코딩한 배치 이미지는 원래 행렬로 GPU 확대·합성. 기존 글자를 DirectWrite로 대체하거나 재조판하지 않으며 페이지 이미지 장면은 64 MiB로 제한
    - Direct2D는 PDF 해석기가 아니므로 1차 타일 합성과 실제 PDF 벡터·글자 GPU 경로를 분리. 기존 PDF 글자를 DirectWrite로 임의 재조판하지 않음
    - 현재 CPU 래스터화+OpenGL 합성과 PDF 벡터·글자·조판 개체의 GPU 렌더링을 구분
@@ -186,6 +186,7 @@ run.py / run.pyw
    - 4단계(1.24.0): MuPDF 표시 순서를 그대로 기록하고 벡터 경로 clip push/pop을 Direct2D 중첩 layer로 연결. 클리핑된 글자·도형·이미지도 지원 장면이면 GPU 경로 유지. 단색 이미지 마스크는 MuPDF가 해석한 알파와 원래 색을 premultiplied BGRA로 만들어 같은 이미지 상한 안에서 GPU 합성
    - 5단계(1.25.0): 원래 glyph 윤곽을 하나의 텍스트 clip geometry로 결합. 모든 shading 유형은 페이지 범위 안의 2배 해상도 premultiplied BGRA 이미지로 제한해 Direct2D 합성하고 64 MiB 장면 상한을 공유. 일반 혼합 모드의 격리 투명도 그룹은 중첩 opacity layer로 처리
    - 6단계(1.26.0): 알파/광도 소프트 마스크와 이미지 클리핑 마스크를 Direct2D command list·opacity mask로 처리. PDF 점선·선끝·선 연결·miter 설정을 Direct2D stroke style로 변환. 선택형 페이지 진단으로 GPU 직접/GPU 합성/CPU 대체와 원인을 표시
+   - 7단계(1.27.0): 윤곽선 글자를 원래 glyph geometry로 GPU rasterize하고, 윤곽선 글자 클리핑과 stroked vector clip은 Direct2D widened geometry로 변환해 GPU layer mask로 적용
    - 다음 단계는 특수 혼합 모드·비격리 반투명 그룹·선을 이용한 클리핑과 드문 효과의 지원 범위를 넓히고, 페이지 전체 CPU 전환을 가능한 경우 명령/그룹 단위 대체로 축소하는 것. PDFium/Skia GPU canvas는 별도 비교 시제품 후보로 유지하고, 현재 PyMuPDF CPU Pixmap 경로와 품질·속도·배포 크기·호환성·라이선스를 비교하며 엔진 이름만으로 GPU 지원을 가정하지 않음
    - 동일 장비·문서에서 최대 800% 확대, 다중 개체 변형, 글꼴·투명도 품질, RAM/VRAM 상한과 CPU 대체 경로 확인
    - 하드웨어별 캐시 정책: 기본값은 `자동`, 사용자가 `낮음 / 보통 / 높음`으로 고정 가능. 리더·편집 프로세스가 각자 정책과 자원을 소유하며 다른 프로세스의 여유 메모리를 전제로 하지 않음

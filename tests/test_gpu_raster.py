@@ -201,6 +201,14 @@ class GpuRasterSceneTests(unittest.TestCase):
                 stroked.get_contents()[0],
                 b"q 4 w 1 J 2 j [6 3] 2 d 1 0 0 RG "
                 b"20 40 m 140 40 l 180 120 l S Q\n")
+            stroked_text = pdf.new_page(width=300, height=240)
+            stroked_text.insert_text(
+                (30, 90), "OUTLINE", fontsize=36, render_mode=1,
+                color=(0.8, 0.1, 0.1), border_width=1)
+            clipped_stroke_text = pdf.new_page(width=300, height=240)
+            clipped_stroke_text.insert_text(
+                (30, 90), "CLIP", fontsize=42, render_mode=5,
+                color=(0.1, 0.1, 0.8), border_width=1)
             pdf.save(self.path)
         self.document = Document(str(self.path), read_only=True)
 
@@ -232,6 +240,26 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertEqual(path.stroke_style[4], 10)
         self.assertAlmostEqual(path.stroke_style[5], 0.5)
         self.assertEqual(path.stroke_style[6], (1.5, 0.75))
+
+    def test_stroked_text_uses_page_space_gpu_outlines(self):
+        scene = self.document.gpu_vector_page(11)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("stroked-text", scene.features)
+        self.assertTrue(scene.paths)
+        self.assertTrue(all(path.stroke_argb is not None
+                            for path in scene.paths))
+        self.assertTrue(all(path.transform is None for path in scene.paths))
+
+    def test_stroke_and_clip_text_mode_stays_on_gpu_path(self):
+        from pdfeditor.gpu_raster import ClipPop, ClipPush
+
+        scene = self.document.gpu_vector_page(12)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("stroked-text", scene.features)
+        self.assertIn("text-clip", scene.features)
+        self.assertTrue(any(isinstance(item, ClipPush)
+                            for item in scene.drawables))
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
 
     def test_text_page_uses_exact_glyph_outlines(self):
         scene = self.document.gpu_vector_page(1)

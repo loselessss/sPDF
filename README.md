@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.26.0** · English and Korean interface · Windows
+**Current version: 1.27.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -146,9 +146,9 @@ Press **F1** in the application for the complete localized guide.
   pages rasterize vectors and exact glyph outlines through Direct2D and compose
   decoded images there. Nested vector and text clipping, colored stencil images,
   ordinary isolated transparency groups, soft and image clip masks, and complex
-  stroke styles are supported. Shadings are rendered into a bounded high-quality
+  stroke styles, stroked text, and stroked clipping paths are supported. Shadings are rendered into a bounded high-quality
   image and then composed by Direct2D. Special blend modes, non-isolated
-  translucent groups, stroked clipping paths, and a few uncommon effects keep the
+  translucent groups, non-uniformly transformed stroked text, and a few uncommon effects keep the
   complete PyMuPDF CPU path, so this is not yet a GPU-only PDF engine.
   The embedded display path is unchanged.
 - Reader and editor previews cover only the current one or two pages. Detailed

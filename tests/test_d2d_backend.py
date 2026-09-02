@@ -10,7 +10,7 @@ from pdfeditor.d2d_backend import (ABI_VERSION, D2DSurface, _NativeInfo,
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 8)
+        self.assertEqual(ABI_VERSION, 9)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -68,6 +68,8 @@ class D2DBackendTests(unittest.TestCase):
                 ])
                 stroke_style = surface.create_stroke_style(
                     (1, 1, 1, 2, 10.0, 0.5, (1.5, 0.75)))
+                stroked_path = surface.create_stroked_path(
+                    path, 4.0, stroke_style)
                 surface.begin_frame(0xff202020)
                 surface.draw_bitmap(bitmap, 8, 8, 56, 56)
                 surface.set_transform(1, 0, 0, 1, 0, 0)
@@ -77,10 +79,12 @@ class D2DBackendTests(unittest.TestCase):
                 surface.stroke_path(path, 0xff00a05a, 2.0)
                 surface.stroke_path(path, 0xffff8000, 4.0, stroke_style)
                 surface.push_clip_path(path)
+                surface.push_clip_path(stroked_path)
                 surface.push_clip_path(group)
                 surface.push_opacity_layer(0.65)
                 surface.fill_path(group, 0x800000ff)
                 surface.pop_layer()
+                surface.pop_clip()
                 surface.pop_clip()
                 surface.pop_clip()
                 surface.set_transform(1, 0, 0, 1, 0, 0)
@@ -101,6 +105,8 @@ class D2DBackendTests(unittest.TestCase):
                 self.assertTrue(group.closed)
                 stroke_style.close()
                 self.assertTrue(stroke_style.closed)
+                stroked_path.close()
+                self.assertTrue(stroked_path.closed)
             self.assertTrue(surface.closed)
         finally:
             user32.DestroyWindow(hwnd)

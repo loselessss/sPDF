@@ -46,6 +46,14 @@ class ClipPush:
 
 
 @dataclass(frozen=True)
+class ClipStrokePush:
+    commands: tuple
+    stroke_width: float
+    stroke_style: tuple = None
+    transform: tuple = None
+
+
+@dataclass(frozen=True)
 class ClipPop:
     pass
 
@@ -180,6 +188,38 @@ def _device_color(colorspace, color, opacity, color_params):
     return _argb(converted, opacity)
 
 
+def _stroke_parameters(stroke):
+    width = float(stroke.linewidth)
+    dash_count = int(stroke.dash_len)
+    dashes = tuple(float(_mupdf.floats_getitem(
+        stroke.dash_list, index)) for index in range(dash_count))
+    if any(not math.isfinite(value) or value < 0 for value in dashes):
+        raise ValueError("invalid stroke dash pattern")
+    if dashes and width <= 0:
+        raise ValueError("dashed hairline stroke is not supported")
+    dash_scale = width if dashes else 1.0
+    style = (
+        int(stroke.start_cap), int(stroke.dash_cap),
+        int(stroke.end_cap), int(stroke.linejoin),
+        float(stroke.miterlimit), float(stroke.dash_phase) / dash_scale,
+        tuple(value / dash_scale for value in dashes))
+    if style == (0, 0, 0, 0, 10.0, 0.0, ()):
+        style = None
+    return width, style
+
+
+def _uniform_scale(matrix):
+    a, b, c, d, _e, _f = _matrix(matrix)
+    first = math.hypot(a, b)
+    second = math.hypot(c, d)
+    tolerance = max(1.0, first, second) * 1e-5
+    dot_tolerance = max(1.0, first * second) * 1e-5
+    if first <= 0 or abs(first - second) > tolerance or \
+            abs(a * c + b * d) > dot_tolerance:
+        raise ValueError("non-uniform stroked text transform")
+    return first
+
+
 class _DisplayListDevice(_mupdf.FzDevice2):
     """Record only operations with an exact Direct2D representation."""
 
@@ -225,24 +265,8 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             commands = _path_commands(path)
             transform = _matrix(ctm)
             argb = _device_color(colorspace, color, alpha, color_params)
-            width = float(stroke.linewidth)
-            dash_count = int(stroke.dash_len)
-            dashes = tuple(float(_mupdf.floats_getitem(
-                stroke.dash_list, index)) for index in range(dash_count))
-            if any(not math.isfinite(value) or value < 0 for value in dashes):
-                raise ValueError("invalid stroke dash pattern")
-            if dashes and width <= 0:
-                raise ValueError("dashed hairline stroke is not supported")
-            dash_scale = width if dashes else 1.0
-            style = (
-                int(stroke.start_cap), int(stroke.dash_cap),
-                int(stroke.end_cap), int(stroke.linejoin),
-                float(stroke.miterlimit),
-                float(stroke.dash_phase) / dash_scale,
-                tuple(value / dash_scale for value in dashes))
-            if style == (0, 0, 0, 0, 10.0, 0.0, ()):
-                style = None
-            else:
+            width, style = _stroke_parameters(stroke)
+            if style is not None:
                 self._features.add("stroke-style")
             if self.items and isinstance(self.items[-1], VectorPath):
                 previous = self.items[-1]
@@ -358,8 +382,20 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         except Exception as error:
             self.failure = str(error)
 
-    def stroke_text(self, *_args):
-        self._fail("stroke-text")
+    def stroke_text(self, _context, text, stroke, ctm, colorspace, color,
+                    alpha, color_params):
+        try:
+            self._features.add("stroked-text")
+            width, style = _stroke_parameters(stroke)
+            width *= _uniform_scale(ctm)
+            argb = _device_color(colorspace, color, alpha, color_params)
+            for commands, transform in self._text_outlines(text, ctm):
+                self.items.append(VectorPath(
+                    _transform_commands(commands, transform),
+                    stroke_argb=argb, stroke_width=width,
+                    stroke_style=style))
+        except Exception as error:
+            self.failure = str(error)
 
     def clip_text(self, _context, text, ctm, _scissor):
         try:
@@ -374,11 +410,31 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         except Exception as error:
             self.failure = str(error)
 
-    def clip_stroke_text(self, *_args):
-        self._fail("clip-stroke-text")
+    def clip_stroke_text(self, _context, text, stroke, ctm, _scissor):
+        try:
+            self._features.add("stroked-text-clip")
+            width, style = _stroke_parameters(stroke)
+            width *= _uniform_scale(ctm)
+            commands = []
+            for outline, transform in self._text_outlines(text, ctm):
+                commands.extend(_transform_commands(outline, transform))
+            if not commands:
+                raise ValueError("stroked text clip has no vector outline")
+            self.items.append(ClipStrokePush(
+                tuple(commands), width, style))
+            self._clip_depth += 1
+        except Exception as error:
+            self.failure = str(error)
 
-    def clip_stroke_path(self, *_args):
-        self._fail("clip-stroke-path")
+    def clip_stroke_path(self, _context, path, stroke, ctm, _scissor):
+        try:
+            self._features.add("stroked-vector-clip")
+            width, style = _stroke_parameters(stroke)
+            self.items.append(ClipStrokePush(
+                _path_commands(path), width, style, _matrix(ctm)))
+            self._clip_depth += 1
+        except Exception as error:
+            self.failure = str(error)
 
     def fill_image_mask(self, _context, image, ctm, colorspace, color,
                         alpha, color_params):
