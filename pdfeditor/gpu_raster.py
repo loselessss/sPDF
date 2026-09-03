@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 import ctypes
 import math
 import struct
+import time
 
 import pymupdf
 from pymupdf import mupdf as _mupdf
@@ -53,6 +54,27 @@ class VectorImage:
     transform: tuple
     opacity: float = 1.0
     interpolate: bool = True
+
+
+@dataclass(frozen=True)
+class VectorLinearGradient:
+    commands: tuple
+    start: tuple
+    end: tuple
+    stops: tuple
+    even_odd: bool = False
+    transform: tuple = None
+
+
+@dataclass(frozen=True)
+class VectorRadialGradient:
+    commands: tuple
+    center: tuple
+    origin: tuple
+    radius: tuple
+    stops: tuple
+    even_odd: bool = False
+    transform: tuple = None
 
 
 @dataclass(frozen=True)
@@ -263,6 +285,8 @@ def _item_bbox(item):
         return _commands_bbox(item.commands, item.transform)
     if isinstance(item, VectorImage):
         return _commands_bbox(UNIT_RECT_COMMANDS, item.transform)
+    if isinstance(item, (VectorLinearGradient, VectorRadialGradient)):
+        return _commands_bbox(item.commands, item.transform)
     return None
 
 
@@ -335,6 +359,26 @@ def _float_pointer_items(pointer, start, count):
     values = (ctypes.c_float * count).from_address(
         int(pointer) + start * ctypes.sizeof(ctypes.c_float))
     return tuple(float(values[index]) for index in range(count))
+
+
+def _gradient_stops(shade, alpha, color_params):
+    source = _mupdf.FzColorspace(shade.colorspace)
+    source.thisown = False
+    channels = source.fz_colorspace_n()
+    if channels <= 0 or not shade.function:
+        return None
+    stride = int(shade.function_stride)
+    if stride < channels:
+        raise ValueError("invalid shading function")
+    stops = []
+    opacity = max(0.0, min(1.0, float(alpha)))
+    for index in range(LINEAR_SHADE_STEPS + 1):
+        position = index / LINEAR_SHADE_STEPS
+        color_index = max(0, min(255, round(position * 255)))
+        color = _float_pointer_items(shade.function, color_index * stride, channels)
+        stops.append((position, _device_color_values(
+            source, color, opacity, color_params)))
+    return tuple(stops)
 
 
 def _argb(color, opacity):
@@ -428,6 +472,10 @@ def _multiply_argb_opacity(argb, opacity):
 def _with_group_opacity(item, opacity):
     if isinstance(item, VectorImage):
         return replace(item, opacity=item.opacity * opacity)
+    if isinstance(item, (VectorLinearGradient, VectorRadialGradient)):
+        return replace(item, stops=tuple(
+            (position, _multiply_argb_opacity(argb, opacity))
+            for position, argb in item.stops))
     if isinstance(item, VectorPath):
         if item.fill_argb is not None and item.stroke_argb is not None:
             raise ValueError("non-isolated group opacity has combined fill and stroke")
@@ -441,9 +489,12 @@ def _with_group_opacity(item, opacity):
 
 def _is_shading_only_group(children):
     drawings = [child for child in children
-                if isinstance(child, (VectorPath, VectorImage))]
+                if isinstance(child, (VectorPath, VectorImage,
+                                      VectorLinearGradient,
+                                      VectorRadialGradient))]
     return bool(drawings) and all(
-        isinstance(child, VectorPath) and child.shading
+        (isinstance(child, VectorPath) and child.shading) or
+        isinstance(child, (VectorLinearGradient, VectorRadialGradient))
         for child in drawings)
 
 
@@ -463,7 +514,8 @@ def _is_opaque_vector_only_group(children):
 def _with_shading_group_opacity(children, opacity):
     flattened = []
     for child in children:
-        if isinstance(child, VectorPath) and child.shading:
+        if (isinstance(child, VectorPath) and child.shading) or \
+                isinstance(child, (VectorLinearGradient, VectorRadialGradient)):
             flattened.append(_with_group_opacity(child, opacity))
         else:
             flattened.append(child)
@@ -493,7 +545,9 @@ def _flatten_nonisolated_groups(items):
                 children, index = parse(index + 1, True)
                 drawing_indexes = [
                     position for position, child in enumerate(children)
-                    if isinstance(child, (VectorPath, VectorImage))]
+                    if isinstance(child, (VectorPath, VectorImage,
+                                          VectorLinearGradient,
+                                          VectorRadialGradient))]
                 shading_only = _is_shading_only_group(children)
                 opaque_vector_only = _is_opaque_vector_only_group(children)
                 disjoint = _drawings_are_disjoint(children)
@@ -566,7 +620,7 @@ def _flatten_nonisolated_groups(items):
 class _DisplayListDevice(_mupdf.FzDevice2):
     """Record only operations with an exact Direct2D representation."""
 
-    def __init__(self, page_rect, raster_scale=1.0, cookie=None):
+    def __init__(self, page_rect, raster_scale=1.0, cookie=None, deadline=None):
         super().__init__()
         for name in (
                 "fill_path", "stroke_path", "clip_path", "pop_clip",
@@ -588,6 +642,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self._features = set()
         self._raster_scale = max(1.0, float(raster_scale))
         self._cookie = cookie
+        self._deadline = deadline
 
     def _fail(self, operation):
         self._set_failure("unsupported operation: " + operation)
@@ -596,7 +651,17 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         if not self.failure:
             self.failure = reason
 
+    def _abort_if_expired(self):
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            self._set_failure("GPU scene time budget exceeded")
+            if self._cookie is not None:
+                self._cookie.set_abort()
+            return True
+        return False
+
     def _append_item(self, item):
+        if self._abort_if_expired():
+            return False
         if len(self.items) >= MAX_GPU_SCENE_ITEMS:
             self._set_failure("GPU scene command limit exceeded")
             if self._cookie is not None:
@@ -607,6 +672,8 @@ class _DisplayListDevice(_mupdf.FzDevice2):
 
     def _extend_items(self, items):
         items = tuple(items)
+        if self._abort_if_expired():
+            return False
         if len(self.items) + len(items) > MAX_GPU_SCENE_ITEMS:
             self._set_failure("GPU scene command limit exceeded")
             if self._cookie is not None:
@@ -733,6 +800,55 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         items.append(ClipPop())
         return items
 
+    def _linear_shade_gradient(self, shade, ctm, alpha, color_params, bounds):
+        if int(shade.type) != FZ_LINEAR_SHADE:
+            return None
+        values = _linear_or_radial_shade_values(shade)
+        if values is None:
+            return None
+        stops = _gradient_stops(shade, alpha, color_params)
+        if stops is None:
+            return None
+        extend, coords = values
+        transform = _concat_matrices(_raw_matrix(shade.matrix), _matrix(ctm))
+        start = _transform_point(transform, coords[0], coords[1])
+        end = _transform_point(transform, coords[3], coords[4])
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length <= 1e-6:
+            raise ValueError("invalid linear shading vector")
+        ux = dx / length
+        uy = dy / length
+        px = -uy
+        py = ux
+        x0, y0, x1, y1 = bounds
+        if x1 <= x0 or y1 <= y0:
+            return ()
+        corners = ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
+        projections = [
+            ((x - start[0]) * ux + (y - start[1]) * uy) / length
+            for x, y in corners]
+        lower = min(projections) if extend[0] else max(0.0, min(projections))
+        upper = max(projections) if extend[1] else min(1.0, max(projections))
+        if upper <= lower:
+            return ()
+        reach = math.hypot(x1 - x0, y1 - y0) + length + 4.0
+        center0 = (start[0] + ux * length * lower,
+                   start[1] + uy * length * lower)
+        center1 = (start[0] + ux * length * upper,
+                   start[1] + uy * length * upper)
+        strip = (
+            ("move", center0[0] + px * reach, center0[1] + py * reach),
+            ("line", center1[0] + px * reach, center1[1] + py * reach),
+            ("line", center1[0] - px * reach, center1[1] - py * reach),
+            ("line", center0[0] - px * reach, center0[1] - py * reach),
+            ("close",))
+        return (
+            ClipPush(_rect_commands(x0, y0, x1, y1)),
+            VectorLinearGradient(strip, start, end, stops),
+            ClipPop())
+
     def _radial_shade_paths(self, shade, ctm, alpha, color_params, bounds):
         if int(shade.type) != FZ_RADIAL_SHADE:
             return None
@@ -783,6 +899,38 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     source, color, opacity, color_params), shading=True))
         items.append(ClipPop())
         return items
+
+    def _radial_shade_gradient(self, shade, ctm, alpha, color_params, bounds):
+        if int(shade.type) != FZ_RADIAL_SHADE:
+            return None
+        values = _linear_or_radial_shade_values(shade)
+        if values is None:
+            return None
+        _extend, coords = values
+        # Direct2D's radial brush has one end radius. PDF radial shadings with a
+        # non-zero start radius stay on the existing exact band path for now.
+        if abs(coords[2]) > 1e-6 or coords[5] <= 1e-6:
+            return None
+        stops = _gradient_stops(shade, alpha, color_params)
+        if stops is None:
+            return None
+        transform = _concat_matrices(_raw_matrix(shade.matrix), _matrix(ctm))
+        x0, y0, x1, y1 = bounds
+        if x1 <= x0 or y1 <= y0:
+            return ()
+        commands = _ellipse_commands(transform, coords[3], coords[4], coords[5])
+        center = _transform_point(transform, coords[3], coords[4])
+        origin = _transform_point(transform, coords[0], coords[1])
+        radius_x = _transform_point(transform, coords[3] + coords[5], coords[4])
+        radius_y = _transform_point(transform, coords[3], coords[4] + coords[5])
+        return (
+            ClipPush(_rect_commands(x0, y0, x1, y1)),
+            VectorRadialGradient(
+                commands, center, origin,
+                (math.hypot(radius_x[0] - center[0], radius_x[1] - center[1]),
+                 math.hypot(radius_y[0] - center[0], radius_y[1] - center[1])),
+                stops),
+            ClipPop())
 
     def fill_path(self, _context, path, even_odd, ctm, colorspace, color,
                   alpha, color_params):
@@ -1085,14 +1233,23 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 x0, y0, x1, y1 = self._page_rect
             if x1 <= x0 or y1 <= y0:
                 return
-            vector_shade = self._linear_shade_paths(
+            vector_shade = self._linear_shade_gradient(
                 shade_ptr, matrix, alpha, color_params, (x0, y0, x1, y1))
+            if vector_shade is None:
+                vector_shade = self._radial_shade_gradient(
+                    shade_ptr, matrix, alpha, color_params, (x0, y0, x1, y1))
+            if vector_shade is None:
+                vector_shade = self._linear_shade_paths(
+                    shade_ptr, matrix, alpha, color_params, (x0, y0, x1, y1))
             if vector_shade is None:
                 vector_shade = self._radial_shade_paths(
                     shade_ptr, matrix, alpha, color_params, (x0, y0, x1, y1))
             if vector_shade is not None:
                 self._extend_items(vector_shade)
                 self._features.add("vector-shading")
+                if any(isinstance(item, (VectorLinearGradient, VectorRadialGradient))
+                       for item in vector_shade):
+                    self._features.add("gradient-primitive")
                 if vector_shade:
                     self._features.add("vector-clip")
                 return
@@ -1250,13 +1407,16 @@ def _validate_composite_context(items):
     return "unbalanced composite scope stack" if scopes else ""
 
 
-def vector_page_from_pymupdf(page, raster_scale=1.0):
+def vector_page_from_pymupdf(page, raster_scale=1.0, timeout_seconds=None):
     """Return a complete GPU scene only when every operation is supported."""
     rect = page.rect
     scale = max(1.0, float(raster_scale))
+    deadline = None
+    if timeout_seconds is not None:
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
     cookie = _mupdf.FzCookie()
     device = _DisplayListDevice(
-        (rect.x0, rect.y0, rect.x1, rect.y1), scale, cookie)
+        (rect.x0, rect.y0, rect.x1, rect.y1), scale, cookie, deadline)
     try:
         _mupdf.fz_run_page(
             page.this, device, _mupdf.FzMatrix(), cookie)

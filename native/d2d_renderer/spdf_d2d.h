@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 15;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 16;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -48,11 +48,17 @@ struct SpdfD2DTransform {
     float dy;
 };
 
+struct SpdfD2DGradientStop {
+    float position;
+    std::uint32_t argb;
+};
+
 static_assert(sizeof(wchar_t) == 2, "The sPDF D2D ABI requires Windows wchar_t");
 static_assert(offsetof(SpdfD2DInfo, adapter_name) == 20, "Unexpected D2D ABI layout");
 static_assert(sizeof(SpdfD2DInfo) == 276, "Unexpected D2D ABI size");
 static_assert(sizeof(SpdfD2DPathCommand) == 28, "Unexpected path command layout");
 static_assert(sizeof(SpdfD2DTransform) == 24, "Unexpected transform layout");
+static_assert(sizeof(SpdfD2DGradientStop) == 8, "Unexpected gradient stop layout");
 
 SPDF_D2D_API std::uint32_t spdf_d2d_abi_version() noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_probe(SpdfD2DInfo* info) noexcept;
@@ -187,6 +193,26 @@ SPDF_D2D_API std::int32_t spdf_d2d_stroke_path_styled(
     std::uint32_t argb,
     float width,
     void* stroke_style) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_fill_linear_gradient(
+    void* surface,
+    void* path,
+    float start_x,
+    float start_y,
+    float end_x,
+    float end_y,
+    const SpdfD2DGradientStop* stops,
+    std::uint32_t stop_count) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_fill_radial_gradient(
+    void* surface,
+    void* path,
+    float center_x,
+    float center_y,
+    float origin_x,
+    float origin_y,
+    float radius_x,
+    float radius_y,
+    const SpdfD2DGradientStop* stops,
+    std::uint32_t stop_count) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_end_frame(void* surface) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_bitmap(void* bitmap) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_path(void* path) noexcept;

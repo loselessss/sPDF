@@ -1,6 +1,6 @@
-# sPDF 1.28.4 Release Notes
+# sPDF 1.28.5 Release Notes
 
-Release date: 2026-09-02
+Release date: 2026-09-03
 
 ## 1.28.0 highlights - 2026-09-02
 
@@ -26,3 +26,9 @@ Release date: 2026-09-02
 
 - Standalone document tabs now sit in the title bar, using compact labels such as `file.pdf [Read/GPU]` and `[Edit/CPU]`.
 - CPU/GPU labels follow actual rasterization instead of composition. CPU tiles show CPU, while mixed rasterization shows CPU+GPU.
+
+## 1.28.5 improvements - 2026-09-03
+
+- GPU-rendered pages keep grayscale antialiasing enabled more explicitly for smoother vector and text-outline edges.
+- Expensive GPU scene preparation falls back after a short wait so difficult pages do not hold the reader for too long.
+- Common linear and radial PDF gradients stay on the GPU path with fewer drawing operations.

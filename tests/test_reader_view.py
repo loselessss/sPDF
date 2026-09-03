@@ -419,10 +419,53 @@ class ReaderViewTests(unittest.TestCase):
             self.view.preview_zoom(2)
             self.view._paint_d2d()
 
-        vector_page.assert_called_once_with(0, 2.0)
+        from pdfeditor.reader_view import GPU_SCENE_TIMEOUT_SECONDS
+        vector_page.assert_called_once_with(
+            0, 2.0, timeout_seconds=GPU_SCENE_TIMEOUT_SECONDS)
         self.assertIs(self.view._vector_pages[0], high)
         self.assertEqual(surface.create_bitmap_bgra.call_args.args[1:3], (4, 4))
         low_bitmap.close.assert_called_once_with()
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_zoom_keeps_existing_gpu_scene_when_refresh_times_out(self):
+        from pdfeditor.gpu_raster import VectorImage, VectorPage
+
+        low = VectorPage(
+            True,
+            items=(VectorImage(
+                bytes((0, 0, 0, 255)) * 4, 2, 2, 8,
+                (200, 0, 0, 200, 0, 0)),),
+            features=("image", "image-downsample"),
+            raster_scale=1.0)
+        timed_out = VectorPage(
+            False, reason="GPU scene time budget exceeded",
+            raster_scale=2.0)
+        bitmap = Mock(closed=False)
+        surface = Mock()
+        surface.create_bitmap_bgra.return_value = bitmap
+        surface.info.driver = "hardware"
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = low
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+
+        self.view._paint_d2d()
+        with patch.object(
+                self.doc, "gpu_vector_page",
+                return_value=timed_out) as vector_page:
+            self.view.preview_zoom(2)
+            self.view._paint_d2d()
+
+        from pdfeditor.reader_view import GPU_SCENE_TIMEOUT_SECONDS
+        vector_page.assert_called_once_with(
+            0, 2.0, timeout_seconds=GPU_SCENE_TIMEOUT_SECONDS)
+        self.assertIs(self.view._vector_pages[0], low)
+        bitmap.close.assert_not_called()
+        self.assertEqual(self.view.rasterization_device(0), "GPU")
 
         self.view._d2d_surface = None
         self.view._d2d_vector_paths.clear()
@@ -561,6 +604,39 @@ class ReaderViewTests(unittest.TestCase):
         self.assertEqual(transform[5] - page_transform[5], image.transform[5])
         self.view._plan_tiles()
         self.assertFalse(self.view._pending)
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_gradient_scene_uses_direct2d_gradient_fill(self):
+        from pdfeditor.gpu_raster import VectorLinearGradient, VectorPage
+
+        gradient = VectorLinearGradient(
+            (("move", 0, 0), ("line", 100, 0),
+             ("line", 100, 80), ("close",)),
+            (0, 0), (100, 0),
+            ((0.0, 0xffff0000), (1.0, 0xff0000ff)))
+        scene = VectorPage(
+            True, items=(gradient,),
+            features=("gradient-primitive", "shading", "vector-shading"))
+        path = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = path
+        self.view._d2d_surface = surface
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+
+        self.view._paint_d2d()
+
+        surface.create_path.assert_called_once_with(
+            gradient.commands, even_odd=False)
+        surface.fill_linear_gradient.assert_called_once_with(
+            path, gradient.start, gradient.end, gradient.stops)
+        surface.fill_path.assert_not_called()
+        self.assertEqual(self.view._rasterized_pages[0], "CPU+GPU")
 
         self.view._d2d_surface = None
         self.view._d2d_vector_paths.clear()

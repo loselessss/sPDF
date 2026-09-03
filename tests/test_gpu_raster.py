@@ -736,6 +736,14 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIn("cubic", kinds)
         self.assertIn("close", kinds)
 
+    def test_gpu_scene_conversion_obeys_time_budget(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+
+        scene = vector_page_from_pymupdf(
+            self.document._doc[0], timeout_seconds=0)
+        self.assertFalse(scene.supported)
+        self.assertEqual(scene.reason, "GPU scene time budget exceeded")
+
     def test_complex_stroke_style_stays_on_direct2d_path(self):
         scene = self.document.gpu_vector_page(11)
         self.assertTrue(scene.supported, scene.reason)
@@ -882,26 +890,30 @@ class GpuRasterSceneTests(unittest.TestCase):
                             for item in scene.drawables[1:-1]))
         self.assertIsInstance(scene.drawables[-1], ClipPop)
 
-    def test_linear_gradient_keeps_gpu_scene_as_vector_bands(self):
+    def test_linear_gradient_keeps_gpu_scene_as_direct2d_primitive(self):
         from pdfeditor.gpu_raster import (ClipPop, ClipPush,
-                                          LINEAR_SHADE_STEPS, VectorImage,
+                                          VectorImage, VectorLinearGradient,
                                           VectorPath)
 
         scene = self.document.gpu_vector_page(7)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("shading", scene.features)
         self.assertIn("vector-shading", scene.features)
+        self.assertIn("gradient-primitive", scene.features)
         self.assertIn("vector-clip", scene.features)
         self.assertIsInstance(scene.drawables[0], ClipPush)
+        gradients = [item for item in scene.drawables
+                     if isinstance(item, VectorLinearGradient)]
+        self.assertEqual(len(gradients), 1)
+        gradient = gradients[0]
+        self.assertEqual(len(gradient.stops), 65)
+        self.assertEqual(gradient.stops[0][1], 0xffff0000)
+        self.assertEqual(gradient.stops[-1][1], 0xff0000ff)
         bands = [item for item in scene.drawables
                  if isinstance(item, VectorPath)]
-        self.assertEqual(len(bands), LINEAR_SHADE_STEPS + 2)
+        self.assertEqual(bands, [])
         self.assertFalse(any(isinstance(item, VectorImage)
                              for item in scene.drawables))
-        self.assertEqual(bands[0].fill_argb, 0xffff0000)
-        self.assertEqual(bands[1].fill_argb, 0xfffd0002)
-        self.assertEqual(bands[-2].fill_argb, 0xff0200fd)
-        self.assertEqual(bands[-1].fill_argb, 0xff0000ff)
         self.assertIsInstance(scene.drawables[-1], ClipPop)
 
     def test_linear_gradient_does_not_use_image_scene_limit(self):
@@ -911,24 +923,30 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("vector-shading", scene.features)
 
-    def test_radial_gradient_keeps_gpu_scene_as_vector_bands(self):
+    def test_radial_gradient_keeps_gpu_scene_as_direct2d_primitive(self):
         from pdfeditor.gpu_raster import (ClipPop, ClipPush,
-                                          LINEAR_SHADE_STEPS, VectorImage,
-                                          VectorPath)
+                                          VectorImage, VectorPath,
+                                          VectorRadialGradient)
 
         scene = self.document.gpu_vector_page(8)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("shading", scene.features)
         self.assertIn("vector-shading", scene.features)
+        self.assertIn("gradient-primitive", scene.features)
         self.assertIn("vector-clip", scene.features)
         self.assertIsInstance(scene.drawables[0], ClipPush)
+        gradients = [item for item in scene.drawables
+                     if isinstance(item, VectorRadialGradient)]
+        self.assertEqual(len(gradients), 1)
+        gradient = gradients[0]
+        self.assertEqual(len(gradient.stops), 65)
+        self.assertEqual(gradient.stops[0][1], 0xffffff00)
+        self.assertEqual(gradient.stops[-1][1], 0xff0000ff)
         bands = [item for item in scene.drawables
                  if isinstance(item, VectorPath)]
-        self.assertEqual(len(bands), LINEAR_SHADE_STEPS)
+        self.assertEqual(bands, [])
         self.assertFalse(any(isinstance(item, VectorImage)
                              for item in scene.drawables))
-        self.assertEqual(bands[0].fill_argb, 0xff0202fd)
-        self.assertEqual(bands[-1].fill_argb, 0xfffdfd02)
         self.assertIsInstance(scene.drawables[-1], ClipPop)
 
     def test_isolated_normal_transparency_group_uses_opacity_layer(self):

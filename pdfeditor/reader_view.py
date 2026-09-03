@@ -10,11 +10,12 @@ import math
 import os
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QImage, QMouseEvent, QPainter, QPixmap, QTransform
+from PyQt5.QtGui import (QColor, QFont, QFontMetrics, QImage, QMouseEvent,
+                         QPainter, QPixmap, QTransform)
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QOpenGLWidget, QWidget
 
 from . import settings
-from .d2d_backend import D2DSurface, probe_d2d_backend
+from .d2d_backend import ABI_VERSION, D2DSurface, probe_d2d_backend
 from .widgets import (EDIT_BOX_COLOR, SEARCH_COLOR, SEARCH_CUR_COLOR, SEL_COLOR,
                       PageCanvas, qimage_from_render)
 
@@ -23,6 +24,8 @@ TILE_CACHE_BYTES = 64 * 1024 * 1024
 PREVIEW_PIXELS = 1_000_000
 VIEWPORT_PIXELS = 6_000_000
 MAX_VISIBLE_TILES = 48
+GPU_SCENE_TIMEOUT_SECONDS = 1.0
+GPU_RENDERER_BADGE = "D2D ABI %d" % ABI_VERSION
 
 
 def opengl_allowed():
@@ -92,6 +95,8 @@ class ReaderPageView(QGraphicsView):
         self._d2d_size = None
         self._d2d_previews = {}
         self._d2d_tiles = {}
+        self._d2d_badges = {}
+        self._badge_pixmaps = {}
         self._vector_pages = {}
         self._d2d_vector_paths = {}
         self._reported_render_device = None
@@ -175,7 +180,9 @@ class ReaderPageView(QGraphicsView):
         return bucket
 
     def _gpu_vector_page(self, document, page):
-        return document.gpu_vector_page(page, self._vector_raster_scale())
+        return document.gpu_vector_page(
+            page, self._vector_raster_scale(),
+            timeout_seconds=GPU_SCENE_TIMEOUT_SECONDS)
 
     def _refresh_vector_page_for_zoom(self, page):
         scene = self._vector_pages.get(page)
@@ -186,7 +193,11 @@ class ReaderPageView(QGraphicsView):
         target_scale = self._vector_raster_scale()
         if scene.raster_scale >= target_scale:
             return scene
-        refreshed = self._document.gpu_vector_page(page, target_scale)
+        refreshed = self._document.gpu_vector_page(
+            page, target_scale, timeout_seconds=GPU_SCENE_TIMEOUT_SECONDS)
+        if not refreshed.supported and refreshed.reason == \
+                "GPU scene time budget exceeded":
+            return scene
         if refreshed is not scene:
             self._discard_native_vector_page(page)
         self._vector_pages[page] = refreshed
@@ -226,11 +237,14 @@ class ReaderPageView(QGraphicsView):
             bitmap.close()
         for _key, bitmap in tuple(self._d2d_tiles.values()):
             bitmap.close()
+        for _key, bitmap in tuple(self._d2d_badges.values()):
+            bitmap.close()
         for _scene, _draws, resources in tuple(self._d2d_vector_paths.values()):
             for path in resources:
                 path.close()
         self._d2d_previews.clear()
         self._d2d_tiles.clear()
+        self._d2d_badges.clear()
         self._d2d_vector_paths.clear()
         if self._d2d_surface is not None:
             self._d2d_surface.close()
@@ -269,6 +283,46 @@ class ReaderPageView(QGraphicsView):
         cache[key] = (identity, bitmap)
         return bitmap
 
+    def _badge_pixmap(self, text):
+        pixmap = self._badge_pixmaps.get(text)
+        if pixmap is not None:
+            return pixmap
+        font = QFont(self.font())
+        font.setPointSize(8)
+        metrics = QFontMetrics(font)
+        width = max(1, metrics.horizontalAdvance(text) + 12)
+        height = max(1, metrics.height() + 6)
+        pixmap = QPixmap(width, height)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setRenderHint(QPainter.TextAntialiasing, True)
+            painter.setFont(font)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(20, 20, 20, 150))
+            painter.drawRoundedRect(0, 0, width, height, 3, 3)
+            painter.setPen(QColor(255, 255, 255, 235))
+            painter.drawText(6, metrics.ascent() + 3, text)
+        finally:
+            painter.end()
+        self._badge_pixmaps[text] = pixmap
+        return pixmap
+
+    def _draw_gpu_engine_badge(self, page_rect):
+        if type(self._d2d_surface) is not D2DSurface:
+            return
+        pixmap = self._badge_pixmap(GPU_RENDERER_BADGE)
+        bitmap = self._native_bitmap(
+            self._d2d_badges, GPU_RENDERER_BADGE, pixmap)
+        position = self.mapFromScene(page_rect.topLeft())
+        x = max(0, position.x() + 6)
+        y = max(0, position.y() + 6)
+        self._d2d_surface.set_transform(1, 0, 0, 1, 0, 0)
+        self._d2d_surface.draw_bitmap(
+            bitmap, x, y, x + pixmap.width(), y + pixmap.height(),
+            opacity=0.8)
+
     def _set_page_transform(self, transform):
         viewport_origin = self.mapFromScene(QPointF(0, 0))
         self._d2d_surface.set_transform(
@@ -302,7 +356,8 @@ class ReaderPageView(QGraphicsView):
                 path.close()
         from .gpu_raster import (ClipPop, ClipPush, ClipStrokePush, GroupPop,
                                  GroupPush, MaskBegin, MaskEnd, VectorImage,
-                                 VectorPath)
+                                 VectorLinearGradient, VectorPath,
+                                 VectorRadialGradient)
 
         items = scene.drawables
         unique = {}
@@ -317,6 +372,10 @@ class ReaderPageView(QGraphicsView):
             if isinstance(item, VectorImage):
                 native_items.append(self._d2d_surface.create_bitmap_bgra(
                     item.pixels, item.width, item.height, item.stride))
+                continue
+            if isinstance(item, (VectorLinearGradient, VectorRadialGradient)):
+                native_items.append(self._d2d_surface.create_path(
+                    item.commands, even_odd=item.even_odd))
                 continue
             if isinstance(item, ClipStrokePush):
                 key = (item.commands, False)
@@ -392,6 +451,18 @@ class ReaderPageView(QGraphicsView):
             if isinstance(item, VectorImage):
                 draws.append(("image", native_items[index], item.opacity,
                               item.transform, item.interpolate))
+                index += 1
+                continue
+            if isinstance(item, VectorLinearGradient):
+                draws.append(("linear_gradient", native_items[index],
+                              item.start, item.end, item.stops,
+                              item.transform))
+                index += 1
+                continue
+            if isinstance(item, VectorRadialGradient):
+                draws.append(("radial_gradient", native_items[index],
+                              item.center, item.origin, item.radius,
+                              item.stops, item.transform))
                 index += 1
                 continue
             if not isinstance(item, VectorPath):
@@ -490,6 +561,18 @@ class ReaderPageView(QGraphicsView):
                 self._d2d_surface.draw_bitmap(
                     resource, 0, 0, 1, 1, opacity, interpolate=interpolate)
                 continue
+            if kind == "linear_gradient":
+                start, end, stops, transform = values
+                self._set_item_transform(page_transform, transform)
+                self._d2d_surface.fill_linear_gradient(
+                    resource, start, end, stops)
+                continue
+            if kind == "radial_gradient":
+                center, origin, radius, stops, transform = values
+                self._set_item_transform(page_transform, transform)
+                self._d2d_surface.fill_radial_gradient(
+                    resource, center, origin, radius, stops)
+                continue
             fill_argb, stroke_argb, stroke_width, transform, stroke_style = \
                 values
             self._set_item_transform(page_transform, transform)
@@ -542,6 +625,7 @@ class ReaderPageView(QGraphicsView):
             if vector_scene is not None and vector_scene.supported:
                 self._draw_vector_page(page, vector_scene)
                 rasterized[page] = ("CPU+GPU" if "shading" in vector_scene.features else "GPU")
+                self._draw_gpu_engine_badge(rect)
             else:
                 rasterized[page] = "CPU"
                 bitmap = self._native_bitmap(self._d2d_previews, page, preview)
@@ -614,11 +698,6 @@ class ReaderPageView(QGraphicsView):
         for page in tuple(self._d2d_vector_paths):
             if page not in pages:
                 self._discard_native_vector_page(page)
-        # Document invalidation owns the scene cache. Ask it on every refresh
-        # so an edit on the same page cannot leave stale native geometry here.
-        self._vector_pages = {
-            page: self._gpu_vector_page(document, page) for page in pages
-        } if self._d2d_requested else {}
         self._page_sizes = {p: document.page_size(p) for p in pages}
         for page in pages:
             if page not in self._previews:
@@ -626,6 +705,11 @@ class ReaderPageView(QGraphicsView):
                 scale = min(0.75, math.sqrt(PREVIEW_PIXELS / max(1, w * h)))
                 image = qimage_from_render(*document.render(page, scale))
                 self._previews[page] = QPixmap.fromImage(image)
+        # Document invalidation owns the scene cache. Ask it on every refresh
+        # so an edit on the same page cannot leave stale native geometry here.
+        self._vector_pages = {
+            page: self._gpu_vector_page(document, page) for page in pages
+        } if self._d2d_requested else {}
         self.canvas._active_page = active_page
         self._layout_pages()
         self._schedule_refine()
@@ -820,6 +904,10 @@ class ReaderPageView(QGraphicsView):
         for _identity, bitmap in tuple(self._d2d_tiles.values()):
             bitmap.close()
         self._d2d_tiles.clear()
+        for _identity, bitmap in tuple(self._d2d_badges.values()):
+            bitmap.close()
+        self._d2d_badges.clear()
+        self._badge_pixmaps.clear()
         self._tile_bytes = 0
         self._wanted.clear()
 
@@ -835,6 +923,10 @@ class ReaderPageView(QGraphicsView):
         for _identity, bitmap in tuple(self._d2d_previews.values()):
             bitmap.close()
         self._d2d_previews.clear()
+        for _identity, bitmap in tuple(self._d2d_badges.values()):
+            bitmap.close()
+        self._d2d_badges.clear()
+        self._badge_pixmaps.clear()
         for _scene, _draws, resources in tuple(self._d2d_vector_paths.values()):
             for path in resources:
                 path.close()

@@ -207,7 +207,7 @@ class Document:
                     if scene is not None:
                         self._gpu_vector_cache_bytes -= _gpu_scene_cost(scene)
 
-    def gpu_vector_page(self, index, raster_scale=1.0):
+    def gpu_vector_page(self, index, raster_scale=1.0, timeout_seconds=None):
         """Return a conservative Direct2D scene or an unsupported result."""
         scale = max(1.0, float(raster_scale))
         key = (index, scale)
@@ -222,7 +222,8 @@ class Document:
                     return candidate
         if scene is None:
             from .gpu_raster import vector_page_from_pymupdf
-            scene = vector_page_from_pymupdf(self._doc[index], scale)
+            scene = vector_page_from_pymupdf(
+                self._doc[index], scale, timeout_seconds=timeout_seconds)
             cost = _gpu_scene_cost(scene)
             self._gpu_vector_cache[key] = scene
             self._gpu_vector_cache_bytes += cost

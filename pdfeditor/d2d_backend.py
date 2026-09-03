@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 15
+ABI_VERSION = 16
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -38,6 +38,10 @@ class _Transform(Structure):
         ("m21", c_float), ("m22", c_float),
         ("dx", c_float), ("dy", c_float),
     ]
+
+
+class _GradientStop(Structure):
+    _fields_ = [("position", c_float), ("argb", c_uint32)]
 
 
 @dataclass(frozen=True)
@@ -145,6 +149,14 @@ def _load_library(path):
     library.spdf_d2d_stroke_path_styled.argtypes = [
         c_void_p, c_void_p, c_uint32, c_float, c_void_p]
     library.spdf_d2d_stroke_path_styled.restype = c_int32
+    library.spdf_d2d_fill_linear_gradient.argtypes = [
+        c_void_p, c_void_p, c_float, c_float, c_float, c_float,
+        POINTER(_GradientStop), c_uint32]
+    library.spdf_d2d_fill_linear_gradient.restype = c_int32
+    library.spdf_d2d_fill_radial_gradient.argtypes = [
+        c_void_p, c_void_p, c_float, c_float, c_float, c_float,
+        c_float, c_float, POINTER(_GradientStop), c_uint32]
+    library.spdf_d2d_fill_radial_gradient.restype = c_int32
     library.spdf_d2d_end_frame.argtypes = [c_void_p]
     library.spdf_d2d_end_frame.restype = c_int32
     library.spdf_d2d_destroy_bitmap.argtypes = [c_void_p]
@@ -489,6 +501,37 @@ class D2DSurface:
                 self._handle, path._handle, int(argb) & 0xffffffff,
                 float(width), style._handle)
         _check_hresult(result, "Direct2D path stroke")
+
+    @staticmethod
+    def _gradient_stops(stops):
+        stops = tuple(stops)
+        if len(stops) < 2 or len(stops) > 256:
+            raise ValueError("invalid Direct2D gradient stop count")
+        return (_GradientStop * len(stops))(*(
+            _GradientStop(float(position), int(argb) & 0xffffffff)
+            for position, argb in stops))
+
+    def fill_linear_gradient(self, path, start, end, stops):
+        if path.closed or path._surface is not self:
+            raise ValueError("path does not belong to this Direct2D surface")
+        native_stops = self._gradient_stops(stops)
+        _check_hresult(
+            self._library.spdf_d2d_fill_linear_gradient(
+                self._handle, path._handle, float(start[0]), float(start[1]),
+                float(end[0]), float(end[1]), native_stops,
+                len(native_stops)),
+            "Direct2D linear gradient fill")
+
+    def fill_radial_gradient(self, path, center, origin, radius, stops):
+        if path.closed or path._surface is not self:
+            raise ValueError("path does not belong to this Direct2D surface")
+        native_stops = self._gradient_stops(stops)
+        _check_hresult(
+            self._library.spdf_d2d_fill_radial_gradient(
+                self._handle, path._handle, float(center[0]), float(center[1]),
+                float(origin[0]), float(origin[1]), float(radius[0]),
+                float(radius[1]), native_stops, len(native_stops)),
+            "Direct2D radial gradient fill")
 
     def end_frame(self):
         if self.closed:

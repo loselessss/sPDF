@@ -5,7 +5,7 @@
 ; 아래 MyAppVersion을 함께 맞출 것(자동 동기화 안 됨).
 
 #define MyAppName "sPDF"
-#define MyAppVersion "1.28.4"
+#define MyAppVersion "1.28.5"
 #define MyAppPublisher "sPDF"
 #define MyAppExeName "sPDF.exe"
 #define MyProgId "sPDF.Document"

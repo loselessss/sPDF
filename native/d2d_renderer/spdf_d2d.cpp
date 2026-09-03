@@ -165,6 +165,7 @@ public:
         if (FAILED(result)) {
             return result;
         }
+        configure_antialiasing();
         // Geometry realizations cache tessellation for repeated zoom/pan frames.
         // They are optional and FillGeometry remains the compatibility path.
         d2d_context_.As(&d2d_context1_);
@@ -239,6 +240,7 @@ public:
         const auto blue = static_cast<float>(argb & 0xff) / 255.0f;
         d2d_context_->BeginDraw();
         drawing_ = true;
+        configure_antialiasing();
         d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
         d2d_context_->Clear(D2D1::ColorF(red, green, blue, alpha));
         return S_OK;
@@ -1097,6 +1099,80 @@ public:
         return S_OK;
     }
 
+    HRESULT fill_linear_gradient(
+        Path* path,
+        float start_x,
+        float start_y,
+        float end_x,
+        float end_y,
+        const SpdfD2DGradientStop* stops,
+        std::uint32_t stop_count) noexcept {
+        if (!drawing_ || path == nullptr || path->owner != this ||
+                !path->resource || !std::isfinite(start_x) ||
+                !std::isfinite(start_y) || !std::isfinite(end_x) ||
+                !std::isfinite(end_y)) {
+            return E_INVALIDARG;
+        }
+        ComPtr<ID2D1GradientStopCollection> collection;
+        auto result = create_gradient_stop_collection(
+            stops, stop_count, &collection);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1LinearGradientBrush> brush;
+        result = d2d_context_->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(
+                D2D1::Point2F(start_x, start_y),
+                D2D1::Point2F(end_x, end_y)),
+            collection.Get(),
+            &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        d2d_context_->FillGeometry(path->resource.Get(), brush.Get());
+        return S_OK;
+    }
+
+    HRESULT fill_radial_gradient(
+        Path* path,
+        float center_x,
+        float center_y,
+        float origin_x,
+        float origin_y,
+        float radius_x,
+        float radius_y,
+        const SpdfD2DGradientStop* stops,
+        std::uint32_t stop_count) noexcept {
+        if (!drawing_ || path == nullptr || path->owner != this ||
+                !path->resource || !std::isfinite(center_x) ||
+                !std::isfinite(center_y) || !std::isfinite(origin_x) ||
+                !std::isfinite(origin_y) || !std::isfinite(radius_x) ||
+                !std::isfinite(radius_y) || radius_x <= 0.0f ||
+                radius_y <= 0.0f) {
+            return E_INVALIDARG;
+        }
+        ComPtr<ID2D1GradientStopCollection> collection;
+        auto result = create_gradient_stop_collection(
+            stops, stop_count, &collection);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1RadialGradientBrush> brush;
+        result = d2d_context_->CreateRadialGradientBrush(
+            D2D1::RadialGradientBrushProperties(
+                D2D1::Point2F(center_x, center_y),
+                D2D1::Point2F(origin_x - center_x, origin_y - center_y),
+                radius_x,
+                radius_y),
+            collection.Get(),
+            &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        d2d_context_->FillGeometry(path->resource.Get(), brush.Get());
+        return S_OK;
+    }
+
     HRESULT draw_bitmap(
         Bitmap* bitmap,
         float left,
@@ -1222,6 +1298,40 @@ private:
         return created.CopyTo(brush);
     }
 
+    HRESULT create_gradient_stop_collection(
+        const SpdfD2DGradientStop* stops,
+        std::uint32_t stop_count,
+        ID2D1GradientStopCollection** collection) noexcept {
+        if (stops == nullptr || collection == nullptr || stop_count < 2 ||
+                stop_count > 256) {
+            return E_INVALIDARG;
+        }
+        std::vector<D2D1_GRADIENT_STOP> native_stops;
+        native_stops.reserve(stop_count);
+        float previous = -1.0f;
+        for (std::uint32_t index = 0; index < stop_count; ++index) {
+            const auto position = stops[index].position;
+            if (!std::isfinite(position) || position < 0.0f ||
+                    position > 1.0f || position < previous) {
+                return E_INVALIDARG;
+            }
+            previous = position;
+            const auto argb = stops[index].argb;
+            const auto alpha = static_cast<float>((argb >> 24) & 0xff) / 255.0f;
+            const auto red = static_cast<float>((argb >> 16) & 0xff) / 255.0f;
+            const auto green = static_cast<float>((argb >> 8) & 0xff) / 255.0f;
+            const auto blue = static_cast<float>(argb & 0xff) / 255.0f;
+            native_stops.push_back(D2D1::GradientStop(
+                position, D2D1::ColorF(red, green, blue, alpha)));
+        }
+        return d2d_context_->CreateGradientStopCollection(
+            native_stops.data(),
+            static_cast<UINT32>(native_stops.size()),
+            D2D1_GAMMA_2_2,
+            D2D1_EXTEND_MODE_CLAMP,
+            collection);
+    }
+
     HRESULT create_target() noexcept {
         ComPtr<IDXGISurface> back_buffer;
         auto result = swap_chain_->GetBuffer(0, IID_PPV_ARGS(&back_buffer));
@@ -1240,8 +1350,17 @@ private:
         if (SUCCEEDED(result)) {
             d2d_context_->SetTarget(target_.Get());
             d2d_context_->SetDpi(dpi_, dpi_);
+            configure_antialiasing();
         }
         return result;
+    }
+
+    void configure_antialiasing() noexcept {
+        if (!d2d_context_) {
+            return;
+        }
+        d2d_context_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        d2d_context_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     }
 
     SpdfD2DDriver driver_ = SPDF_D2D_DRIVER_NONE;
@@ -1692,6 +1811,44 @@ std::int32_t spdf_d2d_stroke_path_styled(
     return static_cast<std::int32_t>(static_cast<Surface*>(surface)->stroke_path(
         static_cast<Surface::Path*>(path), argb, width,
         static_cast<Surface::StrokeStyle*>(stroke_style)));
+}
+
+std::int32_t spdf_d2d_fill_linear_gradient(
+    void* surface,
+    void* path,
+    float start_x,
+    float start_y,
+    float end_x,
+    float end_y,
+    const SpdfD2DGradientStop* stops,
+    std::uint32_t stop_count) noexcept {
+    if (surface == nullptr || path == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->fill_linear_gradient(
+            static_cast<Surface::Path*>(path), start_x, start_y,
+            end_x, end_y, stops, stop_count));
+}
+
+std::int32_t spdf_d2d_fill_radial_gradient(
+    void* surface,
+    void* path,
+    float center_x,
+    float center_y,
+    float origin_x,
+    float origin_y,
+    float radius_x,
+    float radius_y,
+    const SpdfD2DGradientStop* stops,
+    std::uint32_t stop_count) noexcept {
+    if (surface == nullptr || path == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    return static_cast<std::int32_t>(
+        static_cast<Surface*>(surface)->fill_radial_gradient(
+            static_cast<Surface::Path*>(path), center_x, center_y,
+            origin_x, origin_y, radius_x, radius_y, stops, stop_count));
 }
 
 std::int32_t spdf_d2d_end_frame(void* surface) noexcept {

@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.28.4** · English and Korean interface · Windows
+**Current version: 1.28.5** · English and Korean interface · Windows
 
 ## What sPDF is for
 

@@ -45,7 +45,7 @@ def pdf_component_blend(mode, backdrop, source):
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 15)
+        self.assertEqual(ABI_VERSION, 16)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -67,6 +67,52 @@ class D2DBackendTests(unittest.TestCase):
         self.assertIn(result.driver, ("hardware", "warp"))
         self.assertGreaterEqual(result.feature_level, 0xA000)
         self.assertTrue(result.adapter_name)
+
+    @unittest.skipUnless(os.name == "nt", "Direct2D is Windows-only")
+    def test_vector_edges_use_grayscale_antialiasing(self):
+        library = Path(__file__).resolve().parents[1] / "native" / "bin" / \
+            "spdf_d2d_renderer.dll"
+        if not library.is_file():
+            self.skipTest("native renderer is not built")
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.CreateWindowExW.argtypes = [
+            ctypes.c_uint32, ctypes.c_wchar_p, ctypes.c_wchar_p,
+            ctypes.c_uint32, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_void_p]
+        user32.CreateWindowExW.restype = ctypes.c_void_p
+        user32.DestroyWindow.argtypes = [ctypes.c_void_p]
+        user32.DestroyWindow.restype = ctypes.c_int
+        hwnd = user32.CreateWindowExW(
+            0, "STATIC", "sPDF D2D AA test", 0, 0, 0, 64, 64,
+            None, None, None, None)
+        self.assertTrue(hwnd, ctypes.get_last_error())
+        try:
+            with D2DSurface(hwnd, 64, 64, path=library) as surface:
+                path = surface.create_path([
+                    ("move", 8.2, 8.2), ("line", 55.7, 17.4),
+                    ("line", 13.1, 55.6), ("close",)])
+                try:
+                    surface.begin_frame(0x00000000)
+                    surface.fill_path(path, 0xffffffff)
+                    transparent = surface.read_pixels_bgra(64, 64)
+                    surface.end_frame()
+                    alpha = transparent[3::4]
+                    self.assertTrue(any(0 < value < 255 for value in alpha))
+
+                    surface.begin_frame(0xffffffff)
+                    surface.fill_path(path, 0xff000000)
+                    opaque = surface.read_pixels_bgra(64, 64)
+                    surface.end_frame()
+                    pixels = [opaque[i:i + 4] for i in range(0, len(opaque), 4)]
+                    self.assertTrue(any(
+                        bgra[3] == 255 and 0 < bgra[0] < 255 and
+                        bgra[0] == bgra[1] == bgra[2]
+                        for bgra in pixels))
+                finally:
+                    path.close()
+        finally:
+            user32.DestroyWindow(hwnd)
 
     @unittest.skipUnless(os.name == "nt", "Direct2D is Windows-only")
     def test_built_renderer_presents_and_resizes_hidden_hwnd(self):
@@ -112,6 +158,9 @@ class D2DBackendTests(unittest.TestCase):
                 surface.stroke_rect(2, 2, 62, 62, 0xff00a05a, 1.0)
                 surface.fill_path(path, 0x600078d7)
                 surface.stroke_path(path, 0xff00a05a, 2.0)
+                surface.fill_linear_gradient(
+                    path, (6, 6), (58, 58),
+                    ((0.0, 0xffff0000), (1.0, 0xff0000ff)))
                 surface.stroke_path(path, 0xffff8000, 4.0, stroke_style)
                 surface.push_clip_path(path)
                 surface.push_clip_path(stroked_path)
