@@ -1,4 +1,4 @@
-# sPDF 1.28.5 Release Notes
+# sPDF 1.28.6 Release Notes
 
 Release date: 2026-09-03
 
@@ -32,3 +32,8 @@ Release date: 2026-09-03
 - GPU-rendered pages keep grayscale antialiasing enabled more explicitly for smoother vector and text-outline edges.
 - Expensive GPU scene preparation falls back after a short wait so difficult pages do not hold the reader for too long.
 - Common linear and radial PDF gradients stay on the GPU path with fewer drawing operations.
+
+## 1.28.6 improvement - 2026-09-03
+
+- Some journal PDFs with missing display-list glyph ids now keep their original text outlines on the GPU path when the embedded/original font can map the character back to a vector glyph.
+- The temporary Direct2D ABI overlay is no longer shown on GPU-rendered pages.

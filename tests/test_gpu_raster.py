@@ -744,6 +744,34 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertFalse(scene.supported)
         self.assertEqual(scene.reason, "GPU scene time budget exceeded")
 
+    def test_original_font_cmap_can_recover_missing_glyph_id(self):
+        from pdfeditor.gpu_raster import _encoded_glyph_id
+
+        class Font:
+            def fz_encode_character(self, codepoint):
+                self.codepoint = codepoint
+                return 42
+
+            def fz_encode_character_sc(self, _codepoint):
+                return 0
+
+        font = Font()
+
+        self.assertEqual(_encoded_glyph_id(font, ord("f")), 42)
+        self.assertEqual(font.codepoint, ord("f"))
+
+    def test_missing_cmap_glyph_keeps_cpu_fallback(self):
+        from pdfeditor.gpu_raster import _encoded_glyph_id
+
+        class Font:
+            def fz_encode_character(self, _codepoint):
+                return 0
+
+            def fz_encode_character_sc(self, _codepoint):
+                return -1
+
+        self.assertEqual(_encoded_glyph_id(Font(), ord("f")), -1)
+
     def test_complex_stroke_style_stays_on_direct2d_path(self):
         scene = self.document.gpu_vector_page(11)
         self.assertTrue(scene.supported, scene.reason)

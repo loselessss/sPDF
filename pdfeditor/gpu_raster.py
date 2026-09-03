@@ -30,6 +30,7 @@ UNIT_RECT_COMMANDS = (
 FZ_LINEAR_SHADE = 2
 FZ_RADIAL_SHADE = 3
 FZ_LINEAR_SHADE_UNION_OFFSET = 224
+GLYPH_ENCODERS = ("fz_encode_character", "fz_encode_character_sc")
 
 
 @dataclass(frozen=True)
@@ -171,6 +172,40 @@ def _path_commands(path, *, allow_empty=False):
     if not walker.commands and not allow_empty:
         raise ValueError("empty vector path")
     return tuple(walker.commands)
+
+
+def _is_invisible_text_codepoint(ucs):
+    try:
+        char = chr(int(ucs))
+    except (OverflowError, ValueError):
+        return False
+    if char.isspace():
+        return True
+    return int(ucs) in {
+        0x00ad,  # soft hyphen
+        0x200b,  # zero width space
+        0x200c,  # zero width non-joiner
+        0x200d,  # zero width joiner
+        0xfeff,  # zero width no-break space / BOM
+    }
+
+
+def _encoded_glyph_id(font, ucs):
+    try:
+        codepoint = int(ucs)
+    except (OverflowError, ValueError, TypeError):
+        return -1
+    for encoder_name in GLYPH_ENCODERS:
+        encoder = getattr(font, encoder_name, None)
+        if encoder is None:
+            continue
+        try:
+            gid = int(encoder(codepoint))
+        except (RuntimeError, TypeError, ValueError, OverflowError):
+            continue
+        if gid > 0:
+            return gid
+    return -1
 
 
 def _matrix(value):
@@ -997,25 +1032,32 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             page_matrix = _mupdf.FzMatrix(ctm)
             for index in range(span.m_internal.len):
                 item = span.items(index)
-                if item.gid < 0:
-                    raise ValueError("text glyph has no usable glyph id")
+                gid = int(item.gid)
+                if gid < 0:
+                    gid = _encoded_glyph_id(font, item.ucs)
+                    if gid < 0:
+                        if _is_invisible_text_codepoint(item.ucs):
+                            continue
+                        raise ValueError("text glyph has no usable glyph id")
+                    self._features.add("text-glyph-cmap")
                 matrix = _mupdf.FzMatrix(
                     base.a, base.b, base.c, base.d, base.e, base.f)
                 matrix.e = item.x
                 matrix.f = item.y
                 matrix = _mupdf.fz_concat(matrix, page_matrix)
-                key = (font.m_internal_value(), item.gid)
+                key = (font.m_internal_value(), gid)
                 commands = self._glyphs.get(key)
                 if commands is None:
                     outline = font.fz_outline_glyph(
-                        item.gid, _mupdf.FzMatrix())
+                        gid, _mupdf.FzMatrix())
                     if not outline:
-                        if chr(item.ucs).isspace():
+                        if _is_invisible_text_codepoint(item.ucs):
                             self._glyphs[key] = ()
                             continue
                         raise ValueError("font glyph has no vector outline")
                     commands = _path_commands(outline, allow_empty=True)
-                    if not commands and not chr(item.ucs).isspace():
+                    if not commands and not _is_invisible_text_codepoint(
+                            item.ucs):
                         raise ValueError("font glyph has no vector outline")
                     self._glyphs[key] = commands
                 if commands:

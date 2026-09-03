@@ -4,7 +4,7 @@
 
 상태: Direct2D 타일 합성 및 제한형 PDF 벡터·글자 GPU 래스터화 적용
 
-### 현재 단계: 1.28.5 / ABI v16
+### 현재 단계: 1.28.6 / ABI v16
 
 - 1.26~1.27의 소프트/이미지 마스크, 사용자 선 스타일, 윤곽선 글자와 stroked clip geometry에 이어 격리 그룹의 **11개 separable 혼합 모드**를 실제 표시 경로에 연결했다. Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion이 대상이다.
 - 1.28.1은 Hue/Saturation/Color/Luminosity도 Direct2D Blend effect에 연결하여 Normal 외 표준 PDF 혼합 모드 15개를 지원한다. PDF의 SetLum/SetSat·색 범위 보정과 같은 RGB 성분 혼합을 사용하며, 일반 HSL 색상 변환으로 대체하지 않는다. 구형 DLL이 확장된 모드 번호를 받지 않도록 ABI v11로 구분한다.
@@ -15,8 +15,9 @@
 - 밝기 마스크는 MuPDF의 `FZ_RI_IN_SOFTMASK` 색 변환으로 만든 65³ RGB→Gray LUT를 [Direct2D LookupTable3D](https://learn.microsoft.com/en-us/windows/win32/direct2d/3d-lookup-table-effect)에 올린 뒤 알파로 변환한다. 일반 RGB→Gray 변환과 마스크 전용 변환은 다르다. LUT는 약 1.05 MiB로 필요할 때 한 번 생성·업로드하고 기본 ICC 변환이 바뀌면 갱신한다. 픽셀별 변환과 래스터화는 GPU가 수행한다. Windows 10 이상의 해당 GPU 효과를 사용할 수 없으면 기존 안전 경로가 적용된다. 회색조(+alpha) 이미지도 RGBA로 정규화하고 PDF의 Interpolate 설정을 전달한다.
 - 1.28.4는 반복 이미지 XObject 디코딩 캐시, 확대 단계별 이미지 장면 품질 갱신, linear/radial shading의 Direct2D vector band 변환, 일부 비격리/knockout 그룹의 안전한 flatten/격리 변환을 추가했다. ABI v15는 변환된 knockout 그룹을 네이티브 composite capture에 전달한다.
 - 1.28.5는 linear shading과 시작 반지름이 0인 radial shading을 Direct2D gradient primitive로 승격한다. 기존 band 표현보다 draw call을 크게 줄이고, 지원하지 못하는 radial 형태는 기존 band 또는 CPU 대체 경로를 유지한다. ABI v16은 linear/radial gradient fill API와 gradient stop 배열을 추가한다.
+- 1.28.6은 MuPDF display-list 글자 항목의 glyph id가 비어 있어도 같은 내장/원본 폰트의 cmap으로 유니코드 문자를 glyph id에 다시 매핑할 수 있으면 그 원본 glyph outline을 사용한다. 원본 폰트에서 glyph id 또는 outline을 얻지 못하는 보이는 글자는 계속 CPU 경로로 둔다.
 - Direct2D device context는 프레임 시작·렌더 타깃 재생성 시 `D2D1_ANTIALIAS_MODE_PER_PRIMITIVE`와 `D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE`을 명시한다. 기존 PDF 글자는 glyph outline geometry로 처리하므로 화면 기준 텍스트 품질도 geometry AA 경로에서 검증한다.
-- GPU 장면 추출은 페이지당 1초 예산을 적용한다. 시간 예산을 넘긴 페이지는 기존 CPU 타일 경로를 유지하며, 이미 준비된 낮은 확대 단계 GPU 장면은 고해상도 갱신이 시간 초과되어도 버리지 않는다. GPU로 표시된 페이지에는 진단용 Direct2D ABI 배지를 화면 overlay로 작게 표시하며 PDF 원본에는 기록하지 않는다.
+- GPU 장면 추출은 페이지당 1초 예산을 적용한다. 시간 예산을 넘긴 페이지는 기존 CPU 타일 경로를 유지하며, 이미 준비된 낮은 확대 단계 GPU 장면은 고해상도 갱신이 시간 초과되어도 버리지 않는다.
 - knockout·비격리 그룹의 일반 조합, 타일 패턴, 마스크 transfer function과 기타 미지원 명령은 아직 남아 있다. **요소/그룹 단위 CPU 대체 구조까지 완료한 것은 아니다.** shading 생성과 이미지 디코딩도 현재 CPU 작업이다.
 - 실제 Direct2D 출력 픽셀을 읽는 명시적 진단 API를 추가했다. 11개 모드의 반투명 배경·소스·그룹 opacity 결과를 수식과 비교하고, 실제 PDF의 GPU 장면을 CPU 렌더의 내부 픽셀과 비교한다. 픽셀 readback은 테스트용 호출에만 사용하며 일반 repaint 경로에는 넣지 않는다. 임의 포스터·색 관리·모든 중첩 조합의 품질이나 속도 우위를 이 테스트만으로 보장하지 않는다.
 - 추가한 성분 혼합 4개는 12가지 배경/소스 색 쌍(6개 색조 영역, 회색, 흑백)과 4가지 알파/불투명도 조건의 192개 조합을 독립 SetLum/SetSat 수식과 비교한다. 실제 PDF 15개 모드를 일반 장면과 중첩/even-odd 클리핑 장면에서 CPU 내부 픽셀과 비교한다. 반투명 배경·소수점 clip 경계·중첩·회전·96/120 DPI를 별도로 비교하고, 잘못된 capture 종료와 미완료 프레임 정리도 검증한다. 알파/밝기 마스크 내부·외부 혼합, RGB 원색·회색 마스크, 이미지 마스크를 CPU 출력과 비교하며, 중첩 적용·마스크 영역 밖 보존·오류 후 프레임 재시작도 확인한다.
@@ -70,6 +71,7 @@ PDF 저장, 실행 취소, OCR, 페이지 구성과 파일 잠금은 네이티�
 - [ ] **실제 렌더 경로 확인:** 문서별·페이지별 GPU 래스터화, CPU 래스터화 후 GPU 합성, 혼합 경로와 전체 CPU 대체를 구분한다. PNG 기반 비교군의 GPU 표시만으로 벡터·글자 GPU 지원이나 속도 우위를 판단하지 않는다. 대체 사유와 해당 명령·그룹을 함께 수집한다.
 - [ ] **초기 캐시 생성 지연:** GPU 표시가 켜져도 캐시 준비가 오래 걸리는 증상을 재현한다. PDF 해석, 장면 추출, glyph/geometry 생성, 이미지 디코딩·색 변환, shading 이미지 생성, GPU 업로드, 첫 프레임, 선명한 화면 완성 시간을 분리 측정한다. 새 프로세스의 첫 열기와 같은 프로세스의 재열기·재방문·확대/축소를 나누어 비교한다.
 - [ ] **캐시 재사용·입력 반응:** 동일 이미지·glyph·geometry의 중복 생성/업로드, 불필요한 캐시 무효화와 Python 픽셀 루프를 조사한다. 재사용·일괄 변환·보이는 영역 우선 처리를 검토하되, 문서 수정 시 무효화와 닫기·숨김 시 자원 회수는 유지한다. 트레이 상주 여부와 독립적으로 측정한다.
+- [ ] **리더 확대 배율 표시:** CPU/GPU 경로와 무관하게 리더에서 확대·축소 시 하단 배율 입력값이 잠깐 실제 값으로 바뀐 뒤 100%로 되돌아가는 문제가 남아 있다. 실제 화면 확대는 적용되므로 표시 상태 갱신 또는 늦은 레이아웃 동기화 경로를 분리해 수정한다.
 - [ ] **안티앨리어싱 품질:** Direct2D 컨텍스트의 per-primitive/grayscale AA 명시는 적용했고, 실제 출력 픽셀에서 사선 도형의 중간 알파와 흰 배경의 회색 edge를 회귀 검사한다. 남은 작업은 100%·폭 맞춤·800% 및 Windows 100/125/150/200% 배율에서 글자 윤곽, 사선·곡선, 클리핑·마스크 경계와 이미지 확대 품질을 CPU 기준 화면과 비교하는 것이다. 벡터 AA와 이미지 보간을 구분하고 PDF의 명시적 Interpolate 설정을 무조건 덮어쓰지 않는다.
 - [ ] **복잡 효과 PDF 판별과 CPU island:** 작은 shading band, 투명도 그룹, knockout 그룹이 과도하게 반복되는 페이지는 GPU 장면 추출 초기에 비용을 예측하고 세션 안에서 실패 결과를 캐시한다. 전체 페이지를 CPU로 돌리기 전에 문제가 되는 그룹 bbox만 MuPDF로 래스터화해 GPU 장면에 `VectorImage`로 합성하는 부분 대체 경로를 검토한다. CPU island는 PDF 표시 순서, 그룹 opacity, clip/mask coverage, 확대 품질 단계와 메모리 상한을 함께 만족해야 하며 단일 미지원 요소 때문에 단순 벡터·글자까지 CPU로 전환하지 않는 것을 목표로 한다.
 

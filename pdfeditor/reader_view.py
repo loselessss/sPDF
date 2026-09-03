@@ -10,12 +10,12 @@ import math
 import os
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import (QColor, QFont, QFontMetrics, QImage, QMouseEvent,
-                         QPainter, QPixmap, QTransform)
+from PyQt5.QtGui import (QColor, QImage, QMouseEvent, QPainter, QPixmap,
+                         QTransform)
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QOpenGLWidget, QWidget
 
 from . import settings
-from .d2d_backend import ABI_VERSION, D2DSurface, probe_d2d_backend
+from .d2d_backend import D2DSurface, probe_d2d_backend
 from .widgets import (EDIT_BOX_COLOR, SEARCH_COLOR, SEARCH_CUR_COLOR, SEL_COLOR,
                       PageCanvas, qimage_from_render)
 
@@ -25,7 +25,6 @@ PREVIEW_PIXELS = 1_000_000
 VIEWPORT_PIXELS = 6_000_000
 MAX_VISIBLE_TILES = 48
 GPU_SCENE_TIMEOUT_SECONDS = 1.0
-GPU_RENDERER_BADGE = "D2D ABI %d" % ABI_VERSION
 
 
 def opengl_allowed():
@@ -95,8 +94,6 @@ class ReaderPageView(QGraphicsView):
         self._d2d_size = None
         self._d2d_previews = {}
         self._d2d_tiles = {}
-        self._d2d_badges = {}
-        self._badge_pixmaps = {}
         self._vector_pages = {}
         self._d2d_vector_paths = {}
         self._reported_render_device = None
@@ -237,14 +234,11 @@ class ReaderPageView(QGraphicsView):
             bitmap.close()
         for _key, bitmap in tuple(self._d2d_tiles.values()):
             bitmap.close()
-        for _key, bitmap in tuple(self._d2d_badges.values()):
-            bitmap.close()
         for _scene, _draws, resources in tuple(self._d2d_vector_paths.values()):
             for path in resources:
                 path.close()
         self._d2d_previews.clear()
         self._d2d_tiles.clear()
-        self._d2d_badges.clear()
         self._d2d_vector_paths.clear()
         if self._d2d_surface is not None:
             self._d2d_surface.close()
@@ -282,46 +276,6 @@ class ReaderPageView(QGraphicsView):
         bitmap = self._d2d_surface.create_bitmap_bgra(pixels, width, height, stride)
         cache[key] = (identity, bitmap)
         return bitmap
-
-    def _badge_pixmap(self, text):
-        pixmap = self._badge_pixmaps.get(text)
-        if pixmap is not None:
-            return pixmap
-        font = QFont(self.font())
-        font.setPointSize(8)
-        metrics = QFontMetrics(font)
-        width = max(1, metrics.horizontalAdvance(text) + 12)
-        height = max(1, metrics.height() + 6)
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        try:
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            painter.setRenderHint(QPainter.TextAntialiasing, True)
-            painter.setFont(font)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(20, 20, 20, 150))
-            painter.drawRoundedRect(0, 0, width, height, 3, 3)
-            painter.setPen(QColor(255, 255, 255, 235))
-            painter.drawText(6, metrics.ascent() + 3, text)
-        finally:
-            painter.end()
-        self._badge_pixmaps[text] = pixmap
-        return pixmap
-
-    def _draw_gpu_engine_badge(self, page_rect):
-        if type(self._d2d_surface) is not D2DSurface:
-            return
-        pixmap = self._badge_pixmap(GPU_RENDERER_BADGE)
-        bitmap = self._native_bitmap(
-            self._d2d_badges, GPU_RENDERER_BADGE, pixmap)
-        position = self.mapFromScene(page_rect.topLeft())
-        x = max(0, position.x() + 6)
-        y = max(0, position.y() + 6)
-        self._d2d_surface.set_transform(1, 0, 0, 1, 0, 0)
-        self._d2d_surface.draw_bitmap(
-            bitmap, x, y, x + pixmap.width(), y + pixmap.height(),
-            opacity=0.8)
 
     def _set_page_transform(self, transform):
         viewport_origin = self.mapFromScene(QPointF(0, 0))
@@ -625,7 +579,6 @@ class ReaderPageView(QGraphicsView):
             if vector_scene is not None and vector_scene.supported:
                 self._draw_vector_page(page, vector_scene)
                 rasterized[page] = ("CPU+GPU" if "shading" in vector_scene.features else "GPU")
-                self._draw_gpu_engine_badge(rect)
             else:
                 rasterized[page] = "CPU"
                 bitmap = self._native_bitmap(self._d2d_previews, page, preview)
@@ -904,10 +857,6 @@ class ReaderPageView(QGraphicsView):
         for _identity, bitmap in tuple(self._d2d_tiles.values()):
             bitmap.close()
         self._d2d_tiles.clear()
-        for _identity, bitmap in tuple(self._d2d_badges.values()):
-            bitmap.close()
-        self._d2d_badges.clear()
-        self._badge_pixmaps.clear()
         self._tile_bytes = 0
         self._wanted.clear()
 
@@ -923,10 +872,6 @@ class ReaderPageView(QGraphicsView):
         for _identity, bitmap in tuple(self._d2d_previews.values()):
             bitmap.close()
         self._d2d_previews.clear()
-        for _identity, bitmap in tuple(self._d2d_badges.values()):
-            bitmap.close()
-        self._d2d_badges.clear()
-        self._badge_pixmaps.clear()
         for _scene, _draws, resources in tuple(self._d2d_vector_paths.values()):
             for path in resources:
                 path.close()
