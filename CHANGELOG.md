@@ -2,13 +2,13 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.28.3 - 2026-09-02
+## 1.28.4 - 2026-09-02
 
-### Performance improvements
+### Improvements
 
-- Blends and clipping inside alpha, luminosity, and image masks can now stay on the GPU rendering path, including nested masks.
+- Standalone reader/editor tabs now share the title bar with the window controls, removing the duplicate title row.
+- Tab labels use the compact `file.pdf [Read/GPU]` or `[Edit/CPU]` format.
 
 ### Fixes
 
-- Luminosity masks now follow PDF soft-mask color conversion instead of generic display luminance, including colored masks.
-- Grayscale mask images are supported, and PDF image interpolation settings are preserved when zooming.
+- CPU/GPU labels now follow actual page rasterization. CPU tiles composed by the GPU show CPU; partly CPU-rasterized pages show CPU+GPU.

@@ -106,7 +106,8 @@ HELP_HTML = """
 mm 단위로 표시합니다. <b>페이지 구성</b>이나 Ctrl+Shift+P는 페이지를 드래그해
 순서를 바꿀 수 있는 별도 바둑판 창을 엽니다. 미저장 변경과 실행 취소·다시 실행
 이력은 두 창에서 이어집니다.</p>
-<p>편집 문서의 탭에만 <b>[편집 전용]</b>을 표시합니다.
+<p>상단 탭에 <b>[읽기/GPU]</b>, <b>[편집/CPU]</b>처럼 모드와 실제 래스터화 경로를 표시합니다.
+CPU 래스터 이미지의 GPU 합성은 CPU로, 일부 CPU 래스터화가 섞이면 CPU+GPU로 표시합니다.
 독립 편집 창에는 프레젠테이션·전체화면 버튼과 메뉴, F5·F11 단축키가 없습니다.
 이 기능들은 읽기 창에서 사용하세요.</p>
 <p>읽기 창에서도 도구 모음·보기 메뉴 또는 <b>Ctrl+[ / Ctrl+]</b>로 현재 쪽을
@@ -250,7 +251,9 @@ reader tab and closes the reader process when it was the last tab. A failed or
 timed-out open leaves the reader unchanged.
 <b>Page Organization</b> or Ctrl+Shift+P opens a separate thumbnail grid where
 pages can be reordered. Unsaved changes and undo/redo history remain shared.</p>
-<p>Only editor tabs display <b>[Edit-only]</b>. Standalone editors
+<p>Caption tabs show the mode and actual rasterization path, such as <b>[Read/GPU]</b>
+or <b>[Edit/CPU]</b>. GPU composition of CPU tiles is labeled CPU;
+partly CPU-rasterized pages are labeled CPU+GPU. Standalone editors
 do not offer presentation or full-screen buttons, menus, or F5/F11 shortcuts.
 Use these view modes in the reader.</p>
 <p>

@@ -3,6 +3,7 @@
 Qt에 의존하지 않는다(설계 계획서 §4). GUI 없이 단독 테스트가 가능해야
 하므로 이 모듈에서는 PyQt를 import 하지 말 것.
 """
+from collections import OrderedDict
 import os
 import shutil
 import tempfile
@@ -14,6 +15,15 @@ from .access import document_annotation, document_write
 
 
 ANTIALIAS_LEVEL = 8
+GPU_VECTOR_CACHE_BYTES = 128 * 1024 * 1024
+
+
+def _gpu_scene_cost(scene):
+    return sum(
+        int(item.width) * int(item.height) * 4
+        for item in scene.drawables
+        if hasattr(item, "pixels") and hasattr(item, "width") and
+        hasattr(item, "height"))
 
 
 def configure_antialiasing(tools=None):
@@ -61,7 +71,8 @@ class Document:
             raise
         self._source_revision = self._snapshot.revision if self._snapshot else None
         self._display_cache = {}
-        self._gpu_vector_cache = {}
+        self._gpu_vector_cache = OrderedDict()
+        self._gpu_vector_cache_bytes = 0
         sidecar_exists = os.path.exists(os.path.realpath(path) + ".spdf-annotations.json")
         if self.read_only and (self.annotation_mode or sidecar_exists):
             try:
@@ -93,7 +104,8 @@ class Document:
         document._password = None
         document._doc = fitz.open("pdf", data)
         document._display_cache = {}
-        document._gpu_vector_cache = {}
+        document._gpu_vector_cache = OrderedDict()
+        document._gpu_vector_cache_bytes = 0
         return document
 
     @staticmethod
@@ -114,6 +126,7 @@ class Document:
         if self._doc is not None:
             self._display_cache.clear()
             self._gpu_vector_cache.clear()
+            self._gpu_vector_cache_bytes = 0
             self._doc.close()
             self._doc = None
         if getattr(self, "_snapshot", None) is not None:
@@ -185,17 +198,40 @@ class Document:
         if index is None:
             self._display_cache.clear()
             self._gpu_vector_cache.clear()
+            self._gpu_vector_cache_bytes = 0
         else:
             self._display_cache.pop(index, None)
-            self._gpu_vector_cache.pop(index, None)
+            for key in tuple(self._gpu_vector_cache):
+                if key[0] == index:
+                    scene = self._gpu_vector_cache.pop(key, None)
+                    if scene is not None:
+                        self._gpu_vector_cache_bytes -= _gpu_scene_cost(scene)
 
-    def gpu_vector_page(self, index):
+    def gpu_vector_page(self, index, raster_scale=1.0):
         """Return a conservative Direct2D scene or an unsupported result."""
-        scene = self._gpu_vector_cache.get(index)
+        scale = max(1.0, float(raster_scale))
+        key = (index, scale)
+        scene = self._gpu_vector_cache.get(key)
+        if scene is None:
+            for cached_key, candidate in reversed(self._gpu_vector_cache.items()):
+                if cached_key[0] != index or not candidate.supported:
+                    continue
+                if candidate.raster_scale >= scale or \
+                        "image-downsample" not in candidate.features:
+                    self._gpu_vector_cache.move_to_end(cached_key)
+                    return candidate
         if scene is None:
             from .gpu_raster import vector_page_from_pymupdf
-            scene = vector_page_from_pymupdf(self._doc[index])
-            self._gpu_vector_cache[index] = scene
+            scene = vector_page_from_pymupdf(self._doc[index], scale)
+            cost = _gpu_scene_cost(scene)
+            self._gpu_vector_cache[key] = scene
+            self._gpu_vector_cache_bytes += cost
+            while (self._gpu_vector_cache_bytes > GPU_VECTOR_CACHE_BYTES and
+                   len(self._gpu_vector_cache) > 1):
+                _old_key, old_scene = self._gpu_vector_cache.popitem(last=False)
+                self._gpu_vector_cache_bytes -= _gpu_scene_cost(old_scene)
+        else:
+            self._gpu_vector_cache.move_to_end(key)
         return scene
 
     def page_size(self, index):
@@ -825,6 +861,8 @@ class Document:
         self._doc.close()
         self._doc = fitz.open("pdf", data)
         self._display_cache = {}
+        self._gpu_vector_cache.clear()
+        self._gpu_vector_cache_bytes = 0
 
     # --- 저장 -------------------------------------------------------
 
@@ -856,6 +894,7 @@ class Document:
             if same_path:
                 self._display_cache.clear()
                 self._gpu_vector_cache.clear()
+                self._gpu_vector_cache_bytes = 0
                 self._doc.close()
                 self._doc = None
             try:

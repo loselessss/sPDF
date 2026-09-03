@@ -135,6 +135,17 @@ def render_backend():
     return mode if mode in RENDER_BACKENDS else DEFAULT_RENDER_BACKEND
 
 
+def reader_resident():
+    return bool(_load().get("reader_resident", False))
+
+
+def set_reader_resident(enabled):
+    data = _load()
+    data["reader_resident"] = bool(enabled)
+    _save(data)
+    return True
+
+
 def set_render_backend(mode):
     normalized = str(mode).lower()
     if normalized not in RENDER_BACKENDS:

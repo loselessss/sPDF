@@ -61,6 +61,8 @@ class ReaderViewTests(unittest.TestCase):
 
     def test_zoom_immediately_reuses_images_and_preserves_pointer(self):
         from PyQt5.QtCore import QPoint
+        from PyQt5.QtTest import QSignalSpy
+        zooms = QSignalSpy(self.view.zoom_changed)
         self.view.preview_zoom(2)
         self.view.centerOn(600, 700)
         cursor = QPoint(260, 240)
@@ -78,6 +80,7 @@ class ReaderViewTests(unittest.TestCase):
         self.assertLess(self.view.canvas.width(), 1000)
         self.assertLessEqual(self.view.viewport().width(), 720)
         self.assertTrue(self.view._refine_timer.isActive())
+        self.assertEqual([call[0] for call in zooms], [2, 8])
 
     def test_only_requested_pages_have_bounded_previews(self):
         from pdfeditor.reader_view import PREVIEW_PIXELS
@@ -253,6 +256,24 @@ class ReaderViewTests(unittest.TestCase):
         self.assertEqual(fallback["reason"], "unsupported operation: begin-mask")
         self.view._d2d_requested = False
 
+    def test_raster_label_tracks_completed_frames_not_composition_device(self):
+        from types import SimpleNamespace
+        self.view._gpu_surface = Mock()
+        self.view._gpu_surface.isValid.return_value = True
+        self.assertEqual(self.view.rasterization_device(0), "CPU")
+        self.view._gpu_surface = None
+        self.view._d2d_surface = Mock(info=SimpleNamespace(driver="hardware"))
+        try:
+            self.assertEqual(self.view.rasterization_device(0), "CPU")
+            self.view._rasterized_pages = {0: "GPU", 1: "CPU", 2: "CPU+GPU"}
+            self.assertEqual(self.view.rasterization_device(0), "GPU")
+            self.assertEqual(self.view.rasterization_device(1), "CPU")
+            self.assertEqual(self.view.rasterization_device(2), "CPU+GPU")
+            self.view._d2d_surface.info.driver = "warp"
+            self.assertEqual(self.view.rasterization_device(0), "CPU")
+        finally:
+            self.view._d2d_surface = None
+
     def test_forced_gpu_mode_rejects_direct2d_warp(self):
         from types import SimpleNamespace
         from pdfeditor import reader_view
@@ -312,6 +333,8 @@ class ReaderViewTests(unittest.TestCase):
         self.view.canvas.set_selection([QRectF(60, 70, 80, 20)])
         self.view.canvas.set_edit_boxes([QRectF(70, 110, 90, 24)])
         surface = Surface()
+        from types import SimpleNamespace
+        surface.info = SimpleNamespace(driver="hardware")
         self.view._d2d_surface = surface
         ratio = max(1.0, self.view.viewport().devicePixelRatioF())
         self.view._d2d_size = (self.view.viewport().size(), ratio)
@@ -342,6 +365,7 @@ class ReaderViewTests(unittest.TestCase):
         native_path = Mock(closed=False)
         surface = Mock()
         surface.create_path.return_value = native_path
+        surface.info.driver = "hardware"
         self.view._d2d_surface = surface
         ratio = max(1.0, self.view.viewport().devicePixelRatioF())
         self.view._d2d_size = (self.view.viewport().size(), ratio)
@@ -349,6 +373,7 @@ class ReaderViewTests(unittest.TestCase):
         self.view._vector_pages[0] = scene
 
         self.view._paint_d2d()
+        self.assertEqual(self.view.rasterization_device(0), "GPU")
         surface.create_path.assert_called_once_with(
             scene.paths[0].commands, even_odd=False)
         surface.fill_path.assert_called_once_with(native_path, 0xff0080ff)
@@ -356,6 +381,48 @@ class ReaderViewTests(unittest.TestCase):
         surface.create_bitmap_bgra.assert_not_called()
         self.view._plan_tiles()
         self.assertFalse(self.view._pending)
+
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
+
+    def test_gpu_image_scene_refreshes_for_zoom_quality(self):
+        from pdfeditor.gpu_raster import VectorImage, VectorPage
+
+        low = VectorPage(
+            True,
+            items=(VectorImage(
+                bytes((0, 0, 0, 255)) * 4, 2, 2, 8,
+                (200, 0, 0, 200, 0, 0)),),
+            features=("image", "image-downsample"),
+            raster_scale=1.0)
+        high = VectorPage(
+            True,
+            items=(VectorImage(
+                bytes((0, 0, 0, 255)) * 16, 4, 4, 16,
+                (200, 0, 0, 200, 0, 0)),),
+            features=("image", "image-downsample"),
+            raster_scale=2.0)
+        low_bitmap = Mock(closed=False)
+        high_bitmap = Mock(closed=False)
+        surface = Mock()
+        surface.create_bitmap_bgra.side_effect = (low_bitmap, high_bitmap)
+        surface.info.driver = "hardware"
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = low
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        self.view._paint_d2d()
+
+        with patch.object(self.doc, "gpu_vector_page", return_value=high) as vector_page:
+            self.view.preview_zoom(2)
+            self.view._paint_d2d()
+
+        vector_page.assert_called_once_with(0, 2.0)
+        self.assertIs(self.view._vector_pages[0], high)
+        self.assertEqual(surface.create_bitmap_bgra.call_args.args[1:3], (4, 4))
+        low_bitmap.close.assert_called_once_with()
 
         self.view._d2d_surface = None
         self.view._d2d_vector_paths.clear()
@@ -408,7 +475,8 @@ class ReaderViewTests(unittest.TestCase):
         self.view._paint_d2d()
         self.assertEqual([call.args for call in
             surface.begin_composite_group.call_args_list],
-            [(0, 1), (9, .5), (12, .5), (13, .5), (14, .5), (15, .5)])
+            [(0, 1, False), (9, .5, False), (12, .5, False),
+             (13, .5, False), (14, .5, False), (15, .5, False)])
         self.assertEqual(surface.end_composite_group.call_count, 6)
         surface.push_opacity_layer.assert_not_called()
         surface.create_bitmap_bgra.assert_not_called()
@@ -445,6 +513,25 @@ class ReaderViewTests(unittest.TestCase):
             self.view._d2d_surface = None
             self.view._d2d_vector_paths.clear()
             self.view._d2d_requested = False
+
+    def test_knockout_group_is_forwarded_to_direct2d(self):
+        from pdfeditor.gpu_raster import GroupPop, GroupPush, VectorPage
+
+        scene = VectorPage(
+            True, items=(GroupPush(1, 0, True, True), GroupPop()))
+        surface = Mock()
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+
+        self.view._paint_d2d()
+
+        surface.begin_composite_group.assert_called_once_with(0, 1, True)
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+        self.view._d2d_requested = False
 
     def test_supported_image_scene_uploads_bitmap_and_preserves_transform(self):
         from pdfeditor.gpu_raster import VectorImage, VectorPage

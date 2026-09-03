@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.28.3** · English and Korean interface · Windows
+**Current version: 1.28.4** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -62,7 +62,9 @@ computer unless you explicitly use an external link or optional model download.
   to detailed editing. Unsaved changes and undo/redo history stay intact, and
   only visible and nearby thumbnails are rendered. The detail view shows the
   current page's original size in millimetres on the bottom status bar.
-- Only editor tabs show **[Edit-only]**. Presentation and full-screen
+- Standalone document tabs sit in the title bar and show **[Read/GPU]** or **[Edit/CPU]**.
+  Labels track page rasterization, not GPU composition of CPU tiles; mixed rasterization
+  is shown as **CPU+GPU**. Presentation and full-screen
   controls stay in the reader; they are not offered in standalone editor windows.
 - Change text content, font size, and color in the editor. Page organization,
   annotations, and manual OCR are available there; text editing has its own

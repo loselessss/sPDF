@@ -450,11 +450,11 @@ class EmbeddedModeTests(unittest.TestCase):
                 reader._tabs.setCurrentWidget(tab)
                 QTest.qWait(20)
                 self.assertFalse(sip.isdeleted(tab._menubar))
-                self.assertIs(reader.menuWidget(), tab._menubar)
+                self.assertIs(reader.menuBar(), tab._menubar)
             reader.close_tab(first)
             QTest.qWait(30)
             self.assertFalse(sip.isdeleted(second._menubar))
-            self.assertIs(reader.menuWidget(), second._menubar)
+            self.assertIs(reader.menuBar(), second._menubar)
 
     def test_editor_saves_and_refreshes_reader_without_moving_view(self):
         from PyQt5.QtWidgets import QMessageBox

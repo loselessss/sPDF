@@ -95,6 +95,7 @@ class ReaderPageView(QGraphicsView):
         self._vector_pages = {}
         self._d2d_vector_paths = {}
         self._reported_render_device = None
+        self._rasterized_pages = {}
         self._tile_timer = QTimer(self)
         self._tile_timer.setSingleShot(True)
         self._tile_timer.timeout.connect(self._render_next_tile)
@@ -166,10 +167,46 @@ class ReaderPageView(QGraphicsView):
         return {"mode": "cpu", "reason": "PyMuPDF",
                 "features": ()}
 
+    def _vector_raster_scale(self):
+        scale = max(1.0, self.zoom * self.viewport().devicePixelRatioF())
+        bucket = 1.0
+        while bucket < scale and bucket < self.ZOOM_MAX:
+            bucket *= 2.0
+        return bucket
+
+    def _gpu_vector_page(self, document, page):
+        return document.gpu_vector_page(page, self._vector_raster_scale())
+
+    def _refresh_vector_page_for_zoom(self, page):
+        scene = self._vector_pages.get(page)
+        if self._document is None or scene is None or not scene.supported:
+            return scene
+        if "image-downsample" not in scene.features:
+            return scene
+        target_scale = self._vector_raster_scale()
+        if scene.raster_scale >= target_scale:
+            return scene
+        refreshed = self._document.gpu_vector_page(page, target_scale)
+        if refreshed is not scene:
+            self._discard_native_vector_page(page)
+        self._vector_pages[page] = refreshed
+        return refreshed
+
+    def rasterization_device(self, page):
+        """Last completed page frame, not the device used to composite tiles.
+
+        Decoding embedded images is not PDF rasterization. Shadings, however,
+        are currently rasterized by MuPDF before GPU composition.
+        """
+        if self._d2d_surface is None or self.render_device != "gpu":
+            return "CPU"
+        return self._rasterized_pages.get(page, "CPU")
+
     def _notify_render_device(self):
         device = self.render_device
-        if device != self._reported_render_device:
-            self._reported_render_device = device
+        state = (device, tuple(sorted(self._rasterized_pages.items())))
+        if state != self._reported_render_device:
+            self._reported_render_device = state
             self.render_device_changed.emit(device)
 
     def _ensure_d2d(self):
@@ -199,10 +236,19 @@ class ReaderPageView(QGraphicsView):
             self._d2d_surface.close()
             self._d2d_surface = None
         self._d2d_size = None
-        self._notify_render_device()
         if disable:
             self._d2d_requested = False
             QTimer.singleShot(0, self._schedule_refine)
+        self._rasterized_pages.clear()
+        self._notify_render_device()
+
+    def _discard_native_vector_page(self, page):
+        cached = self._d2d_vector_paths.pop(page, None)
+        if cached is None:
+            return
+        _scene, _draws, resources = cached
+        for resource in resources:
+            resource.close()
 
     @staticmethod
     def _bitmap_bytes(pixmap):
@@ -302,7 +348,8 @@ class ReaderPageView(QGraphicsView):
         draws = []
         composite_groups = any(
             isinstance(item, MaskBegin) or
-            (isinstance(item, GroupPush) and item.blend_mode) for item in items)
+            (isinstance(item, GroupPush) and
+             (item.blend_mode or item.knockout)) for item in items)
         clip_groups = []
         index = 0
         while index < len(items):
@@ -320,7 +367,8 @@ class ReaderPageView(QGraphicsView):
                 continue
             if isinstance(item, GroupPush):
                 if composite_groups:
-                    draws.append(("composite_push", item.blend_mode, item.opacity))
+                    draws.append(("composite_push", item.blend_mode,
+                                  item.opacity, item.knockout))
                 else:
                     draws.append(("group_push", item.opacity))
                 index += 1
@@ -415,7 +463,8 @@ class ReaderPageView(QGraphicsView):
                 self._d2d_surface.pop_layer()
                 continue
             if kind == "composite_push":
-                self._d2d_surface.begin_composite_group(resource, values[0])
+                self._d2d_surface.begin_composite_group(
+                    resource, values[0], values[1])
                 continue
             if kind == "composite_pop":
                 self._d2d_surface.end_composite_group()
@@ -482,16 +531,19 @@ class ReaderPageView(QGraphicsView):
             self._d2d_size = size
         exposed = self._visible_scene_rect()
         self._d2d_surface.begin_frame(0xffe8e8e8)
+        rasterized = {}
         for page, preview, rect in self.canvas._pages:
             if not rect.intersects(exposed):
                 continue
             transform = self._page_transforms[page]
             self._set_page_transform(transform)
             width, height = self._page_sizes[page]
-            vector_scene = self._vector_pages.get(page)
+            vector_scene = self._refresh_vector_page_for_zoom(page)
             if vector_scene is not None and vector_scene.supported:
                 self._draw_vector_page(page, vector_scene)
+                rasterized[page] = ("CPU+GPU" if "shading" in vector_scene.features else "GPU")
             else:
+                rasterized[page] = "CPU"
                 bitmap = self._native_bitmap(self._d2d_previews, page, preview)
                 self._d2d_surface.draw_bitmap(bitmap, 0, 0, width, height)
                 for key, (pixmap, region) in self._tiles.items():
@@ -505,6 +557,8 @@ class ReaderPageView(QGraphicsView):
             if page == self.canvas._active_page:
                 self._draw_d2d_overlays()
         self._d2d_surface.end_frame()
+        self._rasterized_pages = rasterized
+        self._notify_render_device()
 
     def paintEvent(self, event):
         if self._d2d_requested:
@@ -532,6 +586,7 @@ class ReaderPageView(QGraphicsView):
 
     def render_document(self, document, pages, active_page):
         self.stop_rendering()
+        self._rasterized_pages.clear()
         changed = document is not self._document
         if changed:
             if (self._document is None or
@@ -558,13 +613,11 @@ class ReaderPageView(QGraphicsView):
                 bitmap.close()
         for page in tuple(self._d2d_vector_paths):
             if page not in pages:
-                _scene, _draws, resources = self._d2d_vector_paths.pop(page)
-                for path in resources:
-                    path.close()
+                self._discard_native_vector_page(page)
         # Document invalidation owns the scene cache. Ask it on every refresh
         # so an edit on the same page cannot leave stale native geometry here.
         self._vector_pages = {
-            page: document.gpu_vector_page(page) for page in pages
+            page: self._gpu_vector_page(document, page) for page in pages
         } if self._d2d_requested else {}
         self._page_sizes = {p: document.page_size(p) for p in pages}
         for page in pages:
@@ -576,6 +629,7 @@ class ReaderPageView(QGraphicsView):
         self.canvas._active_page = active_page
         self._layout_pages()
         self._schedule_refine()
+        self._notify_render_device()
 
     def page_rotation(self, page):
         return self._rotations.get(page, 0)
@@ -629,6 +683,7 @@ class ReaderPageView(QGraphicsView):
         if position is None:
             position = self.viewport().rect().center()
         anchor = self.canvas._page_point(self.mapToScene(position))
+        old_zoom = self.zoom
         self.zoom = max(self.ZOOM_MIN, min(self.ZOOM_MAX, zoom))
         self.stop_rendering()
         self._layout_pages()
@@ -645,6 +700,8 @@ class ReaderPageView(QGraphicsView):
                     break
         self._schedule_refine(90)
         self.viewport_changed.emit()
+        if self.zoom != old_zoom:
+            self.zoom_changed.emit(self.zoom)
 
     def _visible_scene_rect(self):
         return self.mapToScene(self.viewport().rect()).boundingRect()
@@ -859,7 +916,6 @@ class ReaderPageView(QGraphicsView):
                     if event.modifiers() & Qt.ControlModifier else
                     round(self.zoom + (0.01 if delta > 0 else -0.01), 2))
             self.preview_zoom(zoom, event.pos())
-            self.zoom_changed.emit(self.zoom)
             event.accept()
             return
         bar = self.verticalScrollBar()

@@ -259,7 +259,7 @@ class TransferTabBar(QTabBar):
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton:
             i = self.tabAt(ev.pos())
-            self._pressed_tab = self.parentWidget().widget(i) if i >= 0 else None
+            self._pressed_tab = self.window()._tabs.widget(i) if i >= 0 else None
         super().mousePressEvent(ev)
 
     def mouseReleaseEvent(self, ev):
@@ -614,7 +614,7 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         m.addSeparator()
         self._act(m, "탭 닫기", "Ctrl+W",
                   lambda: self._shell.close_tab(self), "close")
-        self._act(m, "종료", "Ctrl+Q", lambda: self._shell.close(), "power")
+        self._act(m, "종료", "Ctrl+Q", lambda: self._shell.request_exit(), "power")
 
         e = self.menuBar().addMenu("편집(&E)")
         self._undo_act = self._act(
@@ -1186,10 +1186,14 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         if self.doc is None:
             return "(빈 탭)"
         name = ("*" if self._dirty else "") + os.path.basename(self.doc.path)
-        if self.read_only:
+        if self._shell.workspace_mode in ("reader", "editor"):
+            mode = localize("Read", "읽기") if self.read_only else localize("Edit", "편집")
+            devices = {self.view.rasterization_device(page)
+                       for page in self.visible_document_pages()}
+            device = next(iter(devices)) if len(devices) == 1 else "CPU+GPU"
+            name += " [%s/%s]" % (mode, device or "CPU")
+        elif self.read_only:
             name += localize(" [Read-only]", " [읽기 전용]")
-        elif self._shell.workspace_mode == "editor":
-            name += localize(" [Edit-only]", " [편집 전용]")
         return name
 
     def _update_title(self):
@@ -1236,6 +1240,7 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
                 self._zoom_input.blockSignals(False)
         if hasattr(self, "_render_diagnostic_label"):
             self._update_render_diagnostic()
+        self._update_title()
 
     def open_current_location(self):
         """현재 PDF를 선택한 상태로 Windows 탐색기를 연다."""
@@ -1449,6 +1454,7 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
                  annotations_enabled=None, autosave_annotations=True,
                  workspace_mode=None):
         super().__init__()
+        self._window_chrome = None
         self._workspace_mode = workspace_mode
         self._read_only, self._annotations_enabled = workspace_policy(
             workspace_mode, read_only, annotations_enabled)
@@ -1488,8 +1494,18 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         self._start_page.browse.connect(self.open_dialog)
         self._start_page.back_to_doc.connect(self._show_tabs_if_any)
 
-        self._tabs = QTabWidget()
-        self._tabs.setTabBar(TransferTabBar(self._tabs))
+        if workspace_mode in ("reader", "editor"):
+            from .window_chrome import DocumentTabs, WindowChrome
+            self.setWindowFlag(Qt.FramelessWindowHint, True)
+            self.setMinimumSize(520, 320)
+            self._tabs = DocumentTabs(TransferTabBar())
+            self._window_chrome = WindowChrome(self, self._tabs.tabBar())
+            self._tabs.currentChanged.connect(lambda _index:
+                self._window_chrome.brand.setVisible(self._tabs.count() == 0))
+            self.setMenuWidget(self._window_chrome)
+        else:
+            self._tabs = QTabWidget()
+            self._tabs.setTabBar(TransferTabBar(self._tabs))
         self._tabs.setTabsClosable(True)
         self._tabs.setMovable(True)
         self._tabs.setDocumentMode(True)
@@ -1505,7 +1521,7 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         # 시작 페이지(탭 없음)일 때 쓰는 최소 메뉴바. 탭이 활성화되면 그 탭의
         # 메뉴바로 교체(reparent)한다.
         self._shell_menubar = self._build_shell_menu()
-        self.setMenuBar(self._shell_menubar)
+        self._switch_menubar(self._shell_menubar)
         self._show_start()
         if self.updates_enabled and not any(
                 getattr(window, "_auto_update_started", False)
@@ -1570,6 +1586,20 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             self._fluent_backdrop_attempted = True
             self._fluent_backdrop_applied = apply_fluent_window_backdrop(self)
 
+    def nativeEvent(self, event_type, message):
+        if getattr(self, "_window_chrome", None) is not None:
+            from .window_chrome import native_frame_event
+            result = native_frame_event(self, message)
+            if result is not None:
+                return True, result
+        return super().nativeEvent(event_type, message)
+
+    def menuBar(self):
+        chrome = getattr(self, "_window_chrome", None)
+        if chrome is not None and chrome.menubar is not None:
+            return chrome.menubar
+        return super().menuBar()
+
     @property
     def presentation_active(self):
         return self._presentation_tab is not None
@@ -1601,6 +1631,8 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             active.set_presentation_chrome_hidden(False)
             self.menuBar().setVisible(state.get("menubar", True))
             self._tabs.tabBar().setVisible(state.get("tabbar", True))
+            if self._window_chrome is not None:
+                self._window_chrome.caption.show()
             self._presentation_tab = None
             self._presentation_window_state = None
             if state.get("fullscreen", False):
@@ -1622,6 +1654,8 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         tab.set_presentation_chrome_hidden(True)
         self.menuBar().hide()
         self._tabs.tabBar().hide()
+        if self._window_chrome is not None:
+            self._window_chrome.caption.hide()
         self.showFullScreen()
         self._sync_view_mode_actions()
 
@@ -1726,7 +1760,7 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             m.addAction(_make_action(
                 self, "미저장 작업 복구...", None, self.show_recovery, "undo"))
         m.addAction(_make_action(
-            self, "종료", "Ctrl+Q", self.close, "power"))
+            self, "종료", "Ctrl+Q", self.request_exit, "power"))
         h = mb.addMenu("도움말(&H)")
         h.addAction(_make_action(
             self, "사용법", "F1", self._shell_help, "help"))
@@ -1756,6 +1790,15 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
                 action.setChecked(settings.startup_workspace() == mode)
                 modes.addAction(action)
                 action.triggered.connect(lambda _checked, mode=mode: self._select_startup_workspace(mode))
+            if self.workspace_mode == "reader":
+                resident = startup.addAction(localize(
+                    "Keep reader in system tray", "리더를 트레이에 상주"))
+                resident.setCheckable(True)
+                resident.setChecked(settings.reader_resident())
+                resident.setToolTip(localize(
+                    "Close documents on exit, but keep reader modules ready. OCR is not kept running.",
+                    "닫을 때 문서와 캐시는 정리하고 리더 모듈만 대기합니다. OCR은 상주하지 않습니다."))
+                resident.triggered.connect(self._set_reader_resident)
         if self.updates_enabled:
             renderer = parent_menu.addMenu(tr("화면 렌더러"))
             renderer.setIcon(fluent_icon("settings"))
@@ -1812,6 +1855,26 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             settings.set_startup_workspace(mode)
         except OSError as error:
             self.statusBar().showMessage(str(error), 8000)
+
+    def _set_reader_resident(self, enabled):
+        try:
+            settings.set_reader_resident(enabled)
+        except OSError as error:
+            self._show_shell_status(str(error), 8000)
+            return
+        from .reader_resident import configure_residency
+        if getattr(QApplication.instance(), "_spdf_standalone_reader", False):
+            if not configure_residency(enabled, updates_enabled=self.updates_enabled):
+                self._show_shell_status(localize(
+                    "Tray residency is unavailable; closing will exit normally.",
+                    "트레이 상주를 사용할 수 없어 닫을 때 정상 종료합니다."), 8000)
+
+    def request_exit(self):
+        resident = getattr(QApplication.instance(), "_spdf_reader_resident", None)
+        if resident is not None and self.workspace_mode == "reader":
+            resident.quit()
+        else:
+            self.close()
 
     def _select_render_backend(self, mode):
         if mode == settings.render_backend():
@@ -2159,16 +2222,8 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         self._tabs.setTabText(i, name)
         self._tabs.setTabToolTip(i, tab.doc.path if tab.doc else "")
         if self._tabs.currentWidget() is tab:
-            window_name = name
-            window_title = self.workspace_title()
-            if self.workspace_mode in ("reader", "editor"):
-                device = getattr(tab.view, "render_device", "cpu")
-                window_title += " [%s]" % device.upper()
-            if self.workspace_mode == "editor" and tab.doc:
-                window_name = ("*" if tab._dirty else "") + os.path.basename(tab.doc.path)
             self.setWindowTitle(
-                "%s — %s" % (window_name, window_title)
-                if tab.doc else window_title)
+                "%s — %s" % (name, APP_NAME) if tab.doc else self.workspace_title())
 
     def _on_tab_changed(self, i):
         if i < 0:
@@ -2179,6 +2234,9 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
         self._sync_tab_title(tab)
 
     def _switch_menubar(self, menubar):
+        if self._window_chrome is not None:
+            self._window_chrome.set_menubar(menubar)
+            return
         # QMainWindow deletes a replaced menu bar unless ownership is released.
         # Inactive tabs still own their menus and must be able to reuse them.
         previous = self.menuWidget()
@@ -2254,6 +2312,10 @@ class AppWindow(QMainWindow, WindowWorkspaceMixin):
             if not tab.maybe_save():
                 ev.ignore()
                 return
+        resident = getattr(QApplication.instance(), "_spdf_reader_resident", None)
+        if resident is not None and resident.park(self):
+            ev.ignore()
+            return
         # 저장 여부가 모두 확정됐으면 무거운 이미지/워커 정리보다 창을 먼저
         # 감춰 사용자가 X 버튼의 반응을 즉시 느끼게 한다.
         self.hide()
@@ -2340,6 +2402,7 @@ def new_window(path=None, force_new=False, updates_enabled=None, *,
         translate_tree(window)
         window.show()
     else:
+        window.showNormal() if window.isMinimized() else window.show()
         window.raise_()
         window.activateWindow()
     if path:

@@ -45,7 +45,7 @@ def pdf_component_blend(mode, backdrop, source):
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 14)
+        self.assertEqual(ABI_VERSION, 15)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -447,6 +447,48 @@ class D2DBackendTests(unittest.TestCase):
             self.assertTrue(surface.closed)
         finally:
             user32.DestroyWindow(hwnd)
+
+    @unittest.skipUnless(os.name == "nt", "Direct2D is Windows-only")
+    def test_knockout_group_replaces_overlapping_primitives(self):
+        library = Path(__file__).resolve().parents[1] / "native" / "bin" / \
+            "spdf_d2d_renderer.dll"
+        if not library.is_file():
+            self.skipTest("native renderer is not built")
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.CreateWindowExW.argtypes = [
+            ctypes.c_uint32, ctypes.c_wchar_p, ctypes.c_wchar_p,
+            ctypes.c_uint32, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_void_p]
+        user32.CreateWindowExW.restype = ctypes.c_void_p
+        user32.DestroyWindow.argtypes = [ctypes.c_void_p]
+        user32.DestroyWindow.restype = ctypes.c_int
+        hwnd = user32.CreateWindowExW(
+            0, "STATIC", "sPDF D2D test", 0, 0, 0, 32, 32,
+            None, None, None, None)
+        self.assertTrue(hwnd, ctypes.get_last_error())
+        try:
+            with D2DSurface(hwnd, 32, 32, path=library) as surface:
+                def overlap_pixel(knockout):
+                    surface.begin_frame(0xffffffff)
+                    surface.begin_composite_group(0, 1, knockout)
+                    surface.fill_rect(4, 4, 24, 24, 0x80ff0000)
+                    surface.fill_rect(12, 12, 28, 28, 0x800000ff)
+                    surface.end_composite_group()
+                    pixels = surface.read_pixels_bgra(32, 32)
+                    surface.end_frame()
+                    offset = (16 * 32 + 16) * 4
+                    return tuple(pixels[offset:offset + 4])
+
+                normal = overlap_pixel(False)
+                knockout = overlap_pixel(True)
+        finally:
+            user32.DestroyWindow(hwnd)
+        self.assertNotEqual(normal, knockout)
+        self.assertLessEqual(abs(knockout[0] - 255), 3)
+        self.assertLessEqual(abs(knockout[1] - 127), 4)
+        self.assertLessEqual(abs(knockout[2] - 127), 4)
+        self.assertEqual(knockout[3], 255)
 
 
 if __name__ == "__main__":

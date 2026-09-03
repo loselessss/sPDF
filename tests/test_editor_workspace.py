@@ -302,18 +302,16 @@ class EditorWorkspaceTests(unittest.TestCase):
         from pdfeditor.i18n import set_language
         tab = self.open_editor()
         try:
-            for language, suffix in (("ko", "[편집 전용]"), ("en", "[Edit-only]")):
+            for language, suffix in (("ko", "[편집/CPU]"), ("en", "[Edit/CPU]")):
                 set_language(language)
                 tab._dirty = False
                 tab._update_title()
                 self.assertEqual(tab.tab_title(), "pages.pdf " + suffix)
                 self.assertEqual(self.window._tabs.tabText(0), tab.tab_title())
-                self.assertNotIn(suffix, self.window.windowTitle())
-                self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF [CPU]")
+                self.assertEqual(self.window.windowTitle(), "pages.pdf " + suffix + " — sPDF")
                 tab.mark_dirty()
                 self.assertEqual(tab.tab_title(), "*pages.pdf " + suffix)
-                self.assertNotIn(suffix, self.window.windowTitle())
-                self.assertEqual(self.window.windowTitle(), "*pages.pdf — sPDF [CPU]")
+                self.assertEqual(self.window.windowTitle(), "*pages.pdf " + suffix + " — sPDF")
         finally:
             set_language("en")
 
@@ -324,10 +322,16 @@ class EditorWorkspaceTests(unittest.TestCase):
         tab.view._d2d_surface = Mock(
             info=SimpleNamespace(driver="hardware"))
         tab._update_title()
-        self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF [GPU]")
+        self.assertEqual(self.window.windowTitle(), "pages.pdf [Edit/CPU] — sPDF")
+        tab.view._rasterized_pages = {0: "GPU"}
+        tab.view._notify_render_device()
+        self.assertEqual(self.window.windowTitle(), "pages.pdf [Edit/GPU] — sPDF")
+        tab.view._rasterized_pages = {0: "CPU+GPU"}
+        tab.view._notify_render_device()
+        self.assertEqual(self.window.windowTitle(), "pages.pdf [Edit/CPU+GPU] — sPDF")
         tab.view._d2d_surface.info.driver = "warp"
         tab._update_title()
-        self.assertEqual(self.window.windowTitle(), "pages.pdf — sPDF [CPU]")
+        self.assertEqual(self.window.windowTitle(), "pages.pdf [Edit/CPU] — sPDF")
         tab.view._d2d_surface = None
 
     def test_reorder_failure_restores_document_and_history(self):

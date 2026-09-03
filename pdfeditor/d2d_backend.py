@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 14
+ABI_VERSION = 15
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -110,7 +110,8 @@ def _load_library(path):
     library.spdf_d2d_begin_mask.restype = c_int32
     library.spdf_d2d_end_mask.argtypes = [c_void_p]
     library.spdf_d2d_end_mask.restype = c_int32
-    library.spdf_d2d_begin_composite_group.argtypes = [c_void_p, c_uint32, c_float]
+    library.spdf_d2d_begin_composite_group.argtypes = [
+        c_void_p, c_uint32, c_float, c_uint32]
     library.spdf_d2d_begin_composite_group.restype = c_int32
     library.spdf_d2d_end_composite_group.argtypes = [c_void_p]
     library.spdf_d2d_end_composite_group.restype = c_int32
@@ -371,11 +372,12 @@ class D2DSurface:
             self._library.spdf_d2d_end_mask(self._handle),
             "Direct2D mask capture end")
 
-    def begin_composite_group(self, mode, opacity):
+    def begin_composite_group(self, mode, opacity, knockout=False):
         if self.closed:
             raise RuntimeError("Direct2D surface is closed")
         _check_hresult(self._library.spdf_d2d_begin_composite_group(
-            self._handle, int(mode), float(opacity)), "Direct2D blend group start")
+            self._handle, int(mode), float(opacity), int(bool(knockout))),
+            "Direct2D blend group start")
 
     def end_composite_group(self):
         if self.closed:

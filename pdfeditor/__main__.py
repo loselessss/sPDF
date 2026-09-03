@@ -14,11 +14,22 @@ def main():
         from .ocr_subprocess import main as ocr_main
         sys.exit(ocr_main())
 
+    import argparse
+    from . import settings
+    parser = argparse.ArgumentParser(prog="sPDF")
+    parser.add_argument("path", nargs="?")
+    parser.add_argument("--workspace", choices=("reader", "editor"))
+    parser.add_argument("--peer")
+    parser.add_argument("--peer-token")
+    parser.add_argument("--peer-request")
+    parser.add_argument("--no-updates", action="store_true")
+    args = parser.parse_args()
+    workspace = args.workspace or settings.startup_workspace()
+
     from PyQt5.QtCore import Qt
     from PyQt5.QtGui import QIcon
     from PyQt5.QtWidgets import QApplication
 
-    from .app import new_window
     from .meta import APP_NAME, APP_VERSION
     from .paths import app_icon
     from .theme import apply_fluent_theme
@@ -30,6 +41,14 @@ def main():
     # contexts. Embedded hosts retain full control of their own QApplication.
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
+    app._spdf_standalone_reader = workspace == "reader"
+    # Forward ordinary file launches before importing the document/editor UI.
+    # Peer handoffs retain their authenticated, acknowledged process channel.
+    if workspace == "reader" and not args.peer and settings.reader_resident():
+        from .reader_resident import forward_to_resident
+        if forward_to_resident(args.path):
+            return
+    from .app import new_window
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(APP_NAME)
@@ -50,20 +69,13 @@ def main():
     if os.path.exists(icon):
         app.setWindowIcon(QIcon(icon))
 
-    import argparse
-    from . import settings
-    parser = argparse.ArgumentParser(prog="sPDF")
-    parser.add_argument("path", nargs="?")
-    parser.add_argument("--workspace", choices=("reader", "editor"))
-    parser.add_argument("--peer")
-    parser.add_argument("--peer-token")
-    parser.add_argument("--peer-request")
-    parser.add_argument("--no-updates", action="store_true")
-    args = parser.parse_args()
     # 공식 실행 진입점에서만 자체 업데이트를 켠다. 다른 프로그램이
     # pdfeditor를 내부 모듈로 불러 new_window/AppWindow를 만들면 기본값은 꺼짐이다.
     new_window(args.path, updates_enabled=not args.no_updates,
-               workspace_mode=args.workspace or settings.startup_workspace())
+               workspace_mode=workspace)
+    if workspace == "reader" and settings.reader_resident():
+        from .reader_resident import configure_residency
+        configure_residency(True, updates_enabled=not args.no_updates)
     from .process_workspace import application_bridge
     bridge = application_bridge()
     if args.peer and args.peer_token:

@@ -70,6 +70,80 @@ def cmyk_image_pdf_bytes():
     return bytes(data)
 
 
+def repeated_image_pdf_bytes():
+    pixels = bytes((
+        255, 0, 0, 0, 255, 0,
+        0, 0, 255, 255, 255, 0))
+    content = (
+        b"q 20 0 0 20 20 20 cm /Im1 Do Q\n"
+        b"q 20 0 0 20 60 20 cm /Im1 Do Q\n")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 120 80] "
+        b"/Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" +
+        content + b"endstream",
+        b"<< /Type /XObject /Subtype /Image /Width 2 /Height 2 "
+        b"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length " +
+        str(len(pixels)).encode() + b" >>\nstream\n" + pixels + b"\nendstream",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
+def downsampled_image_pdf_bytes():
+    width = 64
+    height = 64
+    pixels = bytearray()
+    for y in range(height):
+        for x in range(width):
+            pixels.extend((x * 4, y * 4, 128))
+    content = b"q 8 0 0 8 20 20 cm /Im1 Do Q\n"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 120 80] "
+        b"/Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" +
+        content + b"endstream",
+        b"<< /Type /XObject /Subtype /Image /Width 64 /Height 64 "
+        b"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length " +
+        str(len(pixels)).encode() + b" >>\nstream\n" + bytes(pixels) +
+        b"\nendstream",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 def linear_gradient_pdf_bytes():
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -81,6 +155,37 @@ def linear_gradient_pdf_bytes():
         b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [20 20 280 20] "
         b"/Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] "
         b"/C1 [0 0 1] /N 1 >> /Extend [true true] >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
+def radial_gradient_pdf_bytes():
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /Shading << /Sh1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length 38 >>\nstream\n"
+        b"q 20 20 260 200 re W n /Sh1 sh Q\nendstream",
+        b"<< /ShadingType 3 /ColorSpace /DeviceRGB "
+        b"/Coords [150 120 0 150 120 130] "
+        b"/Function << /FunctionType 2 /Domain [0 1] /C0 [1 1 0] "
+        b"/C1 [0 0 1] /N 1 >> /Extend [false false] >>",
     ]
     data = bytearray(b"%PDF-1.4\n")
     offsets = [0]
@@ -256,7 +361,7 @@ def cmyk_group_pdf_bytes(alpha=1.0, blend_mode="Normal"):
     return bytes(data)
 
 
-def nonisolated_single_path_pdf_bytes(alpha=0.4):
+def nonisolated_single_path_pdf_bytes(alpha=0.4, knockout=False):
     page_content = b"0.2 0.4 0.6 rg 0 0 300 240 re f\nq /GS1 gs /Fm1 Do Q\n"
     form_content = b"1 0 0 rg 20 20 180 140 re f\n"
     objects = [
@@ -269,7 +374,8 @@ def nonisolated_single_path_pdf_bytes(alpha=0.4):
         page_content + b"endstream",
         b"<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
         b"/Resources << >> /Group << /S /Transparency /I false "
-        b"/CS /DeviceRGB >> /Length " + str(len(form_content)).encode() +
+        b"/K " + (b"true" if knockout else b"false") +
+        b" /CS /DeviceRGB >> /Length " + str(len(form_content)).encode() +
         b" >>\nstream\n" + form_content + b"endstream",
         b"<< /Type /ExtGState /ca " + str(alpha).encode("ascii") +
         b" /CA " + str(alpha).encode("ascii") + b" /BM /Normal >>",
@@ -490,6 +596,46 @@ class GpuRasterSceneTests(unittest.TestCase):
             if isinstance(item, VectorPath) and item.fill_argb == 0x66ff0000]
         self.assertEqual(len(translucent), 1)
 
+    def test_single_draw_knockout_group_is_flattened(self):
+        from pdfeditor.gpu_raster import GroupPush, VectorPath, vector_page_from_pymupdf
+        with fitz.open(stream=nonisolated_single_path_pdf_bytes(
+                1.0, knockout=True), filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("transparency-group", scene.features)
+        self.assertFalse(any(isinstance(item, GroupPush) and item.knockout
+                             for item in scene.drawables))
+        self.assertTrue(any(isinstance(item, VectorPath) and
+                            item.fill_argb == 0xffff0000
+                            for item in scene.drawables))
+
+    def test_disjoint_knockout_group_is_flattened(self):
+        from pdfeditor.gpu_raster import (GroupPop, GroupPush, VectorPath,
+                                          _flatten_nonisolated_groups)
+
+        first = VectorPath(
+            (("move", 0, 0), ("line", 10, 0), ("line", 10, 10), ("close",)),
+            fill_argb=0x80ff0000)
+        second = VectorPath(
+            (("move", 20, 0), ("line", 30, 0), ("line", 30, 10), ("close",)),
+            fill_argb=0x800000ff)
+        items = _flatten_nonisolated_groups((
+            GroupPush(0.5, 0, False, True), first, second, GroupPop()))
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0].fill_argb, 0x40ff0000)
+        self.assertEqual(items[1].fill_argb, 0x400000ff)
+
+    def test_overlapping_knockout_group_stays_on_gpu_scene(self):
+        from pdfeditor.gpu_raster import GroupPush, vector_page_from_pymupdf
+
+        with fitz.open(stream=isolated_group_pdf_bytes(),
+                       filetype="pdf") as pdf:
+            pdf.xref_set_key(5, "Group/K", "true")
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertTrue(any(isinstance(item, GroupPush) and item.knockout
+                            for item in scene.drawables))
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.path = Path(self.directory.name) / "gpu-scene.pdf"
@@ -536,6 +682,10 @@ class GpuRasterSceneTests(unittest.TestCase):
                     filetype="pdf") as gradient:
                 pdf.insert_pdf(gradient)
             with fitz.open(
+                    stream=radial_gradient_pdf_bytes(),
+                    filetype="pdf") as radial:
+                pdf.insert_pdf(radial)
+            with fitz.open(
                     stream=isolated_group_pdf_bytes(),
                     filetype="pdf") as group:
                 pdf.insert_pdf(group)
@@ -557,6 +707,14 @@ class GpuRasterSceneTests(unittest.TestCase):
             clipped_stroke_text.insert_text(
                 (30, 90), "CLIP", fontsize=42, render_mode=5,
                 color=(0.1, 0.1, 0.8), border_width=1)
+            with fitz.open(
+                    stream=repeated_image_pdf_bytes(),
+                    filetype="pdf") as repeated:
+                pdf.insert_pdf(repeated)
+            with fitz.open(
+                    stream=downsampled_image_pdf_bytes(),
+                    filetype="pdf") as downsampled:
+                pdf.insert_pdf(downsampled)
             pdf.save(self.path)
         self.document = Document(str(self.path), read_only=True)
 
@@ -579,7 +737,7 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIn("close", kinds)
 
     def test_complex_stroke_style_stays_on_direct2d_path(self):
-        scene = self.document.gpu_vector_page(10)
+        scene = self.document.gpu_vector_page(11)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("stroke-style", scene.features)
         path = scene.paths[0]
@@ -590,7 +748,7 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertEqual(path.stroke_style[6], (1.5, 0.75))
 
     def test_stroked_text_uses_page_space_gpu_outlines(self):
-        scene = self.document.gpu_vector_page(11)
+        scene = self.document.gpu_vector_page(12)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("stroked-text", scene.features)
         self.assertTrue(scene.paths)
@@ -601,7 +759,7 @@ class GpuRasterSceneTests(unittest.TestCase):
     def test_stroke_and_clip_text_mode_stays_on_gpu_path(self):
         from pdfeditor.gpu_raster import ClipPop, ClipPush
 
-        scene = self.document.gpu_vector_page(12)
+        scene = self.document.gpu_vector_page(13)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("stroked-text", scene.features)
         self.assertIn("text-clip", scene.features)
@@ -641,6 +799,34 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIs(first, self.document.gpu_vector_page(0))
         self.document.invalidate_render(0)
         self.assertIsNot(first, self.document.gpu_vector_page(0))
+
+        image = self.document.gpu_vector_page(15)
+        scaled = self.document.gpu_vector_page(15, 2.0)
+        self.assertIsNot(image, scaled)
+        self.assertIs(scaled, self.document.gpu_vector_page(15, 2.0))
+
+    def test_scaled_image_scene_cache_evicts_old_quality_levels(self):
+        self.document.invalidate_render(15)
+        with patch("pdfeditor.core.GPU_VECTOR_CACHE_BYTES", 1500):
+            one = self.document.gpu_vector_page(15, 1.0)
+            two = self.document.gpu_vector_page(15, 2.0)
+            four = self.document.gpu_vector_page(15, 4.0)
+        self.assertNotIn((15, 1.0), self.document._gpu_vector_cache)
+        self.assertNotIn((15, 2.0), self.document._gpu_vector_cache)
+        self.assertIn((15, 4.0), self.document._gpu_vector_cache)
+        self.assertIs(four, self.document.gpu_vector_page(15, 4.0))
+        self.assertLessEqual(
+            self.document._gpu_vector_cache_bytes,
+            sum(item.width * item.height * 4 for item in four.drawables
+                if hasattr(item, "pixels")))
+        self.assertTrue(one.supported and two.supported and four.supported)
+
+    def test_original_quality_image_scene_satisfies_higher_zoom_cache(self):
+        self.document.invalidate_render(15)
+        eight = self.document.gpu_vector_page(15, 8.0)
+        sixteen = self.document.gpu_vector_page(15, 16.0)
+        self.assertIs(eight, sixteen)
+        self.assertEqual(list(self.document._gpu_vector_cache), [(15, 8.0)])
 
     def test_path_clip_is_recorded_in_display_order(self):
         from pdfeditor.gpu_raster import ClipPop, ClipPush, VectorPath
@@ -696,38 +882,60 @@ class GpuRasterSceneTests(unittest.TestCase):
                             for item in scene.drawables[1:-1]))
         self.assertIsInstance(scene.drawables[-1], ClipPop)
 
-    def test_linear_gradient_keeps_gpu_scene_with_bounded_bitmap(self):
+    def test_linear_gradient_keeps_gpu_scene_as_vector_bands(self):
         from pdfeditor.gpu_raster import (ClipPop, ClipPush,
-                                          SHADE_RASTER_SCALE, VectorImage)
+                                          LINEAR_SHADE_STEPS, VectorImage,
+                                          VectorPath)
 
         scene = self.document.gpu_vector_page(7)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("shading", scene.features)
+        self.assertIn("vector-shading", scene.features)
         self.assertIn("vector-clip", scene.features)
         self.assertIsInstance(scene.drawables[0], ClipPush)
-        image = scene.drawables[1]
-        self.assertIsInstance(image, VectorImage)
-        self.assertEqual(
-            (image.width, image.height),
-            (round(300 * SHADE_RASTER_SCALE),
-             round(240 * SHADE_RASTER_SCALE)))
-        self.assertEqual(image.transform, (300.0, 0.0, 0.0, 240.0, 0.0, 0.0))
-        self.assertEqual(image.pixels[:4], bytes((0, 0, 255, 255)))
-        self.assertEqual(image.pixels[-4:], bytes((255, 0, 0, 255)))
+        bands = [item for item in scene.drawables
+                 if isinstance(item, VectorPath)]
+        self.assertEqual(len(bands), LINEAR_SHADE_STEPS + 2)
+        self.assertFalse(any(isinstance(item, VectorImage)
+                             for item in scene.drawables))
+        self.assertEqual(bands[0].fill_argb, 0xffff0000)
+        self.assertEqual(bands[1].fill_argb, 0xfffd0002)
+        self.assertEqual(bands[-2].fill_argb, 0xff0200fd)
+        self.assertEqual(bands[-1].fill_argb, 0xff0000ff)
         self.assertIsInstance(scene.drawables[-1], ClipPop)
 
-    def test_oversized_gradient_scene_uses_complete_cpu_fallback(self):
+    def test_linear_gradient_does_not_use_image_scene_limit(self):
         self.document.invalidate_render(7)
         with patch("pdfeditor.gpu_raster.MAX_GPU_IMAGE_BYTES", 1):
             scene = self.document.gpu_vector_page(7)
-        self.assertFalse(scene.supported)
-        self.assertIn("shading data exceeds GPU scene limit", scene.reason)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("vector-shading", scene.features)
+
+    def test_radial_gradient_keeps_gpu_scene_as_vector_bands(self):
+        from pdfeditor.gpu_raster import (ClipPop, ClipPush,
+                                          LINEAR_SHADE_STEPS, VectorImage,
+                                          VectorPath)
+
+        scene = self.document.gpu_vector_page(8)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("shading", scene.features)
+        self.assertIn("vector-shading", scene.features)
+        self.assertIn("vector-clip", scene.features)
+        self.assertIsInstance(scene.drawables[0], ClipPush)
+        bands = [item for item in scene.drawables
+                 if isinstance(item, VectorPath)]
+        self.assertEqual(len(bands), LINEAR_SHADE_STEPS)
+        self.assertFalse(any(isinstance(item, VectorImage)
+                             for item in scene.drawables))
+        self.assertEqual(bands[0].fill_argb, 0xff0202fd)
+        self.assertEqual(bands[-1].fill_argb, 0xfffdfd02)
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
 
     def test_isolated_normal_transparency_group_uses_opacity_layer(self):
         from pdfeditor.gpu_raster import (ClipPop, ClipPush, GroupPop,
                                           GroupPush, VectorPath)
 
-        scene = self.document.gpu_vector_page(8)
+        scene = self.document.gpu_vector_page(9)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("transparency-group", scene.features)
         self.assertIsInstance(scene.drawables[0], GroupPush)
@@ -747,7 +955,7 @@ class GpuRasterSceneTests(unittest.TestCase):
         from pdfeditor.gpu_raster import (ClipPop, GroupPop, GroupPush,
                                           MaskBegin, MaskEnd, VectorPath)
 
-        scene = self.document.gpu_vector_page(9)
+        scene = self.document.gpu_vector_page(10)
         self.assertTrue(scene.supported, scene.reason)
         self.assertIn("soft-mask", scene.features)
         self.assertIsInstance(scene.drawables[0], MaskBegin)
@@ -767,6 +975,47 @@ class GpuRasterSceneTests(unittest.TestCase):
             scene = self.document.gpu_vector_page(2)
         self.assertFalse(scene.supported)
         self.assertIn("GPU scene limit", scene.reason)
+
+    def test_repeated_image_xobject_reuses_decoded_pixels(self):
+        from pdfeditor.gpu_raster import VectorImage
+
+        self.document.invalidate_render(14)
+        with patch("pdfeditor.gpu_raster.MAX_GPU_IMAGE_BYTES", 20):
+            scene = self.document.gpu_vector_page(14)
+        self.assertTrue(scene.supported, scene.reason)
+        images = [item for item in scene.drawables
+                  if isinstance(item, VectorImage)]
+        self.assertEqual(len(images), 2)
+        self.assertIs(images[0].pixels, images[1].pixels)
+        self.assertEqual(images[0].transform,
+                         (20.0, 0.0, 0.0, 20.0, 20.0, 40.0))
+        self.assertEqual(images[1].transform,
+                         (20.0, 0.0, 0.0, 20.0, 60.0, 40.0))
+
+    def test_downsampled_image_can_stay_within_scene_limit(self):
+        from pdfeditor.gpu_raster import VectorImage
+
+        self.document.invalidate_render(15)
+        with patch("pdfeditor.gpu_raster.MAX_GPU_IMAGE_BYTES", 300):
+            scene = self.document.gpu_vector_page(15)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("image-downsample", scene.features)
+        image = next(item for item in scene.drawables
+                     if isinstance(item, VectorImage))
+        self.assertEqual((image.width, image.height, image.stride), (8, 8, 32))
+        self.assertEqual(len(image.pixels), 256)
+        self.assertEqual(image.transform, (8.0, 0.0, -0.0, 8.0, 20.0, 52.0))
+
+    def test_downsampled_image_quality_tracks_requested_raster_scale(self):
+        from pdfeditor.gpu_raster import VectorImage
+
+        self.document.invalidate_render(15)
+        scene = self.document.gpu_vector_page(15, 4.0)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertEqual(scene.raster_scale, 4.0)
+        image = next(item for item in scene.drawables
+                     if isinstance(item, VectorImage))
+        self.assertEqual((image.width, image.height, image.stride), (32, 32, 128))
 
 
 if __name__ == "__main__":

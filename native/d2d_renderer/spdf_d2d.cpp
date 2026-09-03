@@ -698,7 +698,7 @@ public:
 
     HRESULT begin_composite_group(
         std::uint32_t mode, float opacity, Path* clip = nullptr,
-        bool mask_build = false) noexcept {
+        bool mask_build = false, bool knockout = false) noexcept {
         // No implicit layer may cross a target switch. The scene validator
         // rejects these combinations before any page drawing starts.
         if (!drawing_ || layer_depth_ != 0 || !mask_captures_.empty() ||
@@ -764,10 +764,15 @@ public:
         capture.mode = mode;
         capture.opacity = opacity;
         capture.building_mask = mask_build;
+        capture.knockout = knockout;
+        capture.previous_blend = d2d_context_->GetPrimitiveBlend();
         composite_bytes_ += capture.bytes;
         composite_captures_.push_back(capture);
         d2d_context_->SetTarget(capture.source.Get());
         if (clip == nullptr) d2d_context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+        if (knockout) {
+            d2d_context_->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
+        }
         return S_OK;
     }
 
@@ -884,6 +889,7 @@ public:
         composite_captures_.pop_back();
         composite_bytes_ -= capture.bytes;
         auto result = d2d_context_->Flush();
+        d2d_context_->SetPrimitiveBlend(capture.previous_blend);
         d2d_context_->SetTarget(capture.previous.Get());
         if (FAILED(result)) return result;
         D2D1_MATRIX_3X2_F transform;
@@ -1176,6 +1182,8 @@ private:
         D2D1_MATRIX_3X2_F mask_transform{};
         std::uint32_t mode = 0;
         float opacity = 1.0f;
+        bool knockout = false;
+        D2D1_PRIMITIVE_BLEND previous_blend = D2D1_PRIMITIVE_BLEND_SOURCE_OVER;
         std::uint64_t bytes = 0;
     };
     struct MaskCapture {
@@ -1551,10 +1559,11 @@ std::int32_t spdf_d2d_end_mask(void* surface) noexcept {
 }
 
 std::int32_t spdf_d2d_begin_composite_group(
-    void* surface, std::uint32_t mode, float opacity) noexcept {
+    void* surface, std::uint32_t mode, float opacity, std::uint32_t knockout) noexcept {
     if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
     return static_cast<std::int32_t>(
-        static_cast<Surface*>(surface)->begin_composite_group(mode, opacity));
+        static_cast<Surface*>(surface)->begin_composite_group(
+            mode, opacity, nullptr, false, knockout != 0));
 }
 
 std::int32_t spdf_d2d_end_composite_group(void* surface) noexcept {
