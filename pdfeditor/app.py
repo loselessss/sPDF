@@ -672,6 +672,10 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         p.addSeparator()
         self._act(p, "페이지 여백 자르기...", None,
                   self.crop_page_margins, "edit")
+        self._act(p, localize("Canvas size...", "캔버스 크기..."), None,
+                  self.edit_canvas_size, "edit")
+        self._act(p, localize("Bleed...", "도련 설정..."), None,
+                  self.edit_page_bleed, "fit_page")
         self._act(p, "현재 페이지 책갈피 추가", "Ctrl+B",
                   self.add_current_bookmark, "notes")
         self._act(p, "TXT 책갈피 가져오기...", None,

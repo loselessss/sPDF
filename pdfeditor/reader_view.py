@@ -25,6 +25,7 @@ PREVIEW_PIXELS = 1_000_000
 VIEWPORT_PIXELS = 6_000_000
 MAX_VISIBLE_TILES = 48
 GPU_SCENE_TIMEOUT_SECONDS = 1.0
+FORCED_GPU_SCENE_TIMEOUT_SECONDS = 10.0
 
 
 def opengl_allowed():
@@ -107,6 +108,7 @@ class ReaderPageView(QGraphicsView):
         self.canvas = _ReaderCanvas(self)
         enable_opengl = opengl_allowed() if use_opengl is None else use_opengl
         render_mode = settings.render_backend() if use_opengl is None else "auto"
+        self._render_mode = render_mode
         d2d = probe_d2d_backend() if enable_opengl else None
         self._d2d_requested = bool(
             d2d is not None and d2d.available and
@@ -179,7 +181,12 @@ class ReaderPageView(QGraphicsView):
     def _gpu_vector_page(self, document, page):
         return document.gpu_vector_page(
             page, self._vector_raster_scale(),
-            timeout_seconds=GPU_SCENE_TIMEOUT_SECONDS)
+            timeout_seconds=self._gpu_scene_timeout_seconds())
+
+    def _gpu_scene_timeout_seconds(self):
+        return (FORCED_GPU_SCENE_TIMEOUT_SECONDS
+                if self._render_mode == "gpu"
+                else GPU_SCENE_TIMEOUT_SECONDS)
 
     def _refresh_vector_page_for_zoom(self, page):
         scene = self._vector_pages.get(page)
@@ -191,7 +198,8 @@ class ReaderPageView(QGraphicsView):
         if scene.raster_scale >= target_scale:
             return scene
         refreshed = self._document.gpu_vector_page(
-            page, target_scale, timeout_seconds=GPU_SCENE_TIMEOUT_SECONDS)
+            page, target_scale,
+            timeout_seconds=self._gpu_scene_timeout_seconds())
         if not refreshed.supported and refreshed.reason == \
                 "GPU scene time budget exceeded":
             return scene

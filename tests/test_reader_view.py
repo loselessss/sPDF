@@ -471,6 +471,22 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
 
+    def test_forced_gpu_mode_uses_longer_scene_budget(self):
+        from pdfeditor import reader_view
+
+        self.view._render_mode = "gpu"
+        self.assertEqual(
+            self.view._gpu_scene_timeout_seconds(),
+            reader_view.FORCED_GPU_SCENE_TIMEOUT_SECONDS)
+
+    def test_auto_gpu_mode_uses_interactive_scene_budget(self):
+        from pdfeditor import reader_view
+
+        self.view._render_mode = "auto"
+        self.assertEqual(
+            self.view._gpu_scene_timeout_seconds(),
+            reader_view.GPU_SCENE_TIMEOUT_SECONDS)
+
     def test_stroked_clip_path_is_widened_then_pushed_on_gpu(self):
         from pdfeditor.gpu_raster import ClipPop, ClipStrokePush, VectorPage
 

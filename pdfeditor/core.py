@@ -443,6 +443,70 @@ class Document:
         self.invalidate_render()
 
     @document_write
+    def set_page_canvas_size(self, index, width, height):
+        """Set the current page canvas size in PDF points."""
+        self.ensure_editable()
+        index = int(index)
+        width = float(width)
+        height = float(height)
+        if not 0 <= index < self.page_count or width < 1 or height < 1:
+            raise ValueError("Invalid canvas size.")
+        if width > 20000 or height > 20000:
+            raise ValueError("The canvas size is too large.")
+        page = self._doc[index]
+        rect = fitz.Rect(0, 0, width, height)
+        page.set_mediabox(rect)
+        page.set_cropbox(rect)
+        page.set_trimbox(rect)
+        page.set_bleedbox(rect)
+        self.invalidate_render(index)
+
+    @document_write
+    def set_page_bleed(self, index, left, top, right, bottom):
+        """Set TrimBox/BleedBox around the visible page without scaling art."""
+        self.ensure_editable()
+        index = int(index)
+        margins = tuple(float(value) for value in (left, top, right, bottom))
+        if not 0 <= index < self.page_count or any(value < 0 for value in margins):
+            raise ValueError("Invalid bleed margins.")
+        if any(value > 720 for value in margins):
+            raise ValueError("Bleed margins are too large.")
+        page = self._doc[index]
+        width, height = page.rect.width, page.rect.height
+        if width < 1 or height < 1:
+            raise ValueError("Invalid page size.")
+        left, top, right, bottom = margins
+        self._translate_page_contents(index, left, bottom)
+        media = fitz.Rect(0, 0, width + left + right, height + top + bottom)
+        trim = fitz.Rect(left, top, left + width, top + height)
+        page = self._doc[index]
+        page.set_mediabox(media)
+        page.set_cropbox(trim)
+        page.set_trimbox(trim)
+        page.set_bleedbox(media)
+        self.invalidate_render(index)
+
+    def page_bleed_margins(self, index):
+        page = self._doc[int(index)]
+        trim = page.trimbox
+        bleed = page.bleedbox
+        return (
+            max(0.0, trim.x0 - bleed.x0),
+            max(0.0, trim.y0 - bleed.y0),
+            max(0.0, bleed.x1 - trim.x1),
+            max(0.0, bleed.y1 - trim.y1),
+        )
+
+    def _translate_page_contents(self, index, dx, dy):
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            return
+        page = self._doc[int(index)]
+        prefix = ("q 1 0 0 1 %.6f %.6f cm\n" % (dx, dy)).encode("ascii")
+        for xref in page.get_contents():
+            stream = self._doc.xref_stream(xref)
+            self._doc.update_stream(xref, prefix + stream + b"\nQ")
+
+    @document_write
     def add_watermark(self, indices, text, fontsize=42, opacity=0.2,
                       angle=-35):
         """Place a centered text watermark over selected pages."""
@@ -649,7 +713,7 @@ class Document:
     # --- 텍스트 편집 (설계 §3.4) --------------------------------------
 
     @document_write
-    def replace_span(self, index, bbox, origin, new_text, size, rgb):
+    def replace_span(self, index, bbox, origin, new_text, size, rgb, *, fit=True):
         """한 span의 글자를 지우고(redaction) 같은 baseline에 다시 쓴다.
 
         한계(설계 §3.4): 원본 폰트를 그대로 못 쓰는 경우가 많아 CJK 내장
@@ -666,7 +730,7 @@ class Document:
         page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
         page = self._doc[index]  # apply_redactions 후 페이지 재취득
-        fontsize = self._fit_fontsize(new_text, size, rect.width)
+        fontsize = self._fit_fontsize(new_text, size, rect.width) if fit else size
         page.insert_text((origin[0], origin[1]), new_text,
                          fontsize=fontsize, fontname="korea", color=rgb)
 

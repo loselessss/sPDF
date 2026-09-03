@@ -83,3 +83,28 @@ class DocumentToolsMixin:
                 return
             self.apply_document_change(lambda: self.doc.crop_pages(
                 dialog.pages, fractions))
+
+    @editing_command
+    def edit_canvas_size(self):
+        if self.doc is None:
+            return
+        from .page_setup_dialog import CanvasSizeDialog
+        width, height = self.doc.page_size(self.page_index)
+        dialog = CanvasSizeDialog(self, width_pt=width, height_pt=height)
+        if dialog.exec_() == QDialog.Accepted:
+            width, height = dialog.values()
+            self.apply_document_change(
+                lambda: self.doc.set_page_canvas_size(
+                    self.page_index, width, height))
+
+    @editing_command
+    def edit_page_bleed(self):
+        if self.doc is None:
+            return
+        from .page_setup_dialog import BleedDialog
+        dialog = BleedDialog(
+            self, margins_pt=self.doc.page_bleed_margins(self.page_index))
+        if dialog.exec_() == QDialog.Accepted:
+            margins = dialog.values()
+            self.apply_document_change(
+                lambda: self.doc.set_page_bleed(self.page_index, *margins))

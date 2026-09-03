@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.28.6** · English and Korean interface · Windows
+**Current version: 1.29.0** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -69,6 +69,8 @@ computer unless you explicitly use an external link or optional model download.
 - Change text content, font size, and color in the editor. Page organization,
   annotations, and manual OCR are available there; text editing has its own
   toolbar button.
+- In editor mode, adjust the current page canvas size, set page bleed boxes,
+  and resize editable text elements from the context menu.
 - Select, search, and copy text; add highlights and notes.
 - Correct text in ordinary or OCR-processed PDFs with undo and redo.
 - Rotate, delete, reorder, insert, merge, split, and extract pages.

@@ -106,6 +106,19 @@ class EditorWorkspaceTests(unittest.TestCase):
         preview = tab.view._previews[tab.page_index]
         self.assertLessEqual(preview.width() * preview.height(), 1_100_000)
 
+    def test_editor_text_element_can_be_resized(self):
+        from PyQt5.QtCore import QPointF
+        tab = self.open_editor()
+        span = tab.doc.spans(tab.page_index)[0]
+        x0, y0, x1, y1 = span["bbox"]
+
+        tab.resize_span_at(QPointF((x0 + x1) / 2, (y0 + y1) / 2), 1.2)
+        self.settle()
+
+        resized = tab.doc.spans(tab.page_index)[0]
+        self.assertGreater(resized["size"], span["size"])
+        self.assertTrue(tab._dirty)
+
     def test_document_files_drop_anywhere_in_main_window(self):
         from PyQt5.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
         from PyQt5.QtGui import QDragEnterEvent, QDropEvent

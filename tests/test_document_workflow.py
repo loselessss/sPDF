@@ -144,6 +144,35 @@ class DocumentWorkflowTests(unittest.TestCase):
         self.assertEqual(tab.doc.page_size(0), (160, 240))
         self.assertEqual(self.source.read_bytes(), original)
 
+    def test_canvas_size_is_undoable(self):
+        tab = self.tab
+        self.assertTrue(tab.apply_document_change(
+            lambda: tab.doc.set_page_canvas_size(0, 240, 320)))
+        self.assertEqual(tab.doc.page_size(0), (240, 320))
+        page = tab.doc._doc[0]
+        self.assertEqual(tuple(page.mediabox), (0.0, 0.0, 240.0, 320.0))
+        self.assertEqual(tuple(page.trimbox), (0.0, 0.0, 240.0, 320.0))
+        self.assertEqual(tuple(page.bleedbox), (0.0, 0.0, 240.0, 320.0))
+        tab.undo()
+        self.assertEqual(tab.doc.page_size(0), (200, 300))
+
+    def test_bleed_keeps_trimmed_content_position(self):
+        tab = self.tab
+        before = tab.doc._doc[0].get_text("words")[0]
+        self.assertTrue(tab.apply_document_change(
+            lambda: tab.doc.set_page_bleed(0, 10, 12, 14, 16)))
+        page = tab.doc._doc[0]
+        after = page.get_text("words")[0]
+        self.assertEqual(tab.doc.page_size(0), (200, 300))
+        for actual, expected in zip(after[:4], before[:4]):
+            self.assertAlmostEqual(actual, expected, places=2)
+        self.assertEqual(tuple(page.mediabox), (0.0, 0.0, 224.0, 328.0))
+        self.assertEqual(tuple(page.trimbox), (10.0, 12.0, 210.0, 312.0))
+        self.assertEqual(tuple(page.bleedbox), (0.0, 0.0, 224.0, 328.0))
+        self.assertEqual(tab.doc.page_bleed_margins(0), (10.0, 12.0, 14.0, 16.0))
+        tab.undo()
+        self.assertEqual(tab.doc.page_size(0), (200, 300))
+
     def test_crop_rotated_and_already_cropped_pages(self):
         import fitz
         doc = self.tab.doc

@@ -398,6 +398,46 @@ def nonisolated_single_path_pdf_bytes(alpha=0.4, knockout=False):
     return bytes(data)
 
 
+def small_overlapping_nonisolated_group_pdf_bytes():
+    page_content = b"0.2 0.4 0.6 rg 0 0 300 240 re f\nq /GS1 gs /Fm1 Do Q\n"
+    form_content = (
+        b"/Half gs 1 0 0 rg 80 80 25 25 re f\n"
+        b"/Half gs 0 0 1 rg 92 92 25 25 re f\n")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 240] "
+        b"/Resources << /XObject << /Fm1 5 0 R >> "
+        b"/ExtGState << /GS1 6 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+        b"<< /Type /XObject /Subtype /Form /BBox [0 0 300 240] "
+        b"/Resources << /ExtGState << /Half 7 0 R >> >> "
+        b"/Group << /S /Transparency /I false "
+        b"/K true /CS /DeviceRGB >> /Length " +
+        str(len(form_content)).encode() +
+        b" >>\nstream\n" + form_content + b"endstream",
+        b"<< /Type /ExtGState /ca 0.5 /CA 0.5 /BM /Normal >>",
+        b"<< /Type /ExtGState /ca 0.5 /CA 0.5 /BM /Normal >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 class GpuRasterSceneTests(unittest.TestCase):
     def test_all_standard_pdf_blends_remain_gpu_scenes(self):
         from pdfeditor.gpu_raster import GroupPush, vector_page_from_pymupdf
@@ -548,11 +588,24 @@ class GpuRasterSceneTests(unittest.TestCase):
                 scene = vector_page_from_pymupdf(pdf[0])
                 self.assertTrue(scene.supported, scene.reason)
 
-    def test_color_component_blends_reject_nonisolated_groups(self):
-        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+    def test_color_component_blends_use_cpu_islands_when_self_contained(self):
+        from pdfeditor.gpu_raster import VectorImage, vector_page_from_pymupdf
         for name in ("Hue", "Saturation", "Color", "Luminosity"):
             with self.subTest(mode=name), fitz.open(
                     stream=isolated_group_pdf_bytes(name), filetype="pdf") as pdf:
+                pdf.xref_set_key(5, "Group/I", "false")
+                scene = vector_page_from_pymupdf(pdf[0])
+                self.assertTrue(scene.supported, scene.reason)
+                self.assertIn("cpu-island", scene.features)
+                self.assertTrue(any(isinstance(item, VectorImage)
+                                    for item in scene.drawables))
+
+    def test_color_component_blends_reject_overlapping_nonisolated_groups(self):
+        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+        for name in ("Hue", "Saturation", "Color", "Luminosity"):
+            with self.subTest(mode=name), fitz.open(
+                    stream=isolated_group_pdf_bytes(name, background=True),
+                    filetype="pdf") as pdf:
                 pdf.xref_set_key(5, "Group/I", "false")
                 scene = vector_page_from_pymupdf(pdf[0])
                 self.assertFalse(scene.supported)
@@ -580,6 +633,31 @@ class GpuRasterSceneTests(unittest.TestCase):
             scene = vector_page_from_pymupdf(pdf[0])
         self.assertFalse(scene.supported)
         self.assertIn("non-isolated", scene.reason)
+
+    def test_self_contained_nonisolated_group_becomes_cpu_island(self):
+        from pdfeditor.gpu_raster import GroupPush, VectorImage, vector_page_from_pymupdf
+        with fitz.open(stream=isolated_group_pdf_bytes(),
+                       filetype="pdf") as pdf:
+            pdf.xref_set_key(5, "Group/I", "false")
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("cpu-island", scene.features)
+        self.assertTrue(any(isinstance(item, VectorImage)
+                            for item in scene.drawables))
+        self.assertFalse(any(isinstance(item, GroupPush) and
+                             not item.isolated
+                             for item in scene.drawables))
+
+    def test_small_overlapping_knockout_group_becomes_approximate_cpu_island(self):
+        from pdfeditor.gpu_raster import VectorImage, vector_page_from_pymupdf
+        with fitz.open(stream=small_overlapping_nonisolated_group_pdf_bytes(),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("cpu-island", scene.features)
+        self.assertIn("cpu-island-approximate", scene.features)
+        self.assertTrue(any(isinstance(item, VectorImage)
+                            for item in scene.drawables))
 
     def test_single_draw_nonisolated_opacity_group_is_flattened(self):
         from pdfeditor.gpu_raster import GroupPush, VectorPath, vector_page_from_pymupdf

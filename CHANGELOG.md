@@ -2,12 +2,11 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.28.6 - 2026-09-03
+## 1.29.0 - 2026-09-03
 
-### Improvements
+### New Features
 
-- PDF text whose display-list glyph id is missing can now stay on the GPU path when the same embedded/original font maps the Unicode character back to a vector glyph outline.
-
-### Fixes
-
-- Removed the on-screen Direct2D ABI badge from GPU-rendered pages.
+- Editor mode now has current-page canvas size controls.
+- Editor mode can set TrimBox/BleedBox page bleed margins without scaling existing artwork.
+- Editable text elements can be resized from the editor context menu.
+- The Direct2D renderer can keep self-contained unsupported transparency groups on the GPU path by rasterizing only that bounded group region as a CPU island, with a small approximate island path for difficult local knockout effects.

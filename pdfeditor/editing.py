@@ -10,7 +10,7 @@ undo/redo: PyMuPDF 저널링이 텍스트 삽입과 함께 쓰면 깨져서(연�
 """
 
 from PyQt5.QtCore import QRectF
-from PyQt5.QtWidgets import QDialog, QMessageBox
+from PyQt5.QtWidgets import QDialog, QInputDialog, QMessageBox
 from .access import editing_command, history_command
 from .i18n import localize
 
@@ -115,6 +115,36 @@ class EditMixin:
         else:
             operation = lambda: self.doc.replace_span(
                 self.page_index, span["bbox"], span["origin"], new_text, size, rgb)
+        self._perform_text_edit(operation)
+
+    @editing_command
+    def resize_span_at(self, pt, factor=None):
+        if self.doc is None:
+            return
+        span = self._span_at(pt)
+        if span is None:
+            return
+        if factor is None:
+            size, accepted = QInputDialog.getDouble(
+                self, localize("Element size", "요소 크기"),
+                localize("Font size:", "글자 크기:"),
+                span["size"], 1.0, 1000.0, 1)
+            if not accepted:
+                return
+        else:
+            size = max(1.0, min(1000.0, span["size"] * float(factor)))
+        if abs(size - span["size"]) < 0.05:
+            return
+        scanned = self.doc.is_scanned_area(self.page_index, span["bbox"])
+        if scanned:
+            color = self.doc.sample_bg_fg(self.page_index, span["bbox"])[1]
+            operation = lambda: self.doc.replace_scanned_text(
+                self.page_index, span["bbox"], span["origin"],
+                span["text"], size, fg=color)
+        else:
+            operation = lambda: self.doc.replace_span(
+                self.page_index, span["bbox"], span["origin"],
+                span["text"], size, span["rgb"], fit=False)
         self._perform_text_edit(operation)
 
     @editing_command

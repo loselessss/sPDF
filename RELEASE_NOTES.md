@@ -1,4 +1,4 @@
-# sPDF 1.28.6 Release Notes
+# sPDF 1.29.0 Release Notes
 
 Release date: 2026-09-03
 
@@ -37,3 +37,11 @@ Release date: 2026-09-03
 
 - Some journal PDFs with missing display-list glyph ids now keep their original text outlines on the GPU path when the embedded/original font can map the character back to a vector glyph.
 - The temporary Direct2D ABI overlay is no longer shown on GPU-rendered pages.
+
+## 1.29.0 new features - 2026-09-03
+
+- Editor mode can adjust the current page canvas size.
+- Editor mode can set page bleed boxes while keeping existing artwork at its current size.
+- Editable text elements can be resized from the editor context menu.
+- The Direct2D renderer can now rasterize self-contained unsupported transparency groups as bounded CPU islands. Difficult local knockout effects may use a small approximate island so forced GPU rendering can stay active while page measurements and coordinates still come from the PDF model.
+- Forced GPU mode now allows a longer scene preparation budget than automatic mode, so complex pages have more time to finish GPU scene extraction before falling back.

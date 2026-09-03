@@ -1,8 +1,9 @@
 """Conservative MuPDF display-list to Direct2D scene conversion.
 
 MuPDF remains the PDF parser and supplies exact glyph outlines and decoded
-images. Direct2D rasterizes supported drawing commands. Any command that is not
-represented exactly makes the whole page use the existing PyMuPDF tile path.
+images. Direct2D rasterizes supported drawing commands. Unsupported effects
+fall back to the existing PyMuPDF tile path unless a self-contained effect can
+be rasterized as a bounded image island.
 """
 
 from dataclasses import dataclass, replace
@@ -20,6 +21,9 @@ MAX_GPU_SCENE_ITEMS = 50000
 SHADE_RASTER_SCALE = 2.0
 LINEAR_SHADE_STEPS = 64
 GPU_IMAGE_DOWNSAMPLE_OVERSAMPLE = 1.0
+CPU_ISLAND_BBOX_PAD = 2.0
+MAX_CPU_ISLAND_PAGE_COVERAGE = 0.85
+MAX_APPROXIMATE_CPU_ISLAND_PAGE_COVERAGE = 0.15
 UNIT_RECT_COMMANDS = (
     ("move", 0.0, 0.0),
     ("line", 1.0, 0.0),
@@ -317,7 +321,12 @@ def _commands_bbox(commands, transform=None):
 
 def _item_bbox(item):
     if isinstance(item, VectorPath):
-        return _commands_bbox(item.commands, item.transform)
+        box = _commands_bbox(item.commands, item.transform)
+        if box is not None and item.stroke_argb is not None:
+            pad = max(0.0, float(item.stroke_width)) * 0.5
+            return (box[0] - pad, box[1] - pad,
+                    box[2] + pad, box[3] + pad)
+        return box
     if isinstance(item, VectorImage):
         return _commands_bbox(UNIT_RECT_COMMANDS, item.transform)
     if isinstance(item, (VectorLinearGradient, VectorRadialGradient)):
@@ -345,6 +354,55 @@ def _drawings_are_disjoint(children):
                 return False
             boxes.append(box)
     return bool(boxes)
+
+
+def _union_bbox(items):
+    box = None
+    for item in items:
+        item_box = _item_bbox(item)
+        if item_box is None:
+            continue
+        if box is None:
+            box = item_box
+            continue
+        box = (min(box[0], item_box[0]), min(box[1], item_box[1]),
+               max(box[2], item_box[2]), max(box[3], item_box[3]))
+    return box
+
+
+def _padded_page_bbox(box, page_rect, scale):
+    if box is None:
+        return None
+    pad = max(CPU_ISLAND_BBOX_PAD, 1.0 / max(1.0, float(scale)))
+    x0 = max(float(page_rect.x0), float(box[0]) - pad)
+    y0 = max(float(page_rect.y0), float(box[1]) - pad)
+    x1 = min(float(page_rect.x1), float(box[2]) + pad)
+    y1 = min(float(page_rect.y1), float(box[3]) + pad)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def _bbox_area(box):
+    if box is None:
+        return 0.0
+    return max(0.0, float(box[2]) - float(box[0])) * \
+        max(0.0, float(box[3]) - float(box[1]))
+
+
+def _rgba_to_premul_bgra(samples, width, height):
+    cost = int(width) * int(height) * 4
+    if len(samples) < cost:
+        raise ValueError("rasterized image data is incomplete")
+    bgra = bytearray(cost)
+    for offset in range(0, cost, 4):
+        red, green, blue, opacity = samples[offset:offset + 4]
+        if opacity != 255:
+            red = (red * opacity + 127) // 255
+            green = (green * opacity + 127) // 255
+            blue = (blue * opacity + 127) // 255
+        bgra[offset:offset + 4] = blue, green, red, opacity
+    return bytes(bgra)
 
 
 def _linear_or_radial_shade_values(shade):
@@ -650,6 +708,130 @@ def _flatten_nonisolated_groups(items):
         return flattened, index
 
     return tuple(parse(0)[0])
+
+
+def _group_spans(items):
+    stack = []
+    spans = []
+    for index, item in enumerate(items):
+        if isinstance(item, GroupPush):
+            stack.append((index, item))
+        elif isinstance(item, GroupPop):
+            if not stack:
+                raise ValueError("unbalanced transparency group stack")
+            start, push = stack.pop()
+            spans.append((start, index, push))
+    if stack:
+        raise ValueError("unbalanced transparency group stack")
+    return spans
+
+
+def _enclosing_scopes(items, group_start):
+    scopes = []
+    for item in items[:group_start]:
+        if isinstance(item, (ClipPush, ClipStrokePush)):
+            scopes.append("clip")
+        elif isinstance(item, ClipPop):
+            if scopes:
+                scopes.pop()
+        elif isinstance(item, MaskBegin):
+            scopes.append("mask")
+        elif isinstance(item, MaskEnd):
+            if scopes and scopes[-1] == "mask":
+                scopes[-1] = "clip"
+        elif isinstance(item, GroupPush):
+            scopes.append("group")
+        elif isinstance(item, GroupPop):
+            if scopes and scopes[-1] == "group":
+                scopes.pop()
+    return tuple(scopes)
+
+
+def _cpu_island_from_page(page, box, scale, image_bytes):
+    box = _padded_page_bbox(box, page.rect, scale)
+    if box is None:
+        raise ValueError("CPU island has empty bounds")
+    page_box = (float(page.rect.x0), float(page.rect.y0),
+                float(page.rect.x1), float(page.rect.y1))
+    page_area = _bbox_area(page_box)
+    if page_area <= 0.0 or \
+            _bbox_area(box) / page_area > MAX_CPU_ISLAND_PAGE_COVERAGE:
+        raise ValueError("CPU island covers too much of the page")
+    clip = pymupdf.Rect(*box)
+    pixmap = page.get_pixmap(
+        matrix=pymupdf.Matrix(scale, scale), clip=clip, alpha=True)
+    width = int(pixmap.width)
+    height = int(pixmap.height)
+    cost = width * height * 4
+    if cost <= 0:
+        raise ValueError("CPU island has empty pixels")
+    if cost > MAX_GPU_IMAGE_BYTES or image_bytes + cost > MAX_GPU_IMAGE_BYTES:
+        raise ValueError("CPU island image data exceeds GPU scene limit")
+    if pixmap.n != 4 or not pixmap.alpha:
+        raise ValueError("CPU island is not RGBA")
+    pixels = _rgba_to_premul_bgra(pixmap.samples, width, height)
+    return VectorImage(
+        pixels, width, height, width * 4,
+        (width / scale, 0.0, 0.0, height / scale,
+         float(pixmap.x) / scale, float(pixmap.y) / scale)), cost
+
+
+def _replace_one_group_with_cpu_island(
+        items, page, scale, image_bytes, *, approximate=False):
+    spans = sorted(_group_spans(items), key=lambda span: span[1] - span[0])
+    for start, end, _push in spans:
+        group_items = tuple(items[start:end + 1])
+        try:
+            _flatten_nonisolated_groups(group_items)
+            continue
+        except Exception:
+            pass
+        scopes = _enclosing_scopes(items, start)
+        if "mask" in scopes or (not approximate and "group" in scopes):
+            continue
+        children = tuple(items[start + 1:end])
+        box = _union_bbox(children)
+        if box is None:
+            continue
+        page_area = _bbox_area((float(page.rect.x0), float(page.rect.y0),
+                                float(page.rect.x1), float(page.rect.y1)))
+        coverage = _bbox_area(box) / page_area if page_area > 0.0 else 1.0
+        if approximate and coverage > MAX_APPROXIMATE_CPU_ISLAND_PAGE_COVERAGE:
+            continue
+        external_boxes = [
+            _item_bbox(item) for item in (*items[:start], *items[end + 1:])
+        ]
+        external_boxes = [item_box for item_box in external_boxes
+                          if item_box is not None]
+        overlaps = any(_overlapping(box, item_box)
+                       for item_box in external_boxes)
+        if overlaps and not approximate:
+            continue
+        try:
+            island, cost = _cpu_island_from_page(page, box, scale, image_bytes)
+        except Exception:
+            continue
+        return (items[:start] + (island,) + items[end + 1:],
+                image_bytes + cost, overlaps or bool(scopes))
+    return None
+
+
+def _flatten_or_cpu_island_groups(items, page, scale, image_bytes):
+    current = tuple(items)
+    islanded = False
+    while True:
+        try:
+            return tuple(_flatten_nonisolated_groups(current)), image_bytes, islanded
+        except Exception as error:
+            replaced = _replace_one_group_with_cpu_island(
+                current, page, scale, image_bytes)
+            if replaced is None:
+                replaced = _replace_one_group_with_cpu_island(
+                    current, page, scale, image_bytes, approximate=True)
+            if replaced is None:
+                raise error
+            current, image_bytes, approximate = replaced
+            islanded = "approximate" if approximate else True
 
 
 class _DisplayListDevice(_mupdf.FzDevice2):
@@ -1470,8 +1652,14 @@ def vector_page_from_pymupdf(page, raster_scale=1.0, timeout_seconds=None):
             device.failure = "unbalanced soft mask stack"
         if not device.failure:
             try:
-                device.items = list(_flatten_nonisolated_groups(
-                    tuple(device.items)))
+                items, image_bytes, islanded = _flatten_or_cpu_island_groups(
+                    tuple(device.items), page, scale, device._image_bytes)
+                device.items = list(items)
+                device._image_bytes = image_bytes
+                if islanded:
+                    device._features.add("cpu-island")
+                    if islanded == "approximate":
+                        device._features.add("cpu-island-approximate")
             except Exception as error:
                 device._set_failure(str(error))
         if not device.failure and ("blend-mode" in device._features or

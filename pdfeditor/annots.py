@@ -318,6 +318,21 @@ class AnnotMixin:
         if self.doc is None:
             return
         menu = QMenu(self)
+        if getattr(self, "_edit_mode", False):
+            span = self._span_at(pt)
+            if span is not None:
+                action = menu.addAction(
+                    localize("Element size...", "요소 크기..."),
+                    lambda _c=False, p=pt: self.resize_span_at(p))
+                action.setIcon(fluent_icon("edit"))
+                menu.addAction(
+                    localize("Increase element 10%", "요소 10% 확대"),
+                    lambda _c=False, p=pt: self.resize_span_at(p, 1.1))
+                menu.addAction(
+                    localize("Decrease element 10%", "요소 10% 축소"),
+                    lambda _c=False, p=pt: self.resize_span_at(p, 0.9))
+                menu.exec_(global_pos)
+                return
         if not self.annotations_enabled:
             if self._selected:
                 menu.addAction(tr("복사"), self.copy_selection)
