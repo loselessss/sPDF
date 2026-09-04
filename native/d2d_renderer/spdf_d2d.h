@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 17;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 18;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -53,12 +53,49 @@ struct SpdfD2DGradientStop {
     std::uint32_t argb;
 };
 
+enum SpdfD2DSceneCommandType : std::uint32_t {
+    SPDF_D2D_SCENE_FILL_RECT = 1,
+    SPDF_D2D_SCENE_CLIP_PUSH = 2,
+    SPDF_D2D_SCENE_CLIP_POP = 3,
+    SPDF_D2D_SCENE_OPACITY_PUSH = 4,
+    SPDF_D2D_SCENE_LAYER_POP = 5,
+    SPDF_D2D_SCENE_COMPOSITE_PUSH = 6,
+    SPDF_D2D_SCENE_COMPOSITE_POP = 7,
+    SPDF_D2D_SCENE_CLIP_GROUP_PUSH = 8,
+    SPDF_D2D_SCENE_CLIP_GROUP_POP = 9,
+    SPDF_D2D_SCENE_MASK_BEGIN = 10,
+    SPDF_D2D_SCENE_MASK_END = 11,
+    SPDF_D2D_SCENE_COMPOSITE_MASK_BEGIN = 12,
+    SPDF_D2D_SCENE_COMPOSITE_MASK_END = 13,
+    SPDF_D2D_SCENE_BITMAP = 14,
+    SPDF_D2D_SCENE_PATH_FILL = 15,
+    SPDF_D2D_SCENE_PATH_STROKE = 16,
+    SPDF_D2D_SCENE_LINEAR_GRADIENT = 17,
+    SPDF_D2D_SCENE_RADIAL_GRADIENT = 18,
+};
+
+constexpr std::uint32_t SPDF_D2D_SCENE_HAS_TRANSFORM = 1;
+
+struct SpdfD2DSceneCommand {
+    std::uint32_t type;
+    std::uint32_t flags;
+    void* resource;
+    void* stroke_style;
+    SpdfD2DTransform transform;
+    float values[8];
+    std::uint32_t uint_values[4];
+    const void* data;
+    std::uint32_t data_count;
+};
+
 static_assert(sizeof(wchar_t) == 2, "The sPDF D2D ABI requires Windows wchar_t");
 static_assert(offsetof(SpdfD2DInfo, adapter_name) == 20, "Unexpected D2D ABI layout");
 static_assert(sizeof(SpdfD2DInfo) == 276, "Unexpected D2D ABI size");
 static_assert(sizeof(SpdfD2DPathCommand) == 28, "Unexpected path command layout");
 static_assert(sizeof(SpdfD2DTransform) == 24, "Unexpected transform layout");
 static_assert(sizeof(SpdfD2DGradientStop) == 8, "Unexpected gradient stop layout");
+static_assert(offsetof(SpdfD2DSceneCommand, data) == 96, "Unexpected scene command layout");
+static_assert(sizeof(SpdfD2DSceneCommand) == 112, "Unexpected scene command size");
 
 SPDF_D2D_API std::uint32_t spdf_d2d_abi_version() noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_probe(SpdfD2DInfo* info) noexcept;
@@ -215,8 +252,18 @@ SPDF_D2D_API std::int32_t spdf_d2d_fill_radial_gradient(
     float radius_y,
     const SpdfD2DGradientStop* stops,
     std::uint32_t stop_count) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_create_scene(
+    void* surface,
+    const SpdfD2DSceneCommand* commands,
+    std::uint32_t command_count,
+    void** scene) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_draw_scene(
+    void* surface,
+    void* scene,
+    const SpdfD2DTransform* transform) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_end_frame(void* surface) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_bitmap(void* bitmap) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_path(void* path) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_stroke_style(void* stroke_style) noexcept;
+SPDF_D2D_API void spdf_d2d_destroy_scene(void* scene) noexcept;
 SPDF_D2D_API void spdf_d2d_destroy_surface(void* surface) noexcept;

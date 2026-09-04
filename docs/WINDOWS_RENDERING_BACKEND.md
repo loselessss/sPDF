@@ -4,7 +4,7 @@
 
 상태: Direct2D 타일 합성 및 제한형 PDF 벡터·글자 GPU 래스터화 적용
 
-### 현재 단계: 1.29.2 / ABI v17
+### 현재 단계: 1.29.3 / ABI v18
 
 - 1.26~1.27의 소프트/이미지 마스크, 사용자 선 스타일, 윤곽선 글자와 stroked clip geometry에 이어 격리 그룹의 **11개 separable 혼합 모드**를 실제 표시 경로에 연결했다. Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion이 대상이다.
 - 1.28.1은 Hue/Saturation/Color/Luminosity도 Direct2D Blend effect에 연결하여 Normal 외 표준 PDF 혼합 모드 15개를 지원한다. PDF의 SetLum/SetSat·색 범위 보정과 같은 RGB 성분 혼합을 사용하며, 일반 HSL 색상 변환으로 대체하지 않는다. 구형 DLL이 확장된 모드 번호를 받지 않도록 ABI v11로 구분한다.
@@ -21,6 +21,7 @@
 - 1.29.0은 독립 미지원 투명도 그룹을 MuPDF CPU island 이미지로 래스터화해 GPU 장면에 다시 합성하는 첫 경로를 추가했다. 작은 국소 knockout/비격리 그룹은 `cpu-island-approximate`로 표시하고 GPU 강제 모드에서 GPU 표시를 유지할 수 있게 하되, 선택 좌표·페이지 박스·확대 배율 같은 수치는 PDF 모델과 리더 상태를 기준으로 유지한다.
 - 1.29.1은 soft-mask transfer function을 256샘플 알파 LUT로 만들어 ABI v17의 Direct2D TableTransfer effect에 전달한다. 단순 색상 벡터 타일 패턴은 패턴 셀을 기록한 뒤 page fill clip 안에서 반복 복제해 Direct2D scene item으로 펼친다. 근사 CPU island는 작은 겹침 도형을 같은 제한 영역 island에 흡수해 GPU 강제 렌더링을 유지하면서 중복 벡터 경계선을 줄인다. 같은 색의 연속 글자 glyph outline은 `text-outline-merge`로 결합 path에 압축하고, 같은 색의 연속 fill path는 `baked-gradient-band-merge`로 압축한다. linear/radial gradient primitive를 감싼 동일 영역 clip triplet은 `gradient-clip-merge`로 gradient 항목에 흡수한다. `SPDF_GPU_AGGRESSIVE_BAND_MERGE=1`은 기본값이 꺼진 실험 설정이며, 유사 색상 band를 평균 색상으로 병합하고 별도 장면 캐시 키와 `aggressive-band-merge` feature로 기본 정확 색상 경로와 구분한다. 중첩 타일 패턴, 패턴 내부 마스크와 기타 미지원 명령은 아직 남아 있다. shading 생성과 이미지 디코딩도 현재 CPU 작업이다.
 - 1.29.2의 interactive zoom은 Ctrl/Alt+휠 목표 배율까지 120 ms ease-out으로 현재 GPU 장면의 페이지 행렬을 갱신한다. 각 중간 프레임의 실제 배율을 UI와 좌표 변환에 그대로 사용하고 마지막 프레임은 요청 배율과 정확히 일치한다. 확대 입력이 안정된 뒤에만 더 높은 이미지 품질이 필요한 장면을 보이는 쪽부터 한 쪽씩 갱신하며, paint 경로에서는 장면을 재추출하지 않는다. MuPDF 문서 객체는 GUI 스레드에 유지하고 쪽 사이에서 이벤트 루프에 제어를 돌려주므로, 별도 스레드에서 같은 문서를 공유하지 않는다.
+- 1.29.3은 페이지 표시 목록과 네이티브 자원 참조를 ABI v18 retained scene으로 복사해, 프레임마다 Python이 개별 항목을 호출하지 않고 페이지 행렬과 함께 장면을 한 번 호출한다. bitmap 기반 mask·blend capture가 없는 장면은 Direct2D command list로 한 번 기록해 이후 프레임에서 그대로 재사용한다. mask/composite 장면은 target bitmap 복사와 effect 적용이 필요하므로 현재는 retained 명령을 네이티브에서 재생한다. ACB 포스터(323개 항목, Intel Iris Xe, 1280×900)의 제출 중앙값은 기존 211.05 ms, retained 210.29 ms로 약 0.4% 차이였으며, 23개 soft-mask의 큰 중간 표면 합성이 실제 병목임을 확인했다.
 - 실제 Direct2D 출력 픽셀을 읽는 명시적 진단 API를 추가했다. 11개 모드의 반투명 배경·소스·그룹 opacity 결과를 수식과 비교하고, 실제 PDF의 GPU 장면을 CPU 렌더의 내부 픽셀과 비교한다. 픽셀 readback은 테스트용 호출에만 사용하며 일반 repaint 경로에는 넣지 않는다. 임의 포스터·색 관리·모든 중첩 조합의 품질이나 속도 우위를 이 테스트만으로 보장하지 않는다.
 - 추가한 성분 혼합 4개는 12가지 배경/소스 색 쌍(6개 색조 영역, 회색, 흑백)과 4가지 알파/불투명도 조건의 192개 조합을 독립 SetLum/SetSat 수식과 비교한다. 실제 PDF 15개 모드를 일반 장면과 중첩/even-odd 클리핑 장면에서 CPU 내부 픽셀과 비교한다. 반투명 배경·소수점 clip 경계·중첩·회전·96/120 DPI를 별도로 비교하고, 잘못된 capture 종료와 미완료 프레임 정리도 검증한다. 알파/밝기 마스크 내부·외부 혼합, RGB 원색·회색 마스크, 이미지 마스크를 CPU 출력과 비교하며, 중첩 적용·마스크 영역 밖 보존·오류 후 프레임 재시작도 확인한다.
 

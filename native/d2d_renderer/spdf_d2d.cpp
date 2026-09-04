@@ -5,8 +5,10 @@
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <memory>
 #include <new>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <d2d1_1.h>
@@ -1288,6 +1290,45 @@ public:
         return swap_chain_->Present(1, 0);
     }
 
+    HRESULT begin_scene_recording(
+        ID2D1Image** previous_target,
+        ID2D1CommandList** commands) noexcept {
+        if (!drawing_ || previous_target == nullptr || commands == nullptr ||
+                !mask_captures_.empty() || !composite_captures_.empty() ||
+                layer_depth_ != 0) {
+            return E_UNEXPECTED;
+        }
+        *previous_target = nullptr;
+        *commands = nullptr;
+        d2d_context_->GetTarget(previous_target);
+        ComPtr<ID2D1CommandList> created;
+        const auto result = d2d_context_->CreateCommandList(&created);
+        if (FAILED(result)) return result;
+        d2d_context_->SetTarget(created.Get());
+        created.CopyTo(commands);
+        return S_OK;
+    }
+
+    HRESULT end_scene_recording(
+        ID2D1Image* previous_target,
+        ID2D1CommandList* commands) noexcept {
+        if (previous_target == nullptr || commands == nullptr) return E_INVALIDARG;
+        d2d_context_->SetTarget(previous_target);
+        return commands->Close();
+    }
+
+    HRESULT draw_command_list(
+        ID2D1CommandList* commands,
+        const SpdfD2DTransform& transform) noexcept {
+        if (!drawing_ || commands == nullptr) return E_INVALIDARG;
+        const auto result = set_transform(
+            transform.m11, transform.m12, transform.m21, transform.m22,
+            transform.dx, transform.dy);
+        if (FAILED(result)) return result;
+        d2d_context_->DrawImage(commands);
+        return S_OK;
+    }
+
 private:
     struct CompositeCapture {
         ComPtr<ID2D1Bitmap1> previous;
@@ -1426,6 +1467,157 @@ private:
     std::uint32_t layer_depth_ = 0;
     bool drawing_ = false;
 };
+
+struct SceneCommand {
+    SpdfD2DSceneCommand command{};
+    std::unique_ptr<Surface::Bitmap> bitmap;
+    std::unique_ptr<Surface::Path> path;
+    std::unique_ptr<Surface::StrokeStyle> stroke_style;
+    std::vector<SpdfD2DGradientStop> stops;
+    std::vector<float> transfer;
+};
+
+struct Scene {
+    Surface* owner = nullptr;
+    std::vector<SceneCommand> commands;
+    ComPtr<ID2D1CommandList> display_list;
+    bool recordable = true;
+};
+
+D2D1_MATRIX_3X2_F compose_transform(
+    const SpdfD2DTransform& page,
+    const SpdfD2DTransform& item) noexcept {
+    return D2D1::Matrix3x2F(
+        page.m11 * item.m11 + page.m21 * item.m12,
+        page.m12 * item.m11 + page.m22 * item.m12,
+        page.m11 * item.m21 + page.m21 * item.m22,
+        page.m12 * item.m21 + page.m22 * item.m22,
+        page.m11 * item.dx + page.m21 * item.dy + page.dx,
+        page.m12 * item.dx + page.m22 * item.dy + page.dy);
+}
+
+HRESULT replay_scene(
+    Surface* surface,
+    Scene* scene,
+    const SpdfD2DTransform& page) noexcept {
+    if (surface == nullptr || scene == nullptr || scene->owner != surface) {
+        return E_INVALIDARG;
+    }
+    const auto set_item_transform = [&](const SpdfD2DSceneCommand& command) {
+        const auto matrix = (command.flags & SPDF_D2D_SCENE_HAS_TRANSFORM) != 0
+            ? compose_transform(page, command.transform)
+            : D2D1::Matrix3x2F(
+                page.m11, page.m12, page.m21, page.m22, page.dx, page.dy);
+        return surface->set_transform(
+            matrix._11, matrix._12, matrix._21, matrix._22, matrix._31, matrix._32);
+    };
+    for (const auto& stored : scene->commands) {
+        const auto& command = stored.command;
+        HRESULT result = S_OK;
+        switch (command.type) {
+        case SPDF_D2D_SCENE_FILL_RECT:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->fill_rect(
+                command.values[0], command.values[1], command.values[2], command.values[3],
+                command.uint_values[0]);
+            break;
+        case SPDF_D2D_SCENE_CLIP_PUSH:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->push_clip_path(
+                static_cast<Surface::Path*>(command.resource));
+            break;
+        case SPDF_D2D_SCENE_CLIP_POP:
+            result = surface->pop_clip();
+            break;
+        case SPDF_D2D_SCENE_OPACITY_PUSH:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->push_opacity_layer(command.values[0]);
+            break;
+        case SPDF_D2D_SCENE_LAYER_POP:
+            result = surface->pop_layer();
+            break;
+        case SPDF_D2D_SCENE_COMPOSITE_PUSH:
+            result = surface->begin_composite_group(
+                command.uint_values[0], command.values[0], nullptr, false,
+                command.uint_values[1] != 0);
+            break;
+        case SPDF_D2D_SCENE_COMPOSITE_POP:
+            result = surface->end_composite_group();
+            break;
+        case SPDF_D2D_SCENE_CLIP_GROUP_PUSH:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->begin_composite_group(
+                0, 1.0f, static_cast<Surface::Path*>(command.resource));
+            break;
+        case SPDF_D2D_SCENE_CLIP_GROUP_POP:
+            result = surface->end_composite_group(true);
+            break;
+        case SPDF_D2D_SCENE_MASK_BEGIN:
+        case SPDF_D2D_SCENE_COMPOSITE_MASK_BEGIN:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) {
+                if (command.type == SPDF_D2D_SCENE_MASK_BEGIN) {
+                    result = surface->begin_mask(
+                        command.values[0], command.values[1], command.values[2], command.values[3],
+                        command.uint_values[0] != 0, command.uint_values[1]);
+                } else {
+                    result = surface->begin_composite_mask(
+                        command.values[0], command.values[1], command.values[2], command.values[3],
+                        command.uint_values[0] != 0, command.uint_values[1]);
+                }
+            }
+            break;
+        case SPDF_D2D_SCENE_MASK_END:
+        case SPDF_D2D_SCENE_COMPOSITE_MASK_END:
+            result = surface->set_transform(1, 0, 0, 1, 0, 0);
+            if (SUCCEEDED(result)) {
+                const auto* values = stored.transfer.empty() ? nullptr : stored.transfer.data();
+                const auto count = static_cast<std::uint32_t>(stored.transfer.size());
+                result = command.type == SPDF_D2D_SCENE_MASK_END
+                    ? surface->end_mask(values, count)
+                    : surface->end_composite_mask(values, count);
+            }
+            break;
+        case SPDF_D2D_SCENE_BITMAP:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->draw_bitmap(
+                static_cast<Surface::Bitmap*>(command.resource),
+                command.values[0], command.values[1], command.values[2], command.values[3],
+                command.values[4], command.uint_values[0] != 0);
+            break;
+        case SPDF_D2D_SCENE_PATH_FILL:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->fill_path(
+                static_cast<Surface::Path*>(command.resource), command.uint_values[0]);
+            break;
+        case SPDF_D2D_SCENE_PATH_STROKE:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->stroke_path(
+                static_cast<Surface::Path*>(command.resource), command.uint_values[0],
+                command.values[0], static_cast<Surface::StrokeStyle*>(command.stroke_style));
+            break;
+        case SPDF_D2D_SCENE_LINEAR_GRADIENT:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->fill_linear_gradient(
+                static_cast<Surface::Path*>(command.resource),
+                command.values[0], command.values[1], command.values[2], command.values[3],
+                stored.stops.data(), static_cast<std::uint32_t>(stored.stops.size()));
+            break;
+        case SPDF_D2D_SCENE_RADIAL_GRADIENT:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->fill_radial_gradient(
+                static_cast<Surface::Path*>(command.resource),
+                command.values[0], command.values[1], command.values[2], command.values[3],
+                command.values[4], command.values[5], stored.stops.data(),
+                static_cast<std::uint32_t>(stored.stops.size()));
+            break;
+        default:
+            return E_INVALIDARG;
+        }
+        if (FAILED(result)) return result;
+    }
+    return surface->set_transform(page.m11, page.m12, page.m21, page.m22, page.dx, page.dy);
+}
 
 }  // namespace
 
@@ -1891,8 +2083,137 @@ std::int32_t spdf_d2d_fill_radial_gradient(
     }
     return static_cast<std::int32_t>(
         static_cast<Surface*>(surface)->fill_radial_gradient(
-            static_cast<Surface::Path*>(path), center_x, center_y,
+        static_cast<Surface::Path*>(path), center_x, center_y,
             origin_x, origin_y, radius_x, radius_y, stops, stop_count));
+}
+
+std::int32_t spdf_d2d_create_scene(
+    void* surface,
+    const SpdfD2DSceneCommand* commands,
+    std::uint32_t command_count,
+    void** scene) noexcept {
+    if (surface == nullptr || commands == nullptr || command_count == 0 || scene == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    *scene = nullptr;
+    try {
+        auto created = std::make_unique<Scene>();
+        created->owner = static_cast<Surface*>(surface);
+        created->commands.reserve(command_count);
+        for (std::uint32_t index = 0; index < command_count; ++index) {
+            SceneCommand stored{};
+            stored.command = commands[index];
+            stored.command.data = nullptr;
+            const auto type = commands[index].type;
+            if (type < SPDF_D2D_SCENE_FILL_RECT ||
+                    type > SPDF_D2D_SCENE_RADIAL_GRADIENT) {
+                return static_cast<std::int32_t>(E_INVALIDARG);
+            }
+            if (type == SPDF_D2D_SCENE_COMPOSITE_PUSH ||
+                    type == SPDF_D2D_SCENE_COMPOSITE_POP ||
+                    type == SPDF_D2D_SCENE_CLIP_GROUP_PUSH ||
+                    type == SPDF_D2D_SCENE_CLIP_GROUP_POP ||
+                    type == SPDF_D2D_SCENE_MASK_BEGIN ||
+                    type == SPDF_D2D_SCENE_MASK_END ||
+                    type == SPDF_D2D_SCENE_COMPOSITE_MASK_BEGIN ||
+                    type == SPDF_D2D_SCENE_COMPOSITE_MASK_END) {
+                created->recordable = false;
+            }
+            if (type == SPDF_D2D_SCENE_BITMAP) {
+                const auto* source = static_cast<Surface::Bitmap*>(commands[index].resource);
+                if (source == nullptr || source->owner != created->owner || !source->resource) {
+                    return static_cast<std::int32_t>(E_INVALIDARG);
+                }
+                stored.bitmap = std::make_unique<Surface::Bitmap>(
+                    Surface::Bitmap{created->owner, source->resource});
+                stored.command.resource = stored.bitmap.get();
+            } else if (type == SPDF_D2D_SCENE_CLIP_PUSH ||
+                    type == SPDF_D2D_SCENE_CLIP_GROUP_PUSH ||
+                    type == SPDF_D2D_SCENE_PATH_FILL ||
+                    type == SPDF_D2D_SCENE_PATH_STROKE ||
+                    type == SPDF_D2D_SCENE_LINEAR_GRADIENT ||
+                    type == SPDF_D2D_SCENE_RADIAL_GRADIENT) {
+                const auto* source = static_cast<Surface::Path*>(commands[index].resource);
+                if (source == nullptr || source->owner != created->owner || !source->resource) {
+                    return static_cast<std::int32_t>(E_INVALIDARG);
+                }
+                stored.path = std::make_unique<Surface::Path>(Surface::Path{
+                    created->owner, source->resource, source->fill_realization});
+                stored.command.resource = stored.path.get();
+            }
+            if (type == SPDF_D2D_SCENE_PATH_STROKE && commands[index].stroke_style != nullptr) {
+                const auto* source = static_cast<Surface::StrokeStyle*>(commands[index].stroke_style);
+                if (source->owner != created->owner || !source->resource) {
+                    return static_cast<std::int32_t>(E_INVALIDARG);
+                }
+                stored.stroke_style = std::make_unique<Surface::StrokeStyle>(
+                    Surface::StrokeStyle{created->owner, source->resource});
+                stored.command.stroke_style = stored.stroke_style.get();
+            }
+            if (commands[index].data_count != 0 && commands[index].data == nullptr) {
+                return static_cast<std::int32_t>(E_INVALIDARG);
+            }
+            if (commands[index].type == SPDF_D2D_SCENE_LINEAR_GRADIENT ||
+                    commands[index].type == SPDF_D2D_SCENE_RADIAL_GRADIENT) {
+                if (commands[index].data_count < 2 ||
+                        commands[index].data_count > 256) {
+                    return static_cast<std::int32_t>(E_INVALIDARG);
+                }
+                const auto* first = static_cast<const SpdfD2DGradientStop*>(commands[index].data);
+                if (commands[index].data_count != 0) {
+                    stored.stops.assign(first, first + commands[index].data_count);
+                }
+            } else if (commands[index].type == SPDF_D2D_SCENE_MASK_END ||
+                    commands[index].type == SPDF_D2D_SCENE_COMPOSITE_MASK_END) {
+                if (commands[index].data_count == 1) {
+                    return static_cast<std::int32_t>(E_INVALIDARG);
+                }
+                const auto* first = static_cast<const float*>(commands[index].data);
+                if (commands[index].data_count != 0) {
+                    stored.transfer.assign(first, first + commands[index].data_count);
+                }
+            } else if (commands[index].data_count != 0) {
+                return static_cast<std::int32_t>(E_INVALIDARG);
+            }
+            created->commands.push_back(std::move(stored));
+        }
+        *scene = created.release();
+        return static_cast<std::int32_t>(S_OK);
+    } catch (const std::bad_alloc&) {
+        return static_cast<std::int32_t>(E_OUTOFMEMORY);
+    } catch (...) {
+        return static_cast<std::int32_t>(E_FAIL);
+    }
+}
+
+std::int32_t spdf_d2d_draw_scene(
+    void* surface,
+    void* scene,
+    const SpdfD2DTransform* transform) noexcept {
+    if (surface == nullptr || scene == nullptr || transform == nullptr) {
+        return static_cast<std::int32_t>(E_INVALIDARG);
+    }
+    auto* context = static_cast<Surface*>(surface);
+    auto* retained = static_cast<Scene*>(scene);
+    if (retained->owner != context) return static_cast<std::int32_t>(E_INVALIDARG);
+    if (!retained->recordable) {
+        return static_cast<std::int32_t>(replay_scene(context, retained, *transform));
+    }
+    if (!retained->display_list) {
+        ComPtr<ID2D1Image> previous_target;
+        ComPtr<ID2D1CommandList> commands;
+        auto result = context->begin_scene_recording(&previous_target, &commands);
+        if (FAILED(result)) return static_cast<std::int32_t>(result);
+        const SpdfD2DTransform identity{1, 0, 0, 1, 0, 0};
+        result = replay_scene(context, retained, identity);
+        const auto close_result = context->end_scene_recording(
+            previous_target.Get(), commands.Get());
+        if (FAILED(result)) return static_cast<std::int32_t>(result);
+        if (FAILED(close_result)) return static_cast<std::int32_t>(close_result);
+        retained->display_list = commands;
+    }
+    return static_cast<std::int32_t>(
+        context->draw_command_list(retained->display_list.Get(), *transform));
 }
 
 std::int32_t spdf_d2d_end_frame(void* surface) noexcept {
@@ -1912,6 +2233,10 @@ void spdf_d2d_destroy_path(void* path) noexcept {
 
 void spdf_d2d_destroy_stroke_style(void* stroke_style) noexcept {
     delete static_cast<Surface::StrokeStyle*>(stroke_style);
+}
+
+void spdf_d2d_destroy_scene(void* scene) noexcept {
+    delete static_cast<Scene*>(scene);
 }
 
 void spdf_d2d_destroy_surface(void* surface) noexcept {

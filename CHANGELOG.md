@@ -2,8 +2,8 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.29.2 - 2026-09-04
+## 1.29.3 - 2026-09-04
 
-### Improvements
+### Performance improvements
 
-- Ctrl/Alt wheel zoom now animates the exact page transform while reusing the current GPU scene, then refreshes image quality after input settles.
+- Direct2D pages are retained behind ABI v18 and replayed through one native call per frame. Compatible scenes are also cached as native Direct2D command lists.

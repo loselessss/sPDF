@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 17
+ABI_VERSION = 18
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -42,6 +42,16 @@ class _Transform(Structure):
 
 class _GradientStop(Structure):
     _fields_ = [("position", c_float), ("argb", c_uint32)]
+
+
+class _SceneCommand(Structure):
+    _fields_ = [
+        ("type", c_uint32), ("flags", c_uint32),
+        ("resource", c_void_p), ("stroke_style", c_void_p),
+        ("transform", _Transform), ("values", c_float * 8),
+        ("uint_values", c_uint32 * 4), ("data", c_void_p),
+        ("data_count", c_uint32),
+    ]
 
 
 @dataclass(frozen=True)
@@ -159,6 +169,12 @@ def _load_library(path):
         c_void_p, c_void_p, c_float, c_float, c_float, c_float,
         c_float, c_float, POINTER(_GradientStop), c_uint32]
     library.spdf_d2d_fill_radial_gradient.restype = c_int32
+    library.spdf_d2d_create_scene.argtypes = [
+        c_void_p, POINTER(_SceneCommand), c_uint32, POINTER(c_void_p)]
+    library.spdf_d2d_create_scene.restype = c_int32
+    library.spdf_d2d_draw_scene.argtypes = [
+        c_void_p, c_void_p, POINTER(_Transform)]
+    library.spdf_d2d_draw_scene.restype = c_int32
     library.spdf_d2d_end_frame.argtypes = [c_void_p]
     library.spdf_d2d_end_frame.restype = c_int32
     library.spdf_d2d_destroy_bitmap.argtypes = [c_void_p]
@@ -167,6 +183,8 @@ def _load_library(path):
     library.spdf_d2d_destroy_path.restype = None
     library.spdf_d2d_destroy_stroke_style.argtypes = [c_void_p]
     library.spdf_d2d_destroy_stroke_style.restype = None
+    library.spdf_d2d_destroy_scene.argtypes = [c_void_p]
+    library.spdf_d2d_destroy_scene.restype = None
     library.spdf_d2d_destroy_surface.argtypes = [c_void_p]
     library.spdf_d2d_destroy_surface.restype = None
     return library
@@ -181,6 +199,8 @@ def _check_hresult(result, operation):
 class D2DSurface:
     """Own one native swap chain without owning the target HWND."""
 
+    supports_retained_scenes = True
+
     def __init__(self, hwnd, width, height, dpi=96.0, path=None):
         library_path = Path(path) if path is not None else _library_path()
         self._library = _load_library(library_path)
@@ -188,6 +208,7 @@ class D2DSurface:
         self._bitmaps = set()
         self._paths = set()
         self._stroke_styles = set()
+        self._scenes = set()
         native = _NativeInfo()
         native.struct_size = ctypes.sizeof(_NativeInfo)
         result = self._library.spdf_d2d_create_surface(
@@ -329,6 +350,112 @@ class D2DSurface:
         created = D2DPath(self, handle)
         self._paths.add(created)
         return created
+
+    def create_scene(self, width, height, draws):
+        """Copy an immutable page display list into the native renderer."""
+        if self.closed:
+            raise RuntimeError("Direct2D surface is closed")
+        commands = []
+        data_arrays = []
+
+        def append(kind, *, resource=None, style=None, transform=None,
+                   values=(), uint_values=(), data=None):
+            command = _SceneCommand()
+            command.type = kind
+            if transform is not None:
+                if len(transform) != 6:
+                    raise ValueError("invalid Direct2D scene transform")
+                command.flags = 1
+                command.transform = _Transform(*map(float, transform))
+            if resource is not None:
+                if resource.closed or resource._surface is not self:
+                    raise ValueError("scene resource does not belong to this surface")
+                command.resource = resource._handle
+            if style is not None:
+                if style.closed or style._surface is not self:
+                    raise ValueError("scene style does not belong to this surface")
+                command.stroke_style = style._handle
+            for index, value in enumerate(values):
+                command.values[index] = float(value)
+            for index, value in enumerate(uint_values):
+                command.uint_values[index] = int(value) & 0xffffffff
+            if data is not None:
+                data_arrays.append(data)
+                command.data = ctypes.cast(data, c_void_p)
+                command.data_count = len(data)
+            commands.append(command)
+
+        append(1, values=(0, 0, width, height), uint_values=(0xffffffff,))
+        for kind, resource, *values in draws:
+            if kind == "clip_group_push":
+                append(8, resource=resource, transform=values[0])
+            elif kind == "clip_group_pop":
+                append(9)
+            elif kind == "clip_push":
+                append(2, resource=resource, transform=values[0])
+            elif kind == "clip_pop":
+                append(3)
+            elif kind == "group_push":
+                append(4, values=(resource,))
+            elif kind == "group_pop":
+                append(5)
+            elif kind == "composite_push":
+                append(6, values=(values[0],),
+                       uint_values=(resource, bool(values[1])))
+            elif kind == "composite_pop":
+                append(7)
+            elif kind in ("mask_begin", "composite_mask_begin"):
+                area, luminosity, background_argb = resource, *values
+                append(10 if kind == "mask_begin" else 12, values=area,
+                       uint_values=(bool(luminosity), background_argb))
+            elif kind in ("mask_end", "composite_mask_end"):
+                table = ((c_float * len(resource))(*map(float, resource))
+                         if resource else None)
+                append(11 if kind == "mask_end" else 13, data=table)
+            elif kind == "image":
+                opacity, transform, interpolate = values
+                append(14, resource=resource, transform=transform,
+                       values=(0, 0, 1, 1, opacity),
+                       uint_values=(bool(interpolate),))
+            elif kind == "linear_gradient":
+                start, end, stops, transform = values
+                native_stops = self._gradient_stops(stops)
+                append(17, resource=resource, transform=transform,
+                       values=(*start, *end), data=native_stops)
+            elif kind == "radial_gradient":
+                center, origin, radius, stops, transform = values
+                native_stops = self._gradient_stops(stops)
+                append(18, resource=resource, transform=transform,
+                       values=(*center, *origin, *radius), data=native_stops)
+            elif kind == "path":
+                fill_argb, stroke_argb, stroke_width, transform, style = values
+                if fill_argb is not None:
+                    append(15, resource=resource, transform=transform,
+                           uint_values=(fill_argb,))
+                if stroke_argb is not None:
+                    append(16, resource=resource, style=style,
+                           transform=transform, values=(stroke_width,),
+                           uint_values=(stroke_argb,))
+            else:
+                raise ValueError("unsupported Direct2D scene command")
+        array = (_SceneCommand * len(commands))(*commands)
+        handle = c_void_p()
+        _check_hresult(self._library.spdf_d2d_create_scene(
+            self._handle, array, len(commands), byref(handle)),
+            "Direct2D retained scene creation")
+        scene = D2DScene(self, handle)
+        self._scenes.add(scene)
+        return scene
+
+    def draw_scene(self, scene, transform):
+        if self.closed or scene.closed or scene._surface is not self:
+            raise ValueError("scene does not belong to this Direct2D surface")
+        if len(transform) != 6:
+            raise ValueError("invalid Direct2D scene transform")
+        native = _Transform(*map(float, transform))
+        _check_hresult(self._library.spdf_d2d_draw_scene(
+            self._handle, scene._handle, byref(native)),
+            "Direct2D retained scene replay")
 
     def begin_frame(self, argb=0xffe8e8e8):
         if self.closed:
@@ -555,6 +682,8 @@ class D2DSurface:
 
     def close(self):
         if not self.closed:
+            for scene in tuple(self._scenes):
+                scene.close()
             for bitmap in tuple(self._bitmaps):
                 bitmap.close()
             for path in tuple(self._paths):
@@ -593,6 +722,28 @@ class D2DBitmap:
             self._surface._library.spdf_d2d_destroy_bitmap(self._handle)
             self._handle = c_void_p()
             self._surface._bitmaps.discard(self)
+
+    def __del__(self):
+        try:
+            self.close()
+        except (AttributeError, OSError):
+            pass
+
+
+class D2DScene:
+    def __init__(self, surface, handle):
+        self._surface = surface
+        self._handle = handle
+
+    @property
+    def closed(self):
+        return not bool(self._handle)
+
+    def close(self):
+        if not self.closed:
+            self._surface._library.spdf_d2d_destroy_scene(self._handle)
+            self._handle = c_void_p()
+            self._surface._scenes.discard(self)
 
     def __del__(self):
         try:

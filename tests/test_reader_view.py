@@ -426,6 +426,32 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
 
+    def test_retained_vector_scene_is_created_once_and_replayed_per_frame(self):
+        from pdfeditor.gpu_raster import VectorPage, VectorPath
+
+        class RetainedSurface(Mock):
+            supports_retained_scenes = True
+
+        scene = VectorPage(True, (VectorPath(
+            (("move", 20, 20), ("line", 120, 20),
+             ("line", 120, 100), ("close",)),
+            fill_argb=0xff0080ff),))
+        native_path = Mock(closed=False)
+        retained = Mock(closed=False)
+        surface = RetainedSurface()
+        surface.create_path.return_value = native_path
+        surface.create_scene.return_value = retained
+        self.view._d2d_surface = surface
+
+        self.view._draw_vector_page(0, scene)
+        self.view._draw_vector_page(0, scene)
+
+        surface.create_scene.assert_called_once()
+        self.assertEqual(surface.draw_scene.call_count, 2)
+        surface.fill_path.assert_not_called()
+        self.view._d2d_surface = None
+        self.view._d2d_vector_paths.clear()
+
     def test_gpu_image_scene_refreshes_for_zoom_quality(self):
         from pdfeditor.gpu_raster import VectorImage, VectorPage
 

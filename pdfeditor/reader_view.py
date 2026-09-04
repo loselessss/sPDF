@@ -297,7 +297,10 @@ class ReaderPageView(QGraphicsView):
             bitmap.close()
         for _key, bitmap in tuple(self._d2d_tiles.values()):
             bitmap.close()
-        for _scene, _draws, resources in tuple(self._d2d_vector_paths.values()):
+        for _scene, _draws, resources, retained in tuple(
+                self._d2d_vector_paths.values()):
+            if retained is not None:
+                retained.close()
             for path in resources:
                 path.close()
         self._d2d_previews.clear()
@@ -317,7 +320,9 @@ class ReaderPageView(QGraphicsView):
         cached = self._d2d_vector_paths.pop(page, None)
         if cached is None:
             return
-        _scene, _draws, resources = cached
+        _scene, _draws, resources, retained = cached
+        if retained is not None:
+            retained.close()
         for resource in resources:
             resource.close()
 
@@ -369,6 +374,8 @@ class ReaderPageView(QGraphicsView):
                 all(not path.closed for path in cached[2]):
             return cached[1]
         if cached is not None:
+            if cached[3] is not None:
+                cached[3].close()
             for path in cached[2]:
                 path.close()
         from .gpu_raster import (ClipPop, ClipPush, ClipStrokePush, GroupPop,
@@ -520,14 +527,27 @@ class ReaderPageView(QGraphicsView):
                           native_style))
             index += 1
         draws = tuple(draws)
-        self._d2d_vector_paths[page] = (scene, draws, resources)
+        retained = None
+        if getattr(type(self._d2d_surface), "supports_retained_scenes", False):
+            width, height = self._page_sizes[page]
+            retained = self._d2d_surface.create_scene(width, height, draws)
+        self._d2d_vector_paths[page] = (scene, draws, resources, retained)
         return draws
 
     def _draw_vector_page(self, page, scene):
-        width, height = self._page_sizes[page]
-        self._d2d_surface.fill_rect(0, 0, width, height, 0xffffffff)
         draws = self._native_vector_draws(page, scene)
         page_transform = self._page_transforms[page]
+        retained = self._d2d_vector_paths[page][3]
+        if retained is not None:
+            viewport_origin = self.mapFromScene(QPointF(0, 0))
+            self._d2d_surface.draw_scene(retained, (
+                page_transform.m11(), page_transform.m12(),
+                page_transform.m21(), page_transform.m22(),
+                page_transform.dx() + viewport_origin.x(),
+                page_transform.dy() + viewport_origin.y()))
+            return
+        width, height = self._page_sizes[page]
+        self._d2d_surface.fill_rect(0, 0, width, height, 0xffffffff)
         for kind, resource, *values in draws:
             if kind == "clip_group_push":
                 self._set_item_transform(page_transform, values[0])
@@ -698,8 +718,10 @@ class ReaderPageView(QGraphicsView):
                 bitmap.close()
             self._d2d_previews.clear()
             self._vector_pages.clear()
-            for _scene, _draws, resources in tuple(
+            for _scene, _draws, resources, retained in tuple(
                     self._d2d_vector_paths.values()):
+                if retained is not None:
+                    retained.close()
                 for path in resources:
                     path.close()
             self._d2d_vector_paths.clear()
@@ -976,7 +998,10 @@ class ReaderPageView(QGraphicsView):
         for _identity, bitmap in tuple(self._d2d_previews.values()):
             bitmap.close()
         self._d2d_previews.clear()
-        for _scene, _draws, resources in tuple(self._d2d_vector_paths.values()):
+        for _scene, _draws, resources, retained in tuple(
+                self._d2d_vector_paths.values()):
+            if retained is not None:
+                retained.close()
             for path in resources:
                 path.close()
         self._d2d_vector_paths.clear()

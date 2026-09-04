@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from pdfeditor.d2d_backend import (ABI_VERSION, D2DSurface, _NativeInfo,
-                                  probe_d2d_backend)
+                                  _SceneCommand, probe_d2d_backend)
 
 
 def pdf_component_blend(mode, backdrop, source):
@@ -45,10 +45,12 @@ def pdf_component_blend(mode, backdrop, source):
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 17)
+        self.assertEqual(ABI_VERSION, 18)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
+            self.assertEqual(_SceneCommand.data.offset, 96)
+            self.assertEqual(ctypes.sizeof(_SceneCommand), 112)
 
     def test_missing_library_is_a_safe_fallback(self):
         with patch("pdfeditor.d2d_backend.os.name", "nt"):
@@ -115,6 +117,45 @@ class D2DBackendTests(unittest.TestCase):
             user32.DestroyWindow(hwnd)
 
     @unittest.skipUnless(os.name == "nt", "Direct2D is Windows-only")
+    def test_retained_scene_replays_with_page_transform(self):
+        library = Path(__file__).resolve().parents[1] / "native" / "bin" / \
+            "spdf_d2d_renderer.dll"
+        if not library.is_file():
+            self.skipTest("native renderer is not built")
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.CreateWindowExW.argtypes = [
+            ctypes.c_uint32, ctypes.c_wchar_p, ctypes.c_wchar_p,
+            ctypes.c_uint32, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_void_p]
+        user32.CreateWindowExW.restype = ctypes.c_void_p
+        user32.DestroyWindow.argtypes = [ctypes.c_void_p]
+        user32.DestroyWindow.restype = ctypes.c_int
+        hwnd = user32.CreateWindowExW(
+            0, "STATIC", "sPDF retained scene test", 0, 0, 0, 32, 32,
+            None, None, None, None)
+        self.assertTrue(hwnd, ctypes.get_last_error())
+        try:
+            with D2DSurface(hwnd, 32, 32, path=library) as surface:
+                path = surface.create_path([
+                    ("move", 0, 0), ("line", 8, 0),
+                    ("line", 8, 8), ("line", 0, 8), ("close",)])
+                scene = surface.create_scene(32, 32, (
+                    ("path", path, 0xffff0000, None, 1.0,
+                     (1, 0, 0, 1, 2, 3), None),))
+                path.close()
+                surface.begin_frame(0xff000000)
+                surface.draw_scene(scene, (1, 0, 0, 1, 4, 5))
+                pixels = surface.read_pixels_bgra(32, 32)
+                surface.end_frame()
+                inside = pixels[(10 * 32 + 8) * 4:(10 * 32 + 8) * 4 + 4]
+                outside = pixels[(6 * 32 + 5) * 4:(6 * 32 + 5) * 4 + 4]
+                self.assertEqual(inside, bytes((0, 0, 255, 255)))
+                self.assertEqual(outside, bytes((255, 255, 255, 255)))
+        finally:
+            user32.DestroyWindow(hwnd)
+
+    @unittest.skipUnless(os.name == "nt", "Direct2D is Windows-only")
     def test_mask_transfer_table_modulates_layer_alpha(self):
         library = Path(__file__).resolve().parents[1] / "native" / "bin" / \
             "spdf_d2d_renderer.dll"
@@ -146,6 +187,22 @@ class D2DBackendTests(unittest.TestCase):
                 surface.end_frame()
                 center = pixels[(16 * 32 + 16) * 4:(16 * 32 + 16) * 4 + 4]
                 self.assertEqual(center, bytes((255, 0, 0, 255)))
+
+                path = surface.create_path([
+                    ("move", 0, 0), ("line", 32, 0),
+                    ("line", 32, 32), ("line", 0, 32), ("close",)])
+                retained = surface.create_scene(32, 32, (
+                    ("composite_mask_begin", (0, 0, 32, 32), False, 0),
+                    ("path", path, 0xffffffff, None, 1.0, None, None),
+                    ("composite_mask_end", ()),
+                    ("path", path, 0xffff0000, None, 1.0, None, None),
+                    ("clip_group_pop", None)))
+                surface.begin_frame(0xff0000ff)
+                surface.draw_scene(retained, (1, 0, 0, 1, 0, 0))
+                pixels = surface.read_pixels_bgra(32, 32)
+                surface.end_frame()
+                center = pixels[(16 * 32 + 16) * 4:(16 * 32 + 16) * 4 + 4]
+                self.assertEqual(center, bytes((0, 0, 255, 255)))
         finally:
             user32.DestroyWindow(hwnd)
 

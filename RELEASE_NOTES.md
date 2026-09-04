@@ -1,4 +1,4 @@
-# sPDF 1.29.2 Release Notes
+# sPDF 1.29.3 Release Notes
 
 Release date: 2026-09-04
 
@@ -59,3 +59,7 @@ Release date: 2026-09-04
 ## 1.29.2 improvement - 2026-09-04
 
 - Ctrl/Alt wheel zoom now animates the current GPU scene through exact intermediate page transforms and finishes at the requested zoom value. Image-quality scene refresh remains deferred until input settles.
+
+## 1.29.3 performance improvement - 2026-09-04
+
+- Direct2D pages now keep a retained native scene behind ABI v18, reducing each frame to one Python-to-native scene call. Scenes without bitmap-backed mask or blend captures are additionally compiled into reusable Direct2D command lists.
