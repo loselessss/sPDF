@@ -82,6 +82,46 @@ class ReaderViewTests(unittest.TestCase):
         self.assertTrue(self.view._refine_timer.isActive())
         self.assertEqual([call[0] for call in zooms], [2, 8])
 
+    def test_animated_zoom_reports_actual_intermediate_scale_and_exact_target(self):
+        from PyQt5.QtCore import QPoint
+        from PyQt5.QtTest import QSignalSpy
+        self.view.preview_zoom(2)
+        self.view.centerOn(600, 700)
+        cursor = QPoint(260, 240)
+        before = self.view.canvas._page_point(self.view.mapToScene(cursor))
+        zooms = QSignalSpy(self.view.zoom_changed)
+        with patch("pdfeditor.reader_view.time.monotonic",
+                   side_effect=(100.0, 100.06, 100.12)):
+            self.view._start_zoom_animation(4, cursor)
+            self.view._zoom_animation_timer.stop()
+            self.view._animate_zoom_step()
+            middle = self.view.zoom
+            self.assertGreater(middle, 2)
+            self.assertLess(middle, 4)
+            self.assertEqual(zooms[-1][0], middle)
+            mapped = self.view.canvas._page_point(self.view.mapToScene(cursor))
+            self.assertLess((mapped[1] - before[1]).manhattanLength(), 0.3)
+            self.view._zoom_animation_timer.stop()
+            self.view._animate_zoom_step()
+        self.assertEqual(self.view.zoom, 4)
+        self.assertEqual(self.view.canvas.zoom, 4)
+        self.assertEqual(zooms[-1][0], 4)
+        after = self.view.canvas._page_point(self.view.mapToScene(cursor))
+        self.assertLess((after[1] - before[1]).manhattanLength(), 0.3)
+
+    def test_animated_zoom_timer_reaches_exact_target(self):
+        from PyQt5.QtCore import QPoint
+        from PyQt5.QtTest import QTest
+        cursor = QPoint(260, 240)
+        before = self.view.canvas._page_point(self.view.mapToScene(cursor))
+        self.view._start_zoom_animation(2, cursor)
+        QTest.qWait(180)
+        self.assertFalse(self.view._zoom_animation_timer.isActive())
+        self.assertEqual(self.view.zoom, 2)
+        self.assertEqual(self.view.canvas.zoom, 2)
+        after = self.view.canvas._page_point(self.view.mapToScene(cursor))
+        self.assertLess((after[1] - before[1]).manhattanLength(), 0.3)
+
     def test_only_requested_pages_have_bounded_previews(self):
         from pdfeditor.reader_view import PREVIEW_PIXELS
         with patch.object(self.doc, "render", wraps=self.doc.render) as render:

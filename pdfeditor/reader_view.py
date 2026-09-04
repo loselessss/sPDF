@@ -8,6 +8,7 @@ between tiles without sharing documents with workers or delaying tab close.
 from collections import OrderedDict
 import math
 import os
+import time
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (QColor, QImage, QMouseEvent, QPainter, QPixmap,
@@ -27,6 +28,9 @@ MAX_VISIBLE_TILES = 48
 GPU_SCENE_TIMEOUT_SECONDS = 1.0
 FORCED_GPU_SCENE_TIMEOUT_SECONDS = 10.0
 VECTOR_SCENE_REFINE_DELAY_MS = 120
+ZOOM_ANIMATION_DURATION_SECONDS = 0.12
+ZOOM_ANIMATION_FRAME_MS = 16
+_CURRENT_ZOOM_ANCHOR = object()
 
 
 def opengl_allowed():
@@ -113,6 +117,14 @@ class ReaderPageView(QGraphicsView):
         self._vector_refine_pages = []
         self._vector_refine_document = None
         self._vector_refine_scale = 1.0
+        self._zoom_animation_timer = QTimer(self)
+        self._zoom_animation_timer.setSingleShot(True)
+        self._zoom_animation_timer.timeout.connect(self._animate_zoom_step)
+        self._zoom_animation_start = self.zoom
+        self._zoom_animation_target = self.zoom
+        self._zoom_animation_position = None
+        self._zoom_animation_anchor = None
+        self._zoom_animation_started = 0.0
         self.canvas = _ReaderCanvas(self)
         enable_opengl = opengl_allowed() if use_opengl is None else use_opengl
         render_mode = settings.render_backend() if use_opengl is None else "auto"
@@ -767,13 +779,15 @@ class ReaderPageView(QGraphicsView):
         self.viewport().update()
         self.viewport_changed.emit()
 
-    def preview_zoom(self, zoom, position=None):
+    def _apply_preview_zoom(
+            self, zoom, position=None, anchor=_CURRENT_ZOOM_ANCHOR):
         if position is None:
             position = self.viewport().rect().center()
-        anchor = self.canvas._page_point(self.mapToScene(position))
+        if anchor is _CURRENT_ZOOM_ANCHOR:
+            anchor = self.canvas._page_point(self.mapToScene(position))
         old_zoom = self.zoom
         self.zoom = max(self.ZOOM_MIN, min(self.ZOOM_MAX, zoom))
-        self.stop_rendering()
+        self.stop_rendering(keep_zoom_animation=True)
         self._layout_pages()
         if anchor is not None:
             page, point = anchor
@@ -792,6 +806,39 @@ class ReaderPageView(QGraphicsView):
         self.viewport_changed.emit()
         if self.zoom != old_zoom:
             self.zoom_changed.emit(self.zoom)
+
+    def preview_zoom(self, zoom, position=None):
+        self._zoom_animation_timer.stop()
+        self._zoom_animation_target = max(
+            self.ZOOM_MIN, min(self.ZOOM_MAX, zoom))
+        self._apply_preview_zoom(self._zoom_animation_target, position)
+
+    def _start_zoom_animation(self, zoom, position=None):
+        target = max(self.ZOOM_MIN, min(self.ZOOM_MAX, zoom))
+        if target == self.zoom:
+            self._zoom_animation_timer.stop()
+            return
+        if position is None:
+            position = self.viewport().rect().center()
+        self._zoom_animation_start = self.zoom
+        self._zoom_animation_target = target
+        self._zoom_animation_position = position
+        self._zoom_animation_anchor = self.canvas._page_point(
+            self.mapToScene(position))
+        self._zoom_animation_started = time.monotonic()
+        self._zoom_animation_timer.start(0)
+
+    def _animate_zoom_step(self):
+        elapsed = max(0.0, time.monotonic() - self._zoom_animation_started)
+        progress = min(1.0, elapsed / ZOOM_ANIMATION_DURATION_SECONDS)
+        eased = 1.0 - (1.0 - progress) ** 3
+        zoom = (self._zoom_animation_target if progress >= 1.0 else
+                self._zoom_animation_start +
+                (self._zoom_animation_target - self._zoom_animation_start) * eased)
+        self._apply_preview_zoom(
+            zoom, self._zoom_animation_position, self._zoom_animation_anchor)
+        if progress < 1.0:
+            self._zoom_animation_timer.start(ZOOM_ANIMATION_FRAME_MS)
 
     def _visible_scene_rect(self):
         return self.mapToScene(self.viewport().rect()).boundingRect()
@@ -913,10 +960,12 @@ class ReaderPageView(QGraphicsView):
         self._tile_bytes = 0
         self._wanted.clear()
 
-    def stop_rendering(self):
+    def stop_rendering(self, *, keep_zoom_animation=False):
         self._refine_timer.stop()
         self._tile_timer.stop()
         self._vector_refine_timer.stop()
+        if not keep_zoom_animation:
+            self._zoom_animation_timer.stop()
         self._pending.clear()
         self._vector_refine_pages.clear()
 
@@ -1004,10 +1053,12 @@ class ReaderPageView(QGraphicsView):
             super().wheelEvent(event)
             return
         if event.modifiers() & (Qt.ControlModifier | Qt.AltModifier):
-            zoom = (self.zoom * (1.25 if delta > 0 else 0.8)
+            base = (self._zoom_animation_target
+                    if self._zoom_animation_timer.isActive() else self.zoom)
+            zoom = (base * (1.25 if delta > 0 else 0.8)
                     if event.modifiers() & Qt.ControlModifier else
-                    round(self.zoom + (0.01 if delta > 0 else -0.01), 2))
-            self.preview_zoom(zoom, event.pos())
+                    round(base + (0.01 if delta > 0 else -0.01), 2))
+            self._start_zoom_animation(zoom, event.pos())
             event.accept()
             return
         bar = self.verticalScrollBar()

@@ -1,4 +1,4 @@
-# sPDF 1.29.1 Release Notes
+# sPDF 1.29.2 Release Notes
 
 Release date: 2026-09-04
 
@@ -55,3 +55,7 @@ Release date: 2026-09-04
 - Linear and radial gradient primitives now remove redundant surrounding clip wrappers when the clip matches the gradient geometry, reducing scene commands on pages with many gradients.
 - A disabled-by-default experimental similar-color band merge lets GPU renderer comparisons use a separate scene cache from the default exact-color path.
 - Interactive zoom now transforms the current GPU scene immediately and waits until zoom input settles before refreshing image quality, avoiding scene extraction on every zoom step while preserving exact zoom values and page coordinates.
+
+## 1.29.2 improvement - 2026-09-04
+
+- Ctrl/Alt wheel zoom now animates the current GPU scene through exact intermediate page transforms and finishes at the requested zoom value. Image-quality scene refresh remains deferred until input settles.
