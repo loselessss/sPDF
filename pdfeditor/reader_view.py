@@ -26,6 +26,7 @@ VIEWPORT_PIXELS = 6_000_000
 MAX_VISIBLE_TILES = 48
 GPU_SCENE_TIMEOUT_SECONDS = 1.0
 FORCED_GPU_SCENE_TIMEOUT_SECONDS = 10.0
+VECTOR_SCENE_REFINE_DELAY_MS = 120
 
 
 def opengl_allowed():
@@ -105,6 +106,13 @@ class ReaderPageView(QGraphicsView):
         self._refine_timer = QTimer(self)
         self._refine_timer.setSingleShot(True)
         self._refine_timer.timeout.connect(self._plan_tiles)
+        self._vector_refine_timer = QTimer(self)
+        self._vector_refine_timer.setSingleShot(True)
+        self._vector_refine_timer.timeout.connect(
+            self._refresh_next_vector_page)
+        self._vector_refine_pages = []
+        self._vector_refine_document = None
+        self._vector_refine_scale = 1.0
         self.canvas = _ReaderCanvas(self)
         enable_opengl = opengl_allowed() if use_opengl is None else use_opengl
         render_mode = settings.render_backend() if use_opengl is None else "auto"
@@ -207,6 +215,41 @@ class ReaderPageView(QGraphicsView):
             self._discard_native_vector_page(page)
         self._vector_pages[page] = refreshed
         return refreshed
+
+    def _schedule_vector_refine(self, delay=VECTOR_SCENE_REFINE_DELAY_MS):
+        self._vector_refine_timer.stop()
+        self._vector_refine_pages.clear()
+        self._vector_refine_document = self._document
+        self._vector_refine_scale = self._vector_raster_scale()
+        if self._document is None or not self.isVisible():
+            return
+        exposed = self._visible_scene_rect()
+        candidates = []
+        for page, _preview, rect in self.canvas._pages:
+            scene = self._vector_pages.get(page)
+            if scene is None or not scene.supported or \
+                    "image-downsample" not in scene.features or \
+                    scene.raster_scale >= self._vector_refine_scale:
+                continue
+            candidates.append((not rect.intersects(exposed), page))
+        self._vector_refine_pages = [page for _hidden, page in sorted(candidates)]
+        if self._vector_refine_pages:
+            self._vector_refine_timer.start(max(0, int(delay)))
+
+    def _refresh_next_vector_page(self):
+        if not self._vector_refine_pages or \
+                self._document is not self._vector_refine_document or \
+                self._vector_raster_scale() != self._vector_refine_scale:
+            self._vector_refine_pages.clear()
+            return
+        page = self._vector_refine_pages.pop(0)
+        try:
+            self._refresh_vector_page_for_zoom(page)
+        except Exception as error:
+            self.render_failed.emit(str(error))
+        self.viewport().update()
+        if self._vector_refine_pages:
+            self._vector_refine_timer.start(0)
 
     def rasterization_device(self, page):
         """Last completed page frame, not the device used to composite tiles.
@@ -407,7 +450,7 @@ class ReaderPageView(QGraphicsView):
             if isinstance(item, MaskEnd):
                 clip_groups.append(composite_groups)
                 kind = "composite_mask_end" if composite_groups else "mask_end"
-                draws.append((kind, None))
+                draws.append((kind, item.transfer))
                 index += 1
                 continue
             if isinstance(item, VectorImage):
@@ -513,9 +556,9 @@ class ReaderPageView(QGraphicsView):
             if kind in ("mask_end", "composite_mask_end"):
                 self._d2d_surface.set_transform(1, 0, 0, 1, 0, 0)
                 if kind == "composite_mask_end":
-                    self._d2d_surface.end_composite_mask()
+                    self._d2d_surface.end_composite_mask(resource)
                 else:
-                    self._d2d_surface.end_mask()
+                    self._d2d_surface.end_mask(resource)
                 continue
             if kind == "image":
                 opacity, transform, interpolate = values
@@ -583,7 +626,7 @@ class ReaderPageView(QGraphicsView):
             transform = self._page_transforms[page]
             self._set_page_transform(transform)
             width, height = self._page_sizes[page]
-            vector_scene = self._refresh_vector_page_for_zoom(page)
+            vector_scene = self._vector_pages.get(page)
             if vector_scene is not None and vector_scene.supported:
                 self._draw_vector_page(page, vector_scene)
                 rasterized[page] = ("CPU+GPU" if "shading" in vector_scene.features else "GPU")
@@ -744,6 +787,8 @@ class ReaderPageView(QGraphicsView):
                         self.verticalScrollBar().value() + round(target.y() - actual.y()))
                     break
         self._schedule_refine(90)
+        if self.zoom != old_zoom:
+            self._schedule_vector_refine()
         self.viewport_changed.emit()
         if self.zoom != old_zoom:
             self.zoom_changed.emit(self.zoom)
@@ -871,7 +916,9 @@ class ReaderPageView(QGraphicsView):
     def stop_rendering(self):
         self._refine_timer.stop()
         self._tile_timer.stop()
+        self._vector_refine_timer.stop()
         self._pending.clear()
+        self._vector_refine_pages.clear()
 
     def clear(self):
         self.stop_rendering()

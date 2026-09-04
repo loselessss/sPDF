@@ -418,6 +418,11 @@ class ReaderViewTests(unittest.TestCase):
         with patch.object(self.doc, "gpu_vector_page", return_value=high) as vector_page:
             self.view.preview_zoom(2)
             self.view._paint_d2d()
+            vector_page.assert_not_called()
+            self.assertTrue(self.view._vector_refine_timer.isActive())
+            self.view._vector_refine_timer.stop()
+            self.view._refresh_next_vector_page()
+            self.view._paint_d2d()
 
         from pdfeditor.reader_view import GPU_SCENE_TIMEOUT_SECONDS
         vector_page.assert_called_once_with(
@@ -458,6 +463,10 @@ class ReaderViewTests(unittest.TestCase):
                 self.doc, "gpu_vector_page",
                 return_value=timed_out) as vector_page:
             self.view.preview_zoom(2)
+            self.view._paint_d2d()
+            vector_page.assert_not_called()
+            self.view._vector_refine_timer.stop()
+            self.view._refresh_next_vector_page()
             self.view._paint_d2d()
 
         from pdfeditor.reader_view import GPU_SCENE_TIMEOUT_SECONDS
@@ -784,7 +793,8 @@ class ReaderViewTests(unittest.TestCase):
             ("begin-mask", *args))
         surface.fill_path.side_effect = lambda resource, color: calls.append(
             ("fill", resource, color))
-        surface.end_composite_mask.side_effect = lambda: calls.append(("end-mask",))
+        surface.end_composite_mask.side_effect = lambda transfer=(): calls.append(
+            ("end-mask", transfer))
         surface.end_clip_group.side_effect = lambda: calls.append(("pop-mask",))
         self.view._d2d_surface = surface
         self.view._d2d_requested = True
@@ -796,7 +806,7 @@ class ReaderViewTests(unittest.TestCase):
         self.assertEqual(calls, [
             ("begin-mask", (0, 0, 100, 80), True, 0xff000000),
             ("fill", path, 0xffffffff),
-            ("end-mask",),
+            ("end-mask", ()),
             ("fill", path, 0xffff0000),
             ("pop-mask",),
         ])

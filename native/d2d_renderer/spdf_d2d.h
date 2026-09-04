@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 16;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 17;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -141,7 +141,8 @@ SPDF_D2D_API std::int32_t spdf_d2d_begin_mask(
     float bottom,
     std::uint32_t luminosity,
     std::uint32_t background_argb) noexcept;
-SPDF_D2D_API std::int32_t spdf_d2d_end_mask(void* surface) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_end_mask(
+    void* surface, const float* alpha_transfer, std::uint32_t transfer_count) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_begin_composite_group(
     void* surface, std::uint32_t mode, float opacity, std::uint32_t knockout) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_end_composite_group(void* surface) noexcept;
@@ -150,7 +151,8 @@ SPDF_D2D_API std::int32_t spdf_d2d_end_clip_group(void* surface) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_begin_composite_mask(
     void* surface, float left, float top, float right, float bottom,
     std::uint32_t luminosity, std::uint32_t background_argb) noexcept;
-SPDF_D2D_API std::int32_t spdf_d2d_end_composite_mask(void* surface) noexcept;
+SPDF_D2D_API std::int32_t spdf_d2d_end_composite_mask(
+    void* surface, const float* alpha_transfer, std::uint32_t transfer_count) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_set_luminosity_lut(
     void* surface, const unsigned char* data, std::uint32_t size, std::uint32_t edge) noexcept;
 SPDF_D2D_API std::int32_t spdf_d2d_read_pixels(

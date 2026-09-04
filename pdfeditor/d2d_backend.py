@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 16
+ABI_VERSION = 17
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -112,7 +112,8 @@ def _load_library(path):
     library.spdf_d2d_begin_mask.argtypes = [
         c_void_p, c_float, c_float, c_float, c_float, c_uint32, c_uint32]
     library.spdf_d2d_begin_mask.restype = c_int32
-    library.spdf_d2d_end_mask.argtypes = [c_void_p]
+    library.spdf_d2d_end_mask.argtypes = [
+        c_void_p, POINTER(c_float), c_uint32]
     library.spdf_d2d_end_mask.restype = c_int32
     library.spdf_d2d_begin_composite_group.argtypes = [
         c_void_p, c_uint32, c_float, c_uint32]
@@ -126,7 +127,8 @@ def _load_library(path):
     library.spdf_d2d_begin_composite_mask.argtypes = [
         c_void_p, c_float, c_float, c_float, c_float, c_uint32, c_uint32]
     library.spdf_d2d_begin_composite_mask.restype = c_int32
-    library.spdf_d2d_end_composite_mask.argtypes = [c_void_p]
+    library.spdf_d2d_end_composite_mask.argtypes = [
+        c_void_p, POINTER(c_float), c_uint32]
     library.spdf_d2d_end_composite_mask.restype = c_int32
     library.spdf_d2d_set_luminosity_lut.argtypes = [c_void_p, POINTER(c_ubyte), c_uint32, c_uint32]
     library.spdf_d2d_set_luminosity_lut.restype = c_int32
@@ -377,11 +379,20 @@ class D2DSurface:
                 int(background_argb) & 0xffffffff),
             "Direct2D mask capture start")
 
-    def end_mask(self):
+    def _transfer_table(self, transfer):
+        if not transfer:
+            return None, 0
+        values = tuple(float(value) for value in transfer)
+        if len(values) < 2:
+            raise ValueError("invalid mask transfer table")
+        return (c_float * len(values))(*values), len(values)
+
+    def end_mask(self, transfer=()):
         if self.closed:
             raise RuntimeError("Direct2D surface is closed")
+        table, size = self._transfer_table(transfer)
         _check_hresult(
-            self._library.spdf_d2d_end_mask(self._handle),
+            self._library.spdf_d2d_end_mask(self._handle, table, size),
             "Direct2D mask capture end")
 
     def begin_composite_group(self, mode, opacity, knockout=False):
@@ -424,11 +435,13 @@ class D2DSurface:
             self._handle, *map(float, area), int(bool(luminosity)), int(background_argb)),
             "Direct2D composite mask start")
 
-    def end_composite_mask(self):
+    def end_composite_mask(self, transfer=()):
         if self.closed:
             raise RuntimeError("Direct2D surface is closed")
-        _check_hresult(self._library.spdf_d2d_end_composite_mask(self._handle),
-                       "Direct2D composite mask end")
+        table, size = self._transfer_table(transfer)
+        _check_hresult(self._library.spdf_d2d_end_composite_mask(
+            self._handle, table, size),
+            "Direct2D composite mask end")
 
     def read_pixels_bgra(self, width, height):
         """Explicit test/diagnostic readback, never part of ordinary repaint."""

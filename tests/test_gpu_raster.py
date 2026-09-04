@@ -324,6 +324,110 @@ def soft_mask_pdf_bytes(transfer_function=None):
     return bytes(data)
 
 
+def tiling_pattern_pdf_bytes():
+    page_content = b"/P1 scn 0 0 32 32 re f\n"
+    pattern_content = (
+        b"1 0 0 rg 0 0 4 4 re f\n"
+        b"0 0 1 rg 4 4 4 4 re f\n")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 32 32] "
+        b"/Resources << /ColorSpace << /PatternCS [/Pattern /DeviceRGB] >> "
+        b"/Pattern << /P1 5 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+        b"<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 "
+        b"/BBox [0 0 8 8] /XStep 8 /YStep 8 /Resources << >> "
+        b"/Matrix [1 0 0 1 0 0] /Length " +
+        str(len(pattern_content)).encode() +
+        b" >>\nstream\n" + pattern_content + b"endstream",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
+def baked_gradient_band_pdf_bytes():
+    bands = []
+    for index in range(12):
+        bands.append(
+            f"q 1 0 0 1 {index * 2} 0 cm "
+            "0.3 0.4 0.7 rg 0 0 1.8 20 re f Q\n".encode())
+    bands.append(b"0.8 0.2 0.1 rg 30 0 5 20 re f\n")
+    page_content = b"".join(bands)
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 40 20] "
+        b"/Resources << >> /Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
+def similar_color_band_pdf_bytes():
+    bands = []
+    for index in range(12):
+        red = 0.30 + index * 0.002
+        bands.append(
+            f"{red:.3f} 0.4 0.7 rg {index * 2} 0 1.8 20 re f\n".encode())
+    page_content = b"".join(bands)
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 40 20] "
+        b"/Resources << >> /Contents 4 0 R >>",
+        f"<< /Length {len(page_content)} >>\nstream\n".encode() +
+        page_content + b"endstream",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode())
+        data.extend(obj)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(data)
+
+
 def cmyk_group_pdf_bytes(alpha=1.0, blend_mode="Normal"):
     page_content = b"q /GS1 gs /Fm1 Do Q\n"
     form_content = b"0 1 1 0 k 20 20 180 140 re f\n"
@@ -399,7 +503,10 @@ def nonisolated_single_path_pdf_bytes(alpha=0.4, knockout=False):
 
 
 def small_overlapping_nonisolated_group_pdf_bytes():
-    page_content = b"0.2 0.4 0.6 rg 0 0 300 240 re f\nq /GS1 gs /Fm1 Do Q\n"
+    page_content = (
+        b"0.2 0.4 0.6 rg 0 0 300 240 re f\n"
+        b"q /GS1 gs /Fm1 Do Q\n"
+        b"0 1 0 rg 90 90 8 8 re f\n")
     form_content = (
         b"/Half gs 1 0 0 rg 80 80 25 25 re f\n"
         b"/Half gs 0 0 1 rg 92 92 25 25 re f\n")
@@ -550,15 +657,134 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertTrue(any(isinstance(item, MaskEnd)
                             for item in scene.drawables))
 
-    def test_nonidentity_soft_mask_transfer_function_uses_cpu_fallback(self):
-        from pdfeditor.gpu_raster import vector_page_from_pymupdf
+    def test_nonidentity_soft_mask_transfer_function_stays_on_gpu(self):
+        from pdfeditor.gpu_raster import MaskEnd, vector_page_from_pymupdf
         inverse = (b"<< /FunctionType 2 /Domain [0 1] /C0 [1] "
                    b"/C1 [0] /N 1 >>")
         with fitz.open(stream=soft_mask_pdf_bytes(inverse),
                        filetype="pdf") as pdf:
             scene = vector_page_from_pymupdf(pdf[0])
-        self.assertFalse(scene.supported)
-        self.assertIn("soft-mask-transfer-function", scene.reason)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("soft-mask-transfer-function", scene.features)
+        mask_end = next(item for item in scene.drawables
+                        if isinstance(item, MaskEnd))
+        self.assertEqual(len(mask_end.transfer), 256)
+        self.assertAlmostEqual(mask_end.transfer[0], 1.0)
+        self.assertAlmostEqual(mask_end.transfer[-1], 0.0)
+
+    def test_colored_tiling_pattern_expands_to_gpu_scene(self):
+        from pdfeditor.gpu_raster import (ClipPop, ClipPush, VectorPath,
+                                          vector_page_from_pymupdf)
+        with fitz.open(stream=tiling_pattern_pdf_bytes(),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("tile-pattern", scene.features)
+        self.assertIn("vector-tile-pattern", scene.features)
+        self.assertIsInstance(scene.drawables[0], ClipPush)
+        self.assertIsInstance(scene.drawables[-1], ClipPop)
+        paths = [item for item in scene.drawables
+                 if isinstance(item, VectorPath)]
+        self.assertGreaterEqual(len(paths), 8)
+        self.assertTrue(any(item.fill_argb == 0xffff0000 for item in paths))
+        self.assertTrue(any(item.fill_argb == 0xff0000ff for item in paths))
+
+    def test_baked_gradient_bands_merge_same_color_fill_paths(self):
+        from pdfeditor.gpu_raster import VectorPath, vector_page_from_pymupdf
+        with fitz.open(stream=baked_gradient_band_pdf_bytes(),
+                       filetype="pdf") as pdf:
+            scene = vector_page_from_pymupdf(pdf[0])
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertIn("baked-gradient-band-merge", scene.features)
+        paths = [item for item in scene.drawables
+                 if isinstance(item, VectorPath)]
+        self.assertEqual(len(paths), 2)
+        self.assertIsNone(paths[0].transform)
+        self.assertEqual(paths[0].fill_argb, 0xff4d66b2)
+        self.assertEqual(paths[1].fill_argb, 0xffcc331a)
+        self.assertGreater(len(paths[0].commands), len(paths[1].commands))
+
+    def test_aggressive_band_merge_compacts_similar_color_fill_paths(self):
+        from pdfeditor.gpu_raster import VectorPath, vector_page_from_pymupdf
+        with fitz.open(stream=similar_color_band_pdf_bytes(),
+                       filetype="pdf") as pdf:
+            conservative = vector_page_from_pymupdf(pdf[0])
+            aggressive = vector_page_from_pymupdf(
+                pdf[0], aggressive_band_merge=True)
+        self.assertTrue(conservative.supported, conservative.reason)
+        self.assertTrue(aggressive.supported, aggressive.reason)
+        self.assertNotIn("aggressive-band-merge", conservative.features)
+        self.assertIn("aggressive-band-merge", aggressive.features)
+        conservative_paths = [item for item in conservative.drawables
+                              if isinstance(item, VectorPath)]
+        aggressive_paths = [item for item in aggressive.drawables
+                            if isinstance(item, VectorPath)]
+        self.assertGreater(len(conservative_paths), 1)
+        self.assertEqual(len(aggressive_paths), 1)
+        self.assertNotEqual(
+            aggressive_paths[0].fill_argb, conservative_paths[0].fill_argb)
+
+    def test_aggressive_band_merge_does_not_chain_beyond_tolerance(self):
+        from pdfeditor.gpu_raster import (
+            VectorPath, _compact_consecutive_fill_paths)
+        paths = tuple(VectorPath(
+            (("move", index * 2.0, 0.0),
+             ("line", index * 2.0 + 1.0, 0.0),
+             ("line", index * 2.0 + 1.0, 1.0),
+             ("line", index * 2.0, 1.0), ("close",)),
+            fill_argb=color)
+            for index, color in enumerate(
+                (0xff000000, 0xff0a0a0a, 0xff141414)))
+        compacted, _fill, _text, aggressive = \
+            _compact_consecutive_fill_paths(
+                paths, aggressive_band_merge=True)
+        self.assertTrue(aggressive)
+        self.assertEqual(len(compacted), 2)
+
+    def test_overlapping_text_outlines_are_not_merged(self):
+        from pdfeditor.gpu_raster import (
+            VectorPath, _compact_consecutive_fill_paths)
+        commands = (("move", 0.0, 0.0), ("line", 2.0, 0.0),
+                    ("line", 2.0, 2.0), ("line", 0.0, 2.0),
+                    ("close",))
+        paths = (
+            VectorPath(commands, fill_argb=0x803366cc,
+                       transform=(1, 0, 0, 1, 0, 0), groupable=True),
+            VectorPath(commands, fill_argb=0x803366cc,
+                       transform=(1, 0, 0, 1, 1, 0), groupable=True))
+        compacted, _fill, text, _aggressive = \
+            _compact_consecutive_fill_paths(paths)
+        self.assertFalse(text)
+        self.assertEqual(compacted, paths)
+
+    def test_redundant_rect_clip_is_removed_from_radial_gradient(self):
+        from pdfeditor.gpu_raster import (
+            ClipPop, ClipPush, VectorRadialGradient,
+            _compact_gradient_clip_triplets, _ellipse_commands,
+            _rect_commands)
+        gradient = VectorRadialGradient(
+            _ellipse_commands((1, 0, 0, 1, 0, 0), 5, 5, 5),
+            (5, 5), (5, 5), (5, 5), ((0.0, 0xff000000),
+                                           (1.0, 0xffffffff)))
+        compacted, merged = _compact_gradient_clip_triplets((
+            ClipPush(_rect_commands(0, 0, 10, 10)), gradient, ClipPop()))
+        self.assertTrue(merged)
+        self.assertEqual(compacted, (gradient,))
+
+    def test_radial_gradient_keeps_clip_when_rect_corners_leave_ellipse(self):
+        from pdfeditor.gpu_raster import (
+            ClipPop, ClipPush, VectorRadialGradient,
+            _compact_gradient_clip_triplets, _ellipse_commands,
+            _rect_commands)
+        gradient = VectorRadialGradient(
+            _ellipse_commands((1, 0, 0, 1, 0, 0), 0, 0, 5),
+            (0, 0), (0, 0), (5, 5), ((0.0, 0xff000000),
+                                           (1.0, 0xffffffff)))
+        items = (ClipPush(_rect_commands(-4, -4, 4, 4)),
+                 gradient, ClipPop())
+        compacted, merged = _compact_gradient_clip_triplets(items)
+        self.assertFalse(merged)
+        self.assertEqual(compacted, items)
 
     def test_opaque_normal_cmyk_transparency_wrapper_stays_on_gpu(self):
         from pdfeditor.gpu_raster import vector_page_from_pymupdf
@@ -649,7 +875,8 @@ class GpuRasterSceneTests(unittest.TestCase):
                              for item in scene.drawables))
 
     def test_small_overlapping_knockout_group_becomes_approximate_cpu_island(self):
-        from pdfeditor.gpu_raster import VectorImage, vector_page_from_pymupdf
+        from pdfeditor.gpu_raster import (VectorImage, VectorPath,
+                                          vector_page_from_pymupdf)
         with fitz.open(stream=small_overlapping_nonisolated_group_pdf_bytes(),
                        filetype="pdf") as pdf:
             scene = vector_page_from_pymupdf(pdf[0])
@@ -658,6 +885,9 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIn("cpu-island-approximate", scene.features)
         self.assertTrue(any(isinstance(item, VectorImage)
                             for item in scene.drawables))
+        self.assertFalse(any(isinstance(item, VectorPath) and
+                             item.fill_argb == 0xff00ff00
+                             for item in scene.drawables))
 
     def test_single_draw_nonisolated_opacity_group_is_flattened(self):
         from pdfeditor.gpu_raster import GroupPush, VectorPath, vector_page_from_pymupdf
@@ -793,6 +1023,10 @@ class GpuRasterSceneTests(unittest.TestCase):
                     stream=downsampled_image_pdf_bytes(),
                     filetype="pdf") as downsampled:
                 pdf.insert_pdf(downsampled)
+            with fitz.open(
+                    stream=similar_color_band_pdf_bytes(),
+                    filetype="pdf") as similar:
+                pdf.insert_pdf(similar)
             pdf.save(self.path)
         self.document = Document(str(self.path), read_only=True)
 
@@ -884,10 +1118,11 @@ class GpuRasterSceneTests(unittest.TestCase):
     def test_text_page_uses_exact_glyph_outlines(self):
         scene = self.document.gpu_vector_page(1)
         self.assertTrue(scene.supported, scene.reason)
-        self.assertEqual(len(scene.paths), 7)
+        self.assertIn("text-outline-merge", scene.features)
+        self.assertEqual(len(scene.paths), 1)
         self.assertTrue(all(path.fill_argb == 0xff3366cc
                             for path in scene.paths))
-        self.assertTrue(all(path.transform is not None for path in scene.paths))
+        self.assertTrue(all(path.transform is None for path in scene.paths))
         kinds = {command[0] for path in scene.paths
                  for command in path.commands}
         self.assertIn("move", kinds)
@@ -919,15 +1154,27 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIsNot(image, scaled)
         self.assertIs(scaled, self.document.gpu_vector_page(15, 2.0))
 
+    def test_aggressive_band_merge_uses_separate_scene_cache_key(self):
+        self.document.invalidate_render(16)
+        normal = self.document.gpu_vector_page(16)
+        with patch.dict("os.environ", {"SPDF_GPU_AGGRESSIVE_BAND_MERGE": "1"}):
+            aggressive = self.document.gpu_vector_page(16)
+            self.assertIs(aggressive, self.document.gpu_vector_page(16))
+        self.assertIsNot(normal, aggressive)
+        self.assertNotIn("aggressive-band-merge", normal.features)
+        self.assertIn("aggressive-band-merge", aggressive.features)
+        self.assertIn((16, 1.0, False), self.document._gpu_vector_cache)
+        self.assertIn((16, 1.0, True), self.document._gpu_vector_cache)
+
     def test_scaled_image_scene_cache_evicts_old_quality_levels(self):
         self.document.invalidate_render(15)
         with patch("pdfeditor.core.GPU_VECTOR_CACHE_BYTES", 1500):
             one = self.document.gpu_vector_page(15, 1.0)
             two = self.document.gpu_vector_page(15, 2.0)
             four = self.document.gpu_vector_page(15, 4.0)
-        self.assertNotIn((15, 1.0), self.document._gpu_vector_cache)
-        self.assertNotIn((15, 2.0), self.document._gpu_vector_cache)
-        self.assertIn((15, 4.0), self.document._gpu_vector_cache)
+        self.assertNotIn((15, 1.0, False), self.document._gpu_vector_cache)
+        self.assertNotIn((15, 2.0, False), self.document._gpu_vector_cache)
+        self.assertIn((15, 4.0, False), self.document._gpu_vector_cache)
         self.assertIs(four, self.document.gpu_vector_page(15, 4.0))
         self.assertLessEqual(
             self.document._gpu_vector_cache_bytes,
@@ -940,7 +1187,8 @@ class GpuRasterSceneTests(unittest.TestCase):
         eight = self.document.gpu_vector_page(15, 8.0)
         sixteen = self.document.gpu_vector_page(15, 16.0)
         self.assertIs(eight, sixteen)
-        self.assertEqual(list(self.document._gpu_vector_cache), [(15, 8.0)])
+        self.assertEqual(
+            list(self.document._gpu_vector_cache), [(15, 8.0, False)])
 
     def test_path_clip_is_recorded_in_display_order(self):
         from pdfeditor.gpu_raster import ClipPop, ClipPush, VectorPath
@@ -1006,8 +1254,12 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIn("shading", scene.features)
         self.assertIn("vector-shading", scene.features)
         self.assertIn("gradient-primitive", scene.features)
+        self.assertIn("gradient-clip-merge", scene.features)
         self.assertIn("vector-clip", scene.features)
-        self.assertIsInstance(scene.drawables[0], ClipPush)
+        self.assertEqual(sum(isinstance(item, ClipPush)
+                             for item in scene.drawables), 1)
+        self.assertEqual(sum(isinstance(item, ClipPop)
+                             for item in scene.drawables), 1)
         gradients = [item for item in scene.drawables
                      if isinstance(item, VectorLinearGradient)]
         self.assertEqual(len(gradients), 1)
@@ -1020,7 +1272,6 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertEqual(bands, [])
         self.assertFalse(any(isinstance(item, VectorImage)
                              for item in scene.drawables))
-        self.assertIsInstance(scene.drawables[-1], ClipPop)
 
     def test_linear_gradient_does_not_use_image_scene_limit(self):
         self.document.invalidate_render(7)

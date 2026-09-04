@@ -18,6 +18,11 @@ ANTIALIAS_LEVEL = 8
 GPU_VECTOR_CACHE_BYTES = 128 * 1024 * 1024
 
 
+def _aggressive_gpu_band_merge_enabled():
+    return os.environ.get("SPDF_GPU_AGGRESSIVE_BAND_MERGE", "").lower() in \
+        ("1", "true", "yes", "on")
+
+
 def _gpu_scene_cost(scene):
     return sum(
         int(item.width) * int(item.height) * 4
@@ -210,11 +215,14 @@ class Document:
     def gpu_vector_page(self, index, raster_scale=1.0, timeout_seconds=None):
         """Return a conservative Direct2D scene or an unsupported result."""
         scale = max(1.0, float(raster_scale))
-        key = (index, scale)
+        aggressive_band_merge = _aggressive_gpu_band_merge_enabled()
+        key = (index, scale, aggressive_band_merge)
         scene = self._gpu_vector_cache.get(key)
         if scene is None:
             for cached_key, candidate in reversed(self._gpu_vector_cache.items()):
-                if cached_key[0] != index or not candidate.supported:
+                if cached_key[0] != index or \
+                        cached_key[2] != aggressive_band_merge or \
+                        not candidate.supported:
                     continue
                 if candidate.raster_scale >= scale or \
                         "image-downsample" not in candidate.features:
@@ -223,7 +231,8 @@ class Document:
         if scene is None:
             from .gpu_raster import vector_page_from_pymupdf
             scene = vector_page_from_pymupdf(
-                self._doc[index], scale, timeout_seconds=timeout_seconds)
+                self._doc[index], scale, timeout_seconds=timeout_seconds,
+                aggressive_band_merge=aggressive_band_merge)
             cost = _gpu_scene_cost(scene)
             self._gpu_vector_cache[key] = scene
             self._gpu_vector_cache_bytes += cost

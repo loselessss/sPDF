@@ -24,6 +24,8 @@ GPU_IMAGE_DOWNSAMPLE_OVERSAMPLE = 1.0
 CPU_ISLAND_BBOX_PAD = 2.0
 MAX_CPU_ISLAND_PAGE_COVERAGE = 0.85
 MAX_APPROXIMATE_CPU_ISLAND_PAGE_COVERAGE = 0.15
+MAX_MERGED_FILL_PATH_COMMANDS = 8192
+AGGRESSIVE_BAND_COLOR_TOLERANCE = 12
 UNIT_RECT_COMMANDS = (
     ("move", 0.0, 0.0),
     ("line", 1.0, 0.0),
@@ -124,7 +126,7 @@ class MaskBegin:
 
 @dataclass(frozen=True)
 class MaskEnd:
-    pass
+    transfer: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,16 @@ class VectorPage:
     @property
     def drawables(self):
         return self.items or self.paths
+
+
+@dataclass(frozen=True)
+class _TileState:
+    start: int
+    area: tuple
+    view: tuple
+    xstep: float
+    ystep: float
+    ctm: tuple
 
 
 class _PathWalker(_mupdf.FzPathWalker2):
@@ -238,6 +250,20 @@ def _concat_matrices(first, second):
         e * h + f * j + l)
 
 
+def _invert_matrix(transform):
+    a, b, c, d, e, f = transform
+    determinant = a * d - b * c
+    if abs(determinant) < 1e-12:
+        raise ValueError("non-invertible pattern matrix")
+    return (
+        d / determinant,
+        -b / determinant,
+        -c / determinant,
+        a / determinant,
+        (c * f - d * e) / determinant,
+        (b * e - a * f) / determinant)
+
+
 def _transform_point(transform, x, y):
     a, b, c, d, e, f = transform
     return (a * x + c * y + e, b * x + d * y + f)
@@ -250,6 +276,25 @@ def _rect_commands(x0, y0, x1, y1):
         ("line", float(x1), float(y1)),
         ("line", float(x0), float(y1)),
         ("close",))
+
+
+def _rect_tuple(rect):
+    return (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+
+
+def _translate_commands(commands, dx, dy):
+    translated = []
+    for command in commands:
+        kind = command[0]
+        if kind == "close":
+            translated.append(command)
+            continue
+        values = list(command[1:])
+        for index in range(0, len(values), 2):
+            values[index] = float(values[index]) + dx
+            values[index + 1] = float(values[index + 1]) + dy
+        translated.append((kind, *values))
+    return tuple(translated)
 
 
 def _image_downsample_factor(width, height, transform, raster_scale=1.0):
@@ -319,6 +364,81 @@ def _commands_bbox(commands, transform=None):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _rect_path_bbox(commands, transform=None):
+    if tuple(command[0] for command in commands) != (
+            "move", "line", "line", "line", "close"):
+        return None
+    points = [(float(command[1]), float(command[2]))
+              for command in commands[:-1]]
+    if transform is not None:
+        points = [_transform_point(transform, *point) for point in points]
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    box = (min(xs), min(ys), max(xs), max(ys))
+    epsilon = 1e-5
+    corners = {
+        (0 if abs(x - box[0]) <= epsilon else 1,
+         0 if abs(y - box[1]) <= epsilon else 1)
+        for x, y in points
+        if (abs(x - box[0]) <= epsilon or abs(x - box[2]) <= epsilon) and
+        (abs(y - box[1]) <= epsilon or abs(y - box[3]) <= epsilon)
+    }
+    return box if corners == {(0, 0), (0, 1), (1, 0), (1, 1)} else None
+
+
+def _convex_path_contains_bbox(commands, transform, box):
+    polygon = []
+    current = None
+    for command in commands:
+        kind = command[0]
+        if kind == "move":
+            if polygon:
+                return False
+            current = (float(command[1]), float(command[2]))
+            polygon.append(current)
+        elif kind == "line" and current is not None:
+            current = (float(command[1]), float(command[2]))
+            polygon.append(current)
+        elif kind == "cubic" and current is not None:
+            start = current
+            control1 = (float(command[1]), float(command[2]))
+            control2 = (float(command[3]), float(command[4]))
+            end = (float(command[5]), float(command[6]))
+            for step in range(1, 9):
+                t = step / 8.0
+                mt = 1.0 - t
+                polygon.append((
+                    mt ** 3 * start[0] +
+                    3.0 * mt ** 2 * t * control1[0] +
+                    3.0 * mt * t ** 2 * control2[0] + t ** 3 * end[0],
+                    mt ** 3 * start[1] +
+                    3.0 * mt ** 2 * t * control1[1] +
+                    3.0 * mt * t ** 2 * control2[1] + t ** 3 * end[1]))
+            current = end
+        elif kind != "close":
+            return False
+    if len(polygon) < 3:
+        return False
+    if polygon[-1] == polygon[0]:
+        polygon.pop()
+    if transform is not None:
+        polygon = [_transform_point(transform, *point) for point in polygon]
+    corners = ((box[0], box[1]), (box[2], box[1]),
+               (box[2], box[3]), (box[0], box[3]))
+    epsilon = 1e-5
+    for point in corners:
+        crosses = []
+        for index, first in enumerate(polygon):
+            second = polygon[(index + 1) % len(polygon)]
+            crosses.append(
+                (second[0] - first[0]) * (point[1] - first[1]) -
+                (second[1] - first[1]) * (point[0] - first[0]))
+        if not (all(value >= -epsilon for value in crosses) or
+                all(value <= epsilon for value in crosses)):
+            return False
+    return True
+
+
 def _item_bbox(item):
     if isinstance(item, VectorPath):
         box = _commands_bbox(item.commands, item.transform)
@@ -343,6 +463,15 @@ def _overlapping(first, second):
         first[3] > second[1] + epsilon)
 
 
+def _contains_bbox(outer, inner):
+    epsilon = 1e-5
+    return (
+        outer[0] <= inner[0] + epsilon and
+        outer[1] <= inner[1] + epsilon and
+        outer[2] >= inner[2] - epsilon and
+        outer[3] >= inner[3] - epsilon)
+
+
 def _drawings_are_disjoint(children):
     boxes = []
     for child in children:
@@ -354,6 +483,11 @@ def _drawings_are_disjoint(children):
                 return False
             boxes.append(box)
     return bool(boxes)
+
+
+def _is_drawable_item(item):
+    return isinstance(item, (VectorPath, VectorImage,
+                             VectorLinearGradient, VectorRadialGradient))
 
 
 def _union_bbox(items):
@@ -556,6 +690,26 @@ def _is_identity_transfer_function(function):
     return True
 
 
+def _transfer_function_samples(function):
+    if not function:
+        return ()
+    fn = _mupdf.FzFunction(function)
+    fn.thisown = False
+    inputs = _mupdf.new_floats(1)
+    try:
+        samples = []
+        for index in range(256):
+            value = index / 255.0
+            _mupdf.floats_setitem(inputs, 0, value)
+            output = float(fn.fz_eval_function(inputs, 1, 1))
+            if not math.isfinite(output):
+                raise ValueError("invalid soft-mask transfer function")
+            samples.append(max(0.0, min(1.0, output)))
+    finally:
+        _mupdf.delete_floats(inputs)
+    return tuple(samples)
+
+
 def _multiply_argb_opacity(argb, opacity):
     alpha = (argb >> 24) & 0xff
     alpha = max(0, min(255, round(alpha * opacity)))
@@ -623,6 +777,252 @@ def _with_drawing_group_opacity(children, opacity):
         else:
             flattened.append(child)
     return flattened
+
+
+def _argb_channels(argb):
+    return (
+        (int(argb) >> 24) & 0xff,
+        (int(argb) >> 16) & 0xff,
+        (int(argb) >> 8) & 0xff,
+        int(argb) & 0xff)
+
+
+def _argb_from_channels(alpha, red, green, blue):
+    return (
+        (max(0, min(255, int(round(alpha)))) << 24) |
+        (max(0, min(255, int(round(red)))) << 16) |
+        (max(0, min(255, int(round(green)))) << 8) |
+        max(0, min(255, int(round(blue)))))
+
+
+def _similar_argb(first, second, tolerance):
+    return max(abs(a - b) for a, b in zip(
+        _argb_channels(first), _argb_channels(second))) <= tolerance
+
+
+def _average_fill_argb(chunk):
+    if len(chunk) < 2:
+        return chunk[0].fill_argb
+    areas = [_bbox_area(_item_bbox(item)) for item in chunk]
+    if sum(areas) <= 0.0:
+        areas = [1.0] * len(chunk)
+    totals = [0.0, 0.0, 0.0, 0.0]
+    for item, weight in zip(chunk, areas):
+        for index, value in enumerate(_argb_channels(item.fill_argb)):
+            totals[index] += value * weight
+    total = sum(areas)
+    return _argb_from_channels(*(value / total for value in totals))
+
+
+def _merged_fill_path(chunk, *, approximate_color=False):
+    if len(chunk) < 2:
+        return chunk
+    commands = []
+    first = chunk[0]
+    shading = all(item.shading for item in chunk)
+    for item in chunk:
+        source = item.commands
+        if item.transform is not None:
+            source = _transform_commands(source, item.transform)
+        commands.extend(source)
+    return (VectorPath(
+        tuple(commands), even_odd=first.even_odd,
+        fill_argb=(_average_fill_argb(chunk) if approximate_color
+                   else first.fill_argb),
+        shading=shading),)
+
+
+def _compact_consecutive_fill_paths(items, *, aggressive_band_merge=False):
+    compacted = []
+    chunk = []
+    boxes = []
+    command_count = 0
+    fill_argb = None
+    even_odd = False
+    groupable = False
+    fill_merged = False
+    text_merged = False
+    aggressive_merged = False
+
+    def flush():
+        nonlocal chunk, boxes, command_count, fill_argb, even_odd
+        nonlocal groupable, fill_merged, text_merged, aggressive_merged
+        if len(chunk) >= 2:
+            approximate_color = (
+                aggressive_band_merge and not groupable and
+                any(item.fill_argb != chunk[0].fill_argb for item in chunk))
+            compacted.extend(_merged_fill_path(
+                chunk, approximate_color=approximate_color))
+            aggressive_merged = aggressive_merged or approximate_color
+            if groupable:
+                text_merged = True
+            else:
+                fill_merged = True
+        else:
+            compacted.extend(chunk)
+        chunk = []
+        boxes = []
+        command_count = 0
+        fill_argb = None
+        even_odd = False
+        groupable = False
+
+    for item in items:
+        item_box = _item_bbox(item) if isinstance(item, VectorPath) else None
+        mergeable = (
+            isinstance(item, VectorPath) and
+            item.fill_argb is not None and
+            item.stroke_argb is None and
+            (not item.groupable or item.transform is not None) and
+            (item.groupable or not item.even_odd) and
+            item_box is not None)
+        next_count = command_count + len(item.commands) if mergeable else 0
+        same_run = True
+        if mergeable and fill_argb is not None:
+            same_color = item.fill_argb == fill_argb or (
+                aggressive_band_merge and not item.groupable and
+                not groupable and
+                _similar_argb(item.fill_argb, fill_argb,
+                              AGGRESSIVE_BAND_COLOR_TOLERANCE))
+            same_run = (
+                same_color and item.even_odd == even_odd and
+                item.groupable == groupable)
+        overlaps = bool(
+            mergeable and
+            (not item.groupable or ((item.fill_argb >> 24) & 0xff) < 255) and
+            any(_overlapping(item_box, previous) for previous in boxes))
+        if not mergeable or \
+                not same_run or \
+                next_count > MAX_MERGED_FILL_PATH_COMMANDS or \
+                overlaps:
+            flush()
+        if mergeable:
+            chunk.append(item)
+            boxes.append(item_box)
+            command_count += len(item.commands)
+            if fill_argb is None:
+                fill_argb = item.fill_argb
+            even_odd = item.even_odd
+            groupable = item.groupable
+        else:
+            compacted.append(item)
+    flush()
+    return tuple(compacted), fill_merged, text_merged, aggressive_merged
+
+
+def _compact_gradient_clip_triplets(items):
+    compacted = []
+    merged = False
+    index = 0
+    while index < len(items):
+        if index + 2 < len(items) and \
+                isinstance(items[index], ClipPush) and \
+                isinstance(items[index + 1],
+                           (VectorLinearGradient, VectorRadialGradient)) and \
+                isinstance(items[index + 2], ClipPop):
+            clip = items[index]
+            gradient = items[index + 1]
+            clip_box = _rect_path_bbox(clip.commands, clip.transform)
+            gradient_box = _item_bbox(gradient)
+            replacement = None
+            if clip_box is not None and gradient_box is not None:
+                if _convex_path_contains_bbox(
+                        gradient.commands, gradient.transform, clip_box):
+                    replacement = replace(
+                        gradient, commands=clip.commands,
+                        even_odd=clip.even_odd, transform=clip.transform)
+                elif _contains_bbox(clip_box, gradient_box):
+                    replacement = gradient
+            if replacement is not None:
+                compacted.append(replacement)
+                merged = True
+                index += 3
+                continue
+        compacted.append(items[index])
+        index += 1
+    return tuple(compacted), merged
+
+
+def _tile_offset_transform(transform, state, xoffset, yoffset):
+    page_dx = state.ctm[0] * xoffset + state.ctm[2] * yoffset
+    page_dy = state.ctm[1] * xoffset + state.ctm[3] * yoffset
+    if transform is None:
+        return None, page_dx, page_dy
+    offset = (1.0, 0.0, 0.0, 1.0, xoffset, yoffset)
+    return _concat_matrices(offset, transform), page_dx, page_dy
+
+
+def _offset_tile_item(item, state, xoffset, yoffset):
+    if isinstance(item, (ClipPop, GroupPush, GroupPop)):
+        return item
+    if isinstance(item, (MaskBegin, MaskEnd)):
+        raise ValueError("unsupported mask inside tile pattern")
+    if isinstance(item, VectorPath):
+        transform, dx, dy = _tile_offset_transform(
+            item.transform, state, xoffset, yoffset)
+        commands = item.commands if transform is not None else \
+            _translate_commands(item.commands, dx, dy)
+        return replace(item, commands=commands, transform=transform)
+    if isinstance(item, VectorImage):
+        transform, dx, dy = _tile_offset_transform(
+            item.transform, state, xoffset, yoffset)
+        if transform is None:
+            transform = (1.0, 0.0, 0.0, 1.0, dx, dy)
+        return replace(item, transform=transform)
+    if isinstance(item, (VectorLinearGradient, VectorRadialGradient)):
+        transform, dx, dy = _tile_offset_transform(
+            item.transform, state, xoffset, yoffset)
+        commands = item.commands if transform is not None else \
+            _translate_commands(item.commands, dx, dy)
+        return replace(item, commands=commands, transform=transform)
+    if isinstance(item, ClipPush):
+        transform, dx, dy = _tile_offset_transform(
+            item.transform, state, xoffset, yoffset)
+        commands = item.commands if transform is not None else \
+            _translate_commands(item.commands, dx, dy)
+        return replace(item, commands=commands, transform=transform)
+    if isinstance(item, ClipStrokePush):
+        transform, dx, dy = _tile_offset_transform(
+            item.transform, state, xoffset, yoffset)
+        commands = item.commands if transform is not None else \
+            _translate_commands(item.commands, dx, dy)
+        return replace(item, commands=commands, transform=transform)
+    raise ValueError("unsupported tile pattern item")
+
+
+def _tile_repeat_offsets(state):
+    if not all(math.isfinite(value) for value in
+               (*state.area, *state.view, state.xstep, state.ystep,
+                *state.ctm)):
+        raise ValueError("invalid tile pattern geometry")
+    if abs(state.xstep) < 1e-6 or abs(state.ystep) < 1e-6:
+        raise ValueError("invalid tile pattern step")
+    inverse = _invert_matrix(state.ctm)
+    ax0, ay0, ax1, ay1 = state.area
+    corners = (
+        _transform_point(inverse, ax0, ay0),
+        _transform_point(inverse, ax1, ay0),
+        _transform_point(inverse, ax1, ay1),
+        _transform_point(inverse, ax0, ay1))
+    xs = [point[0] for point in corners]
+    ys = [point[1] for point in corners]
+    vx0, vy0, vx1, vy1 = state.view
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    if state.xstep < 0:
+        state = replace(state, xstep=-state.xstep)
+    if state.ystep < 0:
+        state = replace(state, ystep=-state.ystep)
+    ix0 = math.floor((xmin - max(vx0, vx1)) / state.xstep) - 1
+    ix1 = math.ceil((xmax - min(vx0, vx1)) / state.xstep) + 1
+    iy0 = math.floor((ymin - max(vy0, vy1)) / state.ystep) - 1
+    iy1 = math.ceil((ymax - min(vy0, vy1)) / state.ystep) + 1
+    count = max(0, ix1 - ix0 + 1) * max(0, iy1 - iy0 + 1)
+    if count > 4096:
+        raise ValueError("tile pattern repeat count exceeds GPU scene limit")
+    for iy in range(iy0, iy1 + 1):
+        for ix in range(ix0, ix1 + 1):
+            yield ix * state.xstep, iy * state.ystep
 
 
 def _flatten_nonisolated_groups(items):
@@ -776,6 +1176,42 @@ def _cpu_island_from_page(page, box, scale, image_bytes):
          float(pixmap.x) / scale, float(pixmap.y) / scale)), cost
 
 
+def _approximate_island_absorbed_indexes(items, start, end, box, page):
+    page_area = _bbox_area((float(page.rect.x0), float(page.rect.y0),
+                            float(page.rect.x1), float(page.rect.y1)))
+    if page_area <= 0.0:
+        return box, set()
+    current = box
+    absorbed = set()
+    changed = True
+    while changed:
+        changed = False
+        for index, item in enumerate(items):
+            if start <= index <= end or index in absorbed or \
+                    not _is_drawable_item(item):
+                continue
+            item_box = _item_bbox(item)
+            if item_box is None or not _overlapping(current, item_box):
+                continue
+            expanded = (
+                min(current[0], item_box[0]), min(current[1], item_box[1]),
+                max(current[2], item_box[2]), max(current[3], item_box[3]))
+            if _bbox_area(expanded) / page_area > \
+                    MAX_APPROXIMATE_CPU_ISLAND_PAGE_COVERAGE:
+                continue
+            current = expanded
+            absorbed.add(index)
+            changed = True
+    padded = _padded_page_bbox(current, page.rect, 1.0)
+    if padded is None:
+        padded = current
+    absorbed = {
+        index for index in absorbed
+        if _contains_bbox(padded, _item_bbox(items[index]))
+    }
+    return current, absorbed
+
+
 def _replace_one_group_with_cpu_island(
         items, page, scale, image_bytes, *, approximate=False):
     spans = sorted(_group_spans(items), key=lambda span: span[1] - span[0])
@@ -798,8 +1234,13 @@ def _replace_one_group_with_cpu_island(
         coverage = _bbox_area(box) / page_area if page_area > 0.0 else 1.0
         if approximate and coverage > MAX_APPROXIMATE_CPU_ISLAND_PAGE_COVERAGE:
             continue
+        absorbed = set()
+        if approximate:
+            box, absorbed = _approximate_island_absorbed_indexes(
+                items, start, end, box, page)
         external_boxes = [
-            _item_bbox(item) for item in (*items[:start], *items[end + 1:])
+            _item_bbox(item) for index, item in enumerate(items)
+            if index not in absorbed and not start <= index <= end
         ]
         external_boxes = [item_box for item_box in external_boxes
                           if item_box is not None]
@@ -811,7 +1252,14 @@ def _replace_one_group_with_cpu_island(
             island, cost = _cpu_island_from_page(page, box, scale, image_bytes)
         except Exception:
             continue
-        return (items[:start] + (island,) + items[end + 1:],
+        merged = []
+        for index, item in enumerate(items):
+            if index == start:
+                merged.append(island)
+            if start <= index <= end or index in absorbed:
+                continue
+            merged.append(item)
+        return (tuple(merged),
                 image_bytes + cost, overlaps or bool(scopes))
     return None
 
@@ -855,6 +1303,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         self._group_depth = 0
         self._group_passthrough = []
         self._mask_depth = 0
+        self._tile_stack = []
         self._page_rect = tuple(float(value) for value in page_rect)
         self._features = set()
         self._raster_scale = max(1.0, float(raster_scale))
@@ -1545,9 +1994,14 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         if self._mask_depth <= 0:
             self._set_failure("unbalanced soft mask stack")
             return
-        if not _is_identity_transfer_function(function):
-            self._fail("soft-mask-transfer-function")
-        self._append_item(MaskEnd())
+        try:
+            transfer = _transfer_function_samples(function)
+            if transfer:
+                self._features.add("soft-mask-transfer-function")
+            self._append_item(MaskEnd(transfer))
+        except Exception as error:
+            self._set_failure(str(error))
+            return
         self._mask_depth -= 1
         self._clip_depth += 1
 
@@ -1597,11 +2051,38 @@ class _DisplayListDevice(_mupdf.FzDevice2):
             self._append_item(GroupPop())
         self._group_depth -= 1
 
-    def begin_tile(self, *_args):
-        self._fail("begin-tile")
+    def begin_tile(self, _context, area, view, xstep, ystep, ctm, _id, _n):
+        try:
+            if self._tile_stack:
+                raise ValueError("nested tile patterns are unsupported")
+            self._features.add("tile-pattern")
+            self._tile_stack.append(_TileState(
+                len(self.items), _rect_tuple(area), _rect_tuple(view),
+                float(xstep), float(ystep), _matrix(ctm)))
+        except Exception as error:
+            self._set_failure(str(error))
+        return 0
 
     def end_tile(self, *_args):
-        self._fail("end-tile")
+        if not self._tile_stack:
+            self._set_failure("unbalanced tile pattern stack")
+            return
+        state = self._tile_stack.pop()
+        children = tuple(self.items[state.start:])
+        del self.items[state.start:]
+        try:
+            if not children:
+                return
+            tiled = []
+            for xoffset, yoffset in _tile_repeat_offsets(state):
+                for child in children:
+                    tiled.append(_offset_tile_item(
+                        child, state, xoffset, yoffset))
+            if tiled:
+                self._features.add("vector-tile-pattern")
+                self._extend_items(tiled)
+        except Exception as error:
+            self._set_failure(str(error))
 
 
 def _validate_composite_context(items):
@@ -1631,7 +2112,9 @@ def _validate_composite_context(items):
     return "unbalanced composite scope stack" if scopes else ""
 
 
-def vector_page_from_pymupdf(page, raster_scale=1.0, timeout_seconds=None):
+def vector_page_from_pymupdf(
+        page, raster_scale=1.0, timeout_seconds=None,
+        *, aggressive_band_merge=False):
     """Return a complete GPU scene only when every operation is supported."""
     rect = page.rect
     scale = max(1.0, float(raster_scale))
@@ -1650,6 +2133,8 @@ def vector_page_from_pymupdf(page, raster_scale=1.0, timeout_seconds=None):
             device.failure = "unbalanced transparency group stack"
         if not device.failure and device._mask_depth:
             device.failure = "unbalanced soft mask stack"
+        if not device.failure and device._tile_stack:
+            device.failure = "unbalanced tile pattern stack"
         if not device.failure:
             try:
                 items, image_bytes, islanded = _flatten_or_cpu_island_groups(
@@ -1660,6 +2145,23 @@ def vector_page_from_pymupdf(page, raster_scale=1.0, timeout_seconds=None):
                     device._features.add("cpu-island")
                     if islanded == "approximate":
                         device._features.add("cpu-island-approximate")
+                compacted, fill_merged, text_merged, aggressive_merged = \
+                    _compact_consecutive_fill_paths(
+                        tuple(device.items),
+                        aggressive_band_merge=aggressive_band_merge)
+                gradient_compacted, gradient_merged = _compact_gradient_clip_triplets(
+                    compacted)
+                if gradient_merged:
+                    compacted = gradient_compacted
+                    device._features.add("gradient-clip-merge")
+                if fill_merged or text_merged or gradient_merged:
+                    device.items = list(compacted)
+                if fill_merged:
+                    device._features.add("baked-gradient-band-merge")
+                if text_merged:
+                    device._features.add("text-outline-merge")
+                if aggressive_merged:
+                    device._features.add("aggressive-band-merge")
             except Exception as error:
                 device._set_failure(str(error))
         if not device.failure and ("blend-mode" in device._features or

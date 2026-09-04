@@ -2,11 +2,14 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.29.0 - 2026-09-03
+## 1.29.1 - 2026-09-04
 
-### New Features
+### Improvements
 
-- Editor mode now has current-page canvas size controls.
-- Editor mode can set TrimBox/BleedBox page bleed margins without scaling existing artwork.
-- Editable text elements can be resized from the editor context menu.
-- The Direct2D renderer can keep self-contained unsupported transparency groups on the GPU path by rasterizing only that bounded group region as a CPU island, with a small approximate island path for difficult local knockout effects.
+- PDF soft-mask transfer functions now stay on the Direct2D path with a GPU alpha transfer table instead of forcing whole-page CPU fallback.
+- Simple colored vector tiling patterns now expand into Direct2D scene items instead of forcing whole-page CPU fallback.
+- Approximate CPU islands can absorb small overlapping drawables into the same bounded raster island, reducing duplicate vector edges while keeping forced GPU rendering active.
+- Consecutive same-color text glyph outlines are compacted into combined page-space paths, reducing GPU scene items and native path resources without changing PDF model coordinates.
+- Linear and radial gradient primitives now fold redundant surrounding clip wrappers into the gradient item when the geometry is identical, reducing scene commands for complex pages.
+- An opt-in experimental similar-color band merge can compare aggressive GPU scene compaction separately from the default exact-color path.
+- Interactive zoom now reuses the current GPU scene immediately and defers image-quality scene refresh until zoom input settles.

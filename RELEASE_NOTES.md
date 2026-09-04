@@ -1,6 +1,6 @@
-# sPDF 1.29.0 Release Notes
+# sPDF 1.29.1 Release Notes
 
-Release date: 2026-09-03
+Release date: 2026-09-04
 
 ## 1.28.0 highlights - 2026-09-02
 
@@ -45,3 +45,13 @@ Release date: 2026-09-03
 - Editable text elements can be resized from the editor context menu.
 - The Direct2D renderer can now rasterize self-contained unsupported transparency groups as bounded CPU islands. Difficult local knockout effects may use a small approximate island so forced GPU rendering can stay active while page measurements and coordinates still come from the PDF model.
 - Forced GPU mode now allows a longer scene preparation budget than automatic mode, so complex pages have more time to finish GPU scene extraction before falling back.
+
+## 1.29.1 improvement - 2026-09-04
+
+- PDF soft-mask transfer functions now stay on the Direct2D path using a GPU alpha transfer table. The native renderer ABI is now v17.
+- Simple colored vector tiling patterns now expand into Direct2D scene items instead of forcing whole-page CPU fallback.
+- Approximate CPU islands absorb small overlapping drawables into the same bounded raster island to reduce duplicate vector edges while keeping forced GPU rendering active.
+- Consecutive same-color text glyph outlines are compacted into combined page-space paths, reducing GPU scene items and native path resources without changing PDF model coordinates.
+- Linear and radial gradient primitives now remove redundant surrounding clip wrappers when the clip matches the gradient geometry, reducing scene commands on pages with many gradients.
+- A disabled-by-default experimental similar-color band merge lets GPU renderer comparisons use a separate scene cache from the default exact-color path.
+- Interactive zoom now transforms the current GPU scene immediately and waits until zoom input settles before refreshing image quality, avoiding scene extraction on every zoom step while preserving exact zoom values and page coordinates.

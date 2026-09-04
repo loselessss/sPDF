@@ -625,7 +625,40 @@ public:
         return S_OK;
     }
 
-    HRESULT end_mask() noexcept {
+    HRESULT apply_alpha_transfer(
+        ID2D1Image* source,
+        const float* transfer,
+        std::uint32_t transfer_count,
+        ComPtr<ID2D1Effect>& transfer_effect,
+        ComPtr<ID2D1Image>& output) noexcept {
+        if (source == nullptr) return E_INVALIDARG;
+        output = source;
+        if (transfer_count == 0) return S_OK;
+        if (transfer == nullptr || transfer_count < 2) return E_INVALIDARG;
+        auto result = d2d_context_->CreateEffect(CLSID_D2D1TableTransfer, &transfer_effect);
+        if (FAILED(result)) return result;
+        transfer_effect->SetInput(0, source);
+        if (SUCCEEDED(result)) result = transfer_effect->SetValue(
+            D2D1_TABLETRANSFER_PROP_RED_DISABLE, TRUE);
+        if (SUCCEEDED(result)) result = transfer_effect->SetValue(
+            D2D1_TABLETRANSFER_PROP_GREEN_DISABLE, TRUE);
+        if (SUCCEEDED(result)) result = transfer_effect->SetValue(
+            D2D1_TABLETRANSFER_PROP_BLUE_DISABLE, TRUE);
+        if (SUCCEEDED(result)) result = transfer_effect->SetValue(
+            D2D1_TABLETRANSFER_PROP_ALPHA_DISABLE, FALSE);
+        if (SUCCEEDED(result)) result = transfer_effect->SetValue(
+            D2D1_TABLETRANSFER_PROP_ALPHA_TABLE,
+            reinterpret_cast<const BYTE*>(transfer),
+            transfer_count * sizeof(float));
+        if (SUCCEEDED(result)) result = transfer_effect->SetValue(
+            D2D1_TABLETRANSFER_PROP_CLAMP_OUTPUT, TRUE);
+        if (SUCCEEDED(result)) transfer_effect->GetOutput(&output);
+        return result;
+    }
+
+    HRESULT end_mask(
+        const float* alpha_transfer = nullptr,
+        std::uint32_t transfer_count = 0) noexcept {
         if (!drawing_ || mask_captures_.empty()) {
             return E_UNEXPECTED;
         }
@@ -641,7 +674,7 @@ public:
             return result;
         }
         ComPtr<ID2D1Image> image = capture.commands;
-        ComPtr<ID2D1Effect> luminance;
+        ComPtr<ID2D1Effect> luminance, transfer_effect;
         if (capture.luminosity) {
             result = d2d_context_->CreateEffect(
                 CLSID_D2D1LuminanceToAlpha, &luminance);
@@ -651,6 +684,9 @@ public:
             luminance->SetInput(0, capture.commands.Get());
             luminance->GetOutput(&image);
         }
+        result = apply_alpha_transfer(
+            image.Get(), alpha_transfer, transfer_count, transfer_effect, image);
+        if (FAILED(result)) return result;
         D2D1_RECT_F bounds{};
         result = d2d_context_->GetImageLocalBounds(image.Get(), &bounds);
         if (FAILED(result) || bounds.right <= bounds.left ||
@@ -811,7 +847,9 @@ public:
         return result;
     }
 
-    HRESULT end_composite_mask() noexcept {
+    HRESULT end_composite_mask(
+        const float* alpha_transfer = nullptr,
+        std::uint32_t transfer_count = 0) noexcept {
         if (!drawing_ || composite_captures_.empty() || layer_depth_ != 0 ||
                 !mask_captures_.empty() || !composite_captures_.back().building_mask) {
             return E_UNEXPECTED;
@@ -828,7 +866,7 @@ public:
         if (SUCCEEDED(result)) result = d2d_factory_->CreateRectangleGeometry(
             capture.mask_area, &area);
         ComPtr<ID2D1Image> mask_image = capture.source;
-        ComPtr<ID2D1Effect> luminance, color_conversion;
+        ComPtr<ID2D1Effect> luminance, color_conversion, transfer_effect;
         if (SUCCEEDED(result) && capture.luminosity) {
             if (!luminosity_lut_) return E_UNEXPECTED;
             result = d2d_context_->CreateEffect(CLSID_D2D1LookupTable3D, &color_conversion);
@@ -846,6 +884,9 @@ public:
                 luminance->GetOutput(&mask_image);
             }
         }
+        if (SUCCEEDED(result)) result = apply_alpha_transfer(
+            mask_image.Get(), alpha_transfer, transfer_count,
+            transfer_effect, mask_image);
         if (SUCCEEDED(result)) result = d2d_context_->Flush();
         if (FAILED(result)) return result;
         d2d_context_->SetTarget(nullptr);
@@ -1669,12 +1710,13 @@ std::int32_t spdf_d2d_begin_mask(
             left, top, right, bottom, luminosity != 0, background_argb));
 }
 
-std::int32_t spdf_d2d_end_mask(void* surface) noexcept {
+std::int32_t spdf_d2d_end_mask(
+    void* surface, const float* alpha_transfer, std::uint32_t transfer_count) noexcept {
     if (surface == nullptr) {
         return static_cast<std::int32_t>(E_INVALIDARG);
     }
     return static_cast<std::int32_t>(
-        static_cast<Surface*>(surface)->end_mask());
+        static_cast<Surface*>(surface)->end_mask(alpha_transfer, transfer_count));
 }
 
 std::int32_t spdf_d2d_begin_composite_group(
@@ -1709,9 +1751,11 @@ std::int32_t spdf_d2d_begin_composite_mask(
         left, top, right, bottom, luminosity != 0, background_argb));
 }
 
-std::int32_t spdf_d2d_end_composite_mask(void* surface) noexcept {
+std::int32_t spdf_d2d_end_composite_mask(
+    void* surface, const float* alpha_transfer, std::uint32_t transfer_count) noexcept {
     if (surface == nullptr) return static_cast<std::int32_t>(E_INVALIDARG);
-    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->end_composite_mask());
+    return static_cast<std::int32_t>(static_cast<Surface*>(surface)->end_composite_mask(
+        alpha_transfer, transfer_count));
 }
 
 std::int32_t spdf_d2d_set_luminosity_lut(

@@ -18,7 +18,7 @@ under `native\bin` and are not committed.
 
 ## Current ABI
 
-ABI version 6 can:
+ABI version 17 can:
 
 - probe a hardware D3D11 device and fall back to WARP;
 - create Direct2D and DirectWrite devices on the same DXGI device;
@@ -31,6 +31,8 @@ ABI version 6 can:
   embedded-font glyph outlines;
 - push and pop nested antialiased vector-path clipping layers;
 - push and pop opacity layers for supported isolated transparency groups;
+- apply PDF soft-mask transfer functions through a Direct2D alpha table
+  transfer effect;
 - clear/present, resize, and destroy the surface and bitmap resources.
 
 PyMuPDF still parses PDF content, extracts exact glyph outlines, and decodes

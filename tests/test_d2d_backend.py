@@ -45,7 +45,7 @@ def pdf_component_blend(mode, backdrop, source):
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 16)
+        self.assertEqual(ABI_VERSION, 17)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -111,6 +111,41 @@ class D2DBackendTests(unittest.TestCase):
                         for bgra in pixels))
                 finally:
                     path.close()
+        finally:
+            user32.DestroyWindow(hwnd)
+
+    @unittest.skipUnless(os.name == "nt", "Direct2D is Windows-only")
+    def test_mask_transfer_table_modulates_layer_alpha(self):
+        library = Path(__file__).resolve().parents[1] / "native" / "bin" / \
+            "spdf_d2d_renderer.dll"
+        if not library.is_file():
+            self.skipTest("native renderer is not built")
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.CreateWindowExW.argtypes = [
+            ctypes.c_uint32, ctypes.c_wchar_p, ctypes.c_wchar_p,
+            ctypes.c_uint32, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_void_p]
+        user32.CreateWindowExW.restype = ctypes.c_void_p
+        user32.DestroyWindow.argtypes = [ctypes.c_void_p]
+        user32.DestroyWindow.restype = ctypes.c_int
+        hwnd = user32.CreateWindowExW(
+            0, "STATIC", "sPDF D2D mask transfer test", 0, 0, 0, 32, 32,
+            None, None, None, None)
+        self.assertTrue(hwnd, ctypes.get_last_error())
+        try:
+            with D2DSurface(hwnd, 32, 32, path=library) as surface:
+                inverse = tuple(1.0 - index / 255.0 for index in range(256))
+                surface.begin_frame(0xff0000ff)
+                surface.begin_mask((0, 0, 32, 32), False, 0)
+                surface.fill_rect(0, 0, 32, 32, 0xffffffff)
+                surface.end_mask(inverse)
+                surface.fill_rect(0, 0, 32, 32, 0xffff0000)
+                surface.pop_clip()
+                pixels = surface.read_pixels_bgra(32, 32)
+                surface.end_frame()
+                center = pixels[(16 * 32 + 16) * 4:(16 * 32 + 16) * 4 + 4]
+                self.assertEqual(center, bytes((255, 0, 0, 255)))
         finally:
             user32.DestroyWindow(hwnd)
 
