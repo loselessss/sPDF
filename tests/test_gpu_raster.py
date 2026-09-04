@@ -546,6 +546,15 @@ def small_overlapping_nonisolated_group_pdf_bytes():
 
 
 class GpuRasterSceneTests(unittest.TestCase):
+    def test_image_mask_area_uses_transformed_unit_bounds_and_page_clip(self):
+        from pdfeditor.gpu_raster import _image_mask_area
+
+        self.assertEqual(
+            _image_mask_area((80, 20, -10, 40, 25, 30), (0, 0, 100, 100)),
+            (15, 30, 100, 90))
+        self.assertIsNone(
+            _image_mask_area((10, 0, 0, 10, 120, 120), (0, 0, 100, 100)))
+
     def test_all_standard_pdf_blends_remain_gpu_scenes(self):
         from pdfeditor.gpu_raster import GroupPush, vector_page_from_pymupdf
         modes = ("Multiply", "Screen", "Overlay", "Darken", "Lighten",

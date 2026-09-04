@@ -258,6 +258,12 @@ public:
         if (!d2d_context_ || !drawing_) {
             return E_UNEXPECTED;
         }
+        for (const auto& capture : composite_captures_) {
+            if (capture.cropped) {
+                dx -= capture.destination_origin.x;
+                dy -= capture.destination_origin.y;
+            }
+        }
         d2d_context_->SetTransform(D2D1::Matrix3x2F(
             m11, m12, m21, m22, dx, dy));
         return S_OK;
@@ -738,7 +744,8 @@ public:
 
     HRESULT begin_composite_group(
         std::uint32_t mode, float opacity, Path* clip = nullptr,
-        bool mask_build = false, bool knockout = false) noexcept {
+        bool mask_build = false, bool knockout = false,
+        const D2D1_RECT_F* capture_bounds = nullptr) noexcept {
         // No implicit layer may cross a target switch. The scene validator
         // rejects these combinations before any page drawing starts.
         if (!drawing_ || layer_depth_ != 0 || !mask_captures_.empty() ||
@@ -751,7 +758,78 @@ public:
         d2d_context_->GetTarget(&current);
         auto result = current.As(&capture.previous);
         if (FAILED(result)) return result;
-        const auto size = capture.previous->GetPixelSize();
+        auto size = capture.previous->GetPixelSize();
+        d2d_context_->GetTransform(&capture.previous_transform);
+        if ((mask_build && capture_bounds != nullptr) || clip != nullptr) {
+            const auto& matrix = capture.previous_transform;
+            const auto transform_point = [&](float x, float y) {
+                return D2D1::Point2F(
+                    x * matrix._11 + y * matrix._21 + matrix._31,
+                    x * matrix._12 + y * matrix._22 + matrix._32);
+            };
+            D2D1_RECT_F device_bounds{};
+            if (clip != nullptr) {
+                result = clip->resource->GetBounds(&matrix, &device_bounds);
+                if (FAILED(result)) return result;
+            } else {
+                const D2D1_POINT_2F corners[] = {
+                    transform_point(capture_bounds->left, capture_bounds->top),
+                    transform_point(capture_bounds->right, capture_bounds->top),
+                    transform_point(capture_bounds->left, capture_bounds->bottom),
+                    transform_point(capture_bounds->right, capture_bounds->bottom),
+                };
+                device_bounds = D2D1::RectF(
+                    corners[0].x, corners[0].y, corners[0].x, corners[0].y);
+                for (const auto& point : corners) {
+                    device_bounds.left = (std::min)(device_bounds.left, point.x);
+                    device_bounds.top = (std::min)(device_bounds.top, point.y);
+                    device_bounds.right = (std::max)(device_bounds.right, point.x);
+                    device_bounds.bottom = (std::max)(device_bounds.bottom, point.y);
+                }
+            }
+            const auto left = device_bounds.left;
+            const auto top = device_bounds.top;
+            const auto right = device_bounds.right;
+            const auto bottom = device_bounds.bottom;
+            const auto dip_size = capture.previous->GetSize();
+            if (dip_size.width <= 0 || dip_size.height <= 0) return E_INVALIDARG;
+            if (!std::isfinite(left) || !std::isfinite(top) ||
+                    !std::isfinite(right) || !std::isfinite(bottom)) {
+                device_bounds = D2D1::RectF(
+                    0, 0, dip_size.width, dip_size.height);
+            }
+            const auto scale_x = static_cast<float>(size.width) / dip_size.width;
+            const auto scale_y = static_cast<float>(size.height) / dip_size.height;
+            auto pixel_left = (std::max)(
+                0, static_cast<int>(std::floor(device_bounds.left * scale_x)) - 1);
+            auto pixel_top = (std::max)(
+                0, static_cast<int>(std::floor(device_bounds.top * scale_y)) - 1);
+            auto pixel_right = (std::min)(
+                static_cast<int>(size.width),
+                static_cast<int>(std::ceil(device_bounds.right * scale_x)) + 1);
+            auto pixel_bottom = (std::min)(
+                static_cast<int>(size.height),
+                static_cast<int>(std::ceil(device_bounds.bottom * scale_y)) + 1);
+            if (pixel_right <= pixel_left) {
+                pixel_left = device_bounds.left >= dip_size.width
+                    ? static_cast<int>(size.width) - 1 : 0;
+                pixel_right = pixel_left + 1;
+            }
+            if (pixel_bottom <= pixel_top) {
+                pixel_top = device_bounds.top >= dip_size.height
+                    ? static_cast<int>(size.height) - 1 : 0;
+                pixel_bottom = pixel_top + 1;
+            }
+            capture.source_origin = D2D1::Point2U(
+                static_cast<UINT32>(pixel_left), static_cast<UINT32>(pixel_top));
+            capture.destination_origin = D2D1::Point2F(
+                static_cast<float>(pixel_left) / scale_x,
+                static_cast<float>(pixel_top) / scale_y);
+            size = D2D1::SizeU(
+                static_cast<UINT32>(pixel_right - pixel_left),
+                static_cast<UINT32>(pixel_bottom - pixel_top));
+            capture.cropped = true;
+        }
         // Source + temporary backdrop, plus a coverage mask for explicit clips.
         capture.bytes = static_cast<std::uint64_t>(size.width) * size.height * 4 *
             (mask_build ? 4 : (clip == nullptr ? 2 : 3));
@@ -776,10 +854,24 @@ public:
             // A clip is not an isolated transparency group: its children must
             // blend against the existing backdrop. Apply coverage only on exit.
             d2d_context_->SetTarget(nullptr);
-            result = capture.source->CopyFromBitmap(nullptr, capture.previous.Get(), nullptr);
+            D2D1_POINT_2U destination{};
+            const auto dimensions = capture.source->GetPixelSize();
+            const auto source = D2D1::RectU(
+                capture.source_origin.x, capture.source_origin.y,
+                capture.source_origin.x + dimensions.width,
+                capture.source_origin.y + dimensions.height);
+            result = capture.source->CopyFromBitmap(
+                &destination, capture.previous.Get(),
+                capture.cropped ? &source : nullptr);
             if (SUCCEEDED(result)) {
                 d2d_context_->SetTarget(capture.mask.Get());
                 d2d_context_->Clear(D2D1::ColorF(0, 0, 0, 0));
+                if (capture.cropped) {
+                    auto adjusted = capture.previous_transform;
+                    adjusted._31 -= capture.destination_origin.x;
+                    adjusted._32 -= capture.destination_origin.y;
+                    d2d_context_->SetTransform(adjusted);
+                }
                 // Use the same coverage rasterizer as ordinary clip layers.
                 // Filled geometry realizations have different fractional-edge AA.
                 const auto parameters = D2D1::LayerParameters1(
@@ -799,6 +891,7 @@ public:
                 result = d2d_context_->Flush();
             }
             d2d_context_->SetTarget(capture.previous.Get());
+            d2d_context_->SetTransform(capture.previous_transform);
             if (FAILED(result)) return result;
         }
         capture.mode = mode;
@@ -809,6 +902,12 @@ public:
         composite_bytes_ += capture.bytes;
         composite_captures_.push_back(capture);
         d2d_context_->SetTarget(capture.source.Get());
+        if (capture.cropped) {
+            auto adjusted = capture.previous_transform;
+            adjusted._31 -= capture.destination_origin.x;
+            adjusted._32 -= capture.destination_origin.y;
+            d2d_context_->SetTransform(adjusted);
+        }
         if (clip == nullptr) d2d_context_->Clear(D2D1::ColorF(0, 0, 0, 0));
         if (knockout) {
             d2d_context_->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
@@ -837,11 +936,13 @@ public:
         std::uint32_t background_argb) noexcept {
         if (!std::isfinite(left) || !std::isfinite(top) || !std::isfinite(right) ||
                 !std::isfinite(bottom) || right <= left || bottom <= top) return E_INVALIDARG;
-        auto result = begin_composite_group(0, 1.0f, nullptr, true);
+        const auto area = D2D1::RectF(left, top, right, bottom);
+        auto result = begin_composite_group(
+            0, 1.0f, nullptr, true, false, &area);
         if (FAILED(result)) return result;
         auto& capture = composite_captures_.back();
         capture.luminosity = luminosity;
-        capture.mask_area = D2D1::RectF(left, top, right, bottom);
+        capture.mask_area = area;
         d2d_context_->GetTransform(&capture.mask_transform);
         if (luminosity || ((background_argb >> 24) & 0xff) != 0) {
             result = fill_rect(left, top, right, bottom, background_argb);
@@ -892,7 +993,14 @@ public:
         if (SUCCEEDED(result)) result = d2d_context_->Flush();
         if (FAILED(result)) return result;
         d2d_context_->SetTarget(nullptr);
-        result = content->CopyFromBitmap(nullptr, capture.previous.Get(), nullptr);
+        D2D1_POINT_2U destination{};
+        const auto dimensions = capture.source->GetPixelSize();
+        const auto source = D2D1::RectU(
+            capture.source_origin.x, capture.source_origin.y,
+            capture.source_origin.x + dimensions.width,
+            capture.source_origin.y + dimensions.height);
+        result = content->CopyFromBitmap(
+            &destination, capture.previous.Get(), capture.cropped ? &source : nullptr);
         if (FAILED(result)) {
             d2d_context_->SetTarget(capture.source.Get());
             return result;
@@ -937,8 +1045,6 @@ public:
         d2d_context_->SetPrimitiveBlend(capture.previous_blend);
         d2d_context_->SetTarget(capture.previous.Get());
         if (FAILED(result)) return result;
-        D2D1_MATRIX_3X2_F transform;
-        d2d_context_->GetTransform(&transform);
         d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
         if (capture.mode == 0 && !clip) {
             d2d_context_->DrawBitmap(capture.source.Get(), nullptr,
@@ -950,10 +1056,18 @@ public:
                 D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
                                  D2D1_ALPHA_MODE_PREMULTIPLIED), dpi_, dpi_);
             result = d2d_context_->CreateBitmap(
-                capture.previous->GetPixelSize(), nullptr, 0, properties, &backdrop);
+                capture.source->GetPixelSize(), nullptr, 0, properties, &backdrop);
             if (SUCCEEDED(result)) {
                 d2d_context_->SetTarget(nullptr);
-                result = backdrop->CopyFromBitmap(nullptr, capture.previous.Get(), nullptr);
+                D2D1_POINT_2U destination{};
+                const auto dimensions = capture.source->GetPixelSize();
+                const auto source = D2D1::RectU(
+                    capture.source_origin.x, capture.source_origin.y,
+                    capture.source_origin.x + dimensions.width,
+                    capture.source_origin.y + dimensions.height);
+                result = backdrop->CopyFromBitmap(
+                    &destination, capture.previous.Get(),
+                    capture.cropped ? &source : nullptr);
                 d2d_context_->SetTarget(capture.previous.Get());
             }
             if (clip) {
@@ -985,12 +1099,26 @@ public:
                                                 D2D1_COMPOSITE_MODE_PLUS);
                 }
                 if (SUCCEEDED(result)) {
-                    d2d_context_->DrawImage(combined.Get(), D2D1::Point2F(0, 0),
+                    if (capture.cropped) {
+                        const auto dip_size = capture.source->GetSize();
+                        d2d_context_->PushAxisAlignedClip(
+                            D2D1::RectF(
+                                capture.destination_origin.x,
+                                capture.destination_origin.y,
+                                capture.destination_origin.x + dip_size.width,
+                                capture.destination_origin.y + dip_size.height),
+                            D2D1_ANTIALIAS_MODE_ALIASED);
+                    }
+                    d2d_context_->DrawImage(
+                        combined.Get(), capture.destination_origin,
                         D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
                         D2D1_COMPOSITE_MODE_SOURCE_COPY);
+                    if (capture.cropped) {
+                        d2d_context_->PopAxisAlignedClip();
+                    }
                     result = d2d_context_->Flush();
                 }
-                d2d_context_->SetTransform(transform);
+                d2d_context_->SetTransform(capture.previous_transform);
                 return result;
             }
             ComPtr<ID2D1Effect> alpha;
@@ -1026,7 +1154,7 @@ public:
                 }
             }
         }
-        d2d_context_->SetTransform(transform);
+        d2d_context_->SetTransform(capture.previous_transform);
         return result;
     }
 
@@ -1338,9 +1466,13 @@ private:
         bool luminosity = false;
         D2D1_RECT_F mask_area{};
         D2D1_MATRIX_3X2_F mask_transform{};
+        D2D1_MATRIX_3X2_F previous_transform{};
+        D2D1_POINT_2U source_origin{};
+        D2D1_POINT_2F destination_origin{};
         std::uint32_t mode = 0;
         float opacity = 1.0f;
         bool knockout = false;
+        bool cropped = false;
         D2D1_PRIMITIVE_BLEND previous_blend = D2D1_PRIMITIVE_BLEND_SOURCE_OVER;
         std::uint64_t bytes = 0;
     };

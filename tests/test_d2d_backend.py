@@ -189,20 +189,22 @@ class D2DBackendTests(unittest.TestCase):
                 self.assertEqual(center, bytes((255, 0, 0, 255)))
 
                 path = surface.create_path([
-                    ("move", 0, 0), ("line", 32, 0),
-                    ("line", 32, 32), ("line", 0, 32), ("close",)])
+                    ("move", 4, 4), ("line", 12, 4),
+                    ("line", 12, 12), ("line", 4, 12), ("close",)])
                 retained = surface.create_scene(32, 32, (
-                    ("composite_mask_begin", (0, 0, 32, 32), False, 0),
+                    ("composite_mask_begin", (4, 4, 12, 12), False, 0),
                     ("path", path, 0xffffffff, None, 1.0, None, None),
                     ("composite_mask_end", ()),
                     ("path", path, 0xffff0000, None, 1.0, None, None),
                     ("clip_group_pop", None)))
                 surface.begin_frame(0xff0000ff)
-                surface.draw_scene(retained, (1, 0, 0, 1, 0, 0))
+                surface.draw_scene(retained, (1.25, 0, 0, 1.25, 3, 5))
                 pixels = surface.read_pixels_bgra(32, 32)
                 surface.end_frame()
-                center = pixels[(16 * 32 + 16) * 4:(16 * 32 + 16) * 4 + 4]
+                center = pixels[(12 * 32 + 10) * 4:(12 * 32 + 10) * 4 + 4]
+                outside = pixels[(6 * 32 + 4) * 4:(6 * 32 + 4) * 4 + 4]
                 self.assertEqual(center, bytes((0, 0, 255, 255)))
+                self.assertEqual(outside, bytes((255, 255, 255, 255)))
         finally:
             user32.DestroyWindow(hwnd)
 

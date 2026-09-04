@@ -364,6 +364,15 @@ def _commands_bbox(commands, transform=None):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _image_mask_area(transform, page_rect):
+    bounds = _commands_bbox(UNIT_RECT_COMMANDS, transform)
+    page_x0, page_y0, page_x1, page_y1 = page_rect
+    area = (
+        max(page_x0, bounds[0]), max(page_y0, bounds[1]),
+        min(page_x1, bounds[2]), min(page_y1, bounds[3]))
+    return area if area[2] > area[0] and area[3] > area[1] else None
+
+
 def _rect_path_bbox(commands, transform=None):
     if tuple(command[0] for command in commands) != (
             "move", "line", "line", "line", "close"):
@@ -1849,6 +1858,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
         try:
             source = _mupdf.FzImage(image)
             source.thisown = False
+            transform = _matrix(ctm)
             factor = _image_downsample_factor(
                 int(source.w()), int(source.h()), ctm, self._raster_scale)
             key = self._image_cache_key(source, "clip-mask", (factor,))
@@ -1862,7 +1872,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                 pixmap = self._downsample_pixmap(pixmap, ctm)
                 if pixmap.samples and min(pixmap.samples) == 255:
                     self._append_item(ClipPush(
-                        UNIT_RECT_COMMANDS, transform=_matrix(ctm)))
+                        UNIT_RECT_COMMANDS, transform=transform))
                     self._clip_depth += 1
                     self._features.add("clip-mask")
                     self._features.add("vector-clip")
@@ -1876,10 +1886,13 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     key, bytes(bgra), pixmap.width, pixmap.height,
                     pixmap.width * 4)
             pixels, width, height, stride = cached
+            mask_area = _image_mask_area(transform, self._page_rect)
+            if mask_area is None:
+                return
             self._extend_items((
-                MaskBegin(self._page_rect, False, 0),
+                MaskBegin(mask_area, False, 0),
                 VectorImage(
-                    pixels, width, height, stride, _matrix(ctm),
+                    pixels, width, height, stride, transform,
                     interpolate=bool(source.interpolate())),
                 MaskEnd()))
             self._clip_depth += 1

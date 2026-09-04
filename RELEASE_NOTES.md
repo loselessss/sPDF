@@ -1,4 +1,4 @@
-# sPDF 1.29.3 Release Notes
+# sPDF 1.29.4 Release Notes
 
 Release date: 2026-09-04
 
@@ -63,3 +63,7 @@ Release date: 2026-09-04
 ## 1.29.3 performance improvement - 2026-09-04
 
 - Direct2D pages now keep a retained native scene behind ABI v18, reducing each frame to one Python-to-native scene call. Scenes without bitmap-backed mask or blend captures are additionally compiled into reusable Direct2D command lists.
+
+## 1.29.4 performance improvement - 2026-09-05
+
+- Image masks and geometry clips now use bounded temporary GPU composition surfaces instead of repeatedly copying the whole window, improving interaction on complex poster and leaflet pages while preserving exact page transforms.
