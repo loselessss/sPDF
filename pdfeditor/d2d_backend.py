@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 
-ABI_VERSION = 18
+ABI_VERSION = 19
 DRIVER_NAMES = {0: "none", 1: "hardware", 2: "warp"}
 
 
@@ -391,6 +391,10 @@ class D2DSurface:
                 append(8, resource=resource, transform=values[0])
             elif kind == "clip_group_pop":
                 append(9)
+            elif kind == "rect_clip_push":
+                append(19, transform=values[0], values=values[1])
+            elif kind == "rect_clip_pop":
+                append(20)
             elif kind == "clip_push":
                 append(2, resource=resource, transform=values[0])
             elif kind == "clip_pop":

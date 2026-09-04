@@ -8,6 +8,10 @@ between tiles without sharing documents with workers or delaying tab close.
 from collections import OrderedDict
 import math
 import os
+import pickle
+import shutil
+import subprocess
+import tempfile
 import time
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
@@ -27,10 +31,40 @@ VIEWPORT_PIXELS = 6_000_000
 MAX_VISIBLE_TILES = 48
 GPU_SCENE_TIMEOUT_SECONDS = 1.0
 FORCED_GPU_SCENE_TIMEOUT_SECONDS = 10.0
+AUTO_GPU_SCENE_COMPLEXITY_LIMIT = 5000
+DEFERRED_GPU_SCENE_TIMEOUT_SECONDS = 10.0
+GPU_SCENE_WORKER_TIMEOUT_SECONDS = 12.0
 VECTOR_SCENE_REFINE_DELAY_MS = 120
 ZOOM_ANIMATION_DURATION_SECONDS = 0.12
 ZOOM_ANIMATION_FRAME_MS = 16
 _CURRENT_ZOOM_ANCHOR = object()
+
+
+def _axis_aligned_clip_rect(item):
+    """Return a simple local rectangle that stays axis-aligned on the page."""
+    transform = item.transform
+    if transform is not None and (abs(transform[1]) > 1e-8 or
+                                  abs(transform[2]) > 1e-8):
+        return None
+    points = []
+    for command in item.commands:
+        if command[0] in ("move", "line") and len(command) == 3:
+            points.append((float(command[1]), float(command[2])))
+        elif command[0] != "close":
+            return None
+    if len(points) == 5 and points[-1] == points[0]:
+        points.pop()
+    if len(points) != 4 or len(set(points)) != 4:
+        return None
+    xs = {point[0] for point in points}
+    ys = {point[1] for point in points}
+    if len(xs) != 2 or len(ys) != 2:
+        return None
+    closed = points[1:] + points[:1]
+    if any(first[0] != second[0] and first[1] != second[1]
+           for first, second in zip(points, closed)):
+        return None
+    return min(xs), min(ys), max(xs), max(ys)
 
 
 def opengl_allowed():
@@ -117,6 +151,13 @@ class ReaderPageView(QGraphicsView):
         self._vector_refine_pages = []
         self._vector_refine_document = None
         self._vector_refine_scale = 1.0
+        self._vector_refine_process = None
+        self._vector_refine_job = None
+        self._vector_refine_attempted = set()
+        self._vector_refine_poll_timer = QTimer(self)
+        self._vector_refine_poll_timer.setInterval(30)
+        self._vector_refine_poll_timer.timeout.connect(
+            self._poll_vector_refine_worker)
         self._zoom_animation_timer = QTimer(self)
         self._zoom_animation_timer.setSingleShot(True)
         self._zoom_animation_timer.timeout.connect(self._animate_zoom_step)
@@ -178,6 +219,11 @@ class ReaderPageView(QGraphicsView):
                 return {"mode": "pending", "reason": "scene pending",
                         "features": ()}
             if not scene.supported:
+                if scene.reason in (
+                        "GPU scene deferred by complexity probe",
+                        "GPU scene time budget exceeded"):
+                    return {"mode": "pending", "reason": scene.reason,
+                            "features": scene.features}
                 return {"mode": "fallback", "reason": scene.reason,
                         "features": scene.features}
             bitmap_features = {"image", "stencil", "shading", "clip-mask"}
@@ -199,8 +245,19 @@ class ReaderPageView(QGraphicsView):
         return bucket
 
     def _gpu_vector_page(self, document, page):
+        scale = self._vector_raster_scale()
+        cached = document.cached_gpu_vector_page(page, scale)
+        if cached is not None:
+            return cached
+        if self._render_mode == "auto":
+            score, _operations = document.gpu_scene_complexity(page)
+            if score >= AUTO_GPU_SCENE_COMPLEXITY_LIMIT:
+                from .gpu_raster import VectorPage
+                return VectorPage(
+                    False, reason="GPU scene deferred by complexity probe",
+                    features=("deferred-scene",), raster_scale=scale)
         return document.gpu_vector_page(
-            page, self._vector_raster_scale(),
+            page, scale,
             timeout_seconds=self._gpu_scene_timeout_seconds())
 
     def _gpu_scene_timeout_seconds(self):
@@ -239,9 +296,19 @@ class ReaderPageView(QGraphicsView):
         candidates = []
         for page, _preview, rect in self.canvas._pages:
             scene = self._vector_pages.get(page)
-            if scene is None or not scene.supported or \
-                    "image-downsample" not in scene.features or \
-                    scene.raster_scale >= self._vector_refine_scale:
+            if scene is None:
+                continue
+            generation = getattr(self._document, "render_generation", 0)
+            key = (generation, page, self._vector_refine_scale)
+            deferred = (
+                self._render_mode == "auto" and not scene.supported and
+                scene.reason in ("GPU scene deferred by complexity probe",
+                                 "GPU scene time budget exceeded") and
+                key not in self._vector_refine_attempted)
+            image_refine = (
+                scene.supported and "image-downsample" in scene.features and
+                scene.raster_scale < self._vector_refine_scale)
+            if not deferred and not image_refine:
                 continue
             candidates.append((not rect.intersects(exposed), page))
         self._vector_refine_pages = [page for _hidden, page in sorted(candidates)]
@@ -254,7 +321,18 @@ class ReaderPageView(QGraphicsView):
                 self._vector_raster_scale() != self._vector_refine_scale:
             self._vector_refine_pages.clear()
             return
+        if self._vector_refine_process is not None:
+            # Keep the newest settled-scale request queued while an older
+            # snapshot is still being extracted.
+            return
         page = self._vector_refine_pages.pop(0)
+        scene = self._vector_pages.get(page)
+        if self._render_mode == "auto" and scene is not None and \
+                not scene.supported and scene.reason in (
+                    "GPU scene deferred by complexity probe",
+                    "GPU scene time budget exceeded"):
+            self._start_vector_refine_worker(page)
+            return
         try:
             self._refresh_vector_page_for_zoom(page)
         except Exception as error:
@@ -262,6 +340,120 @@ class ReaderPageView(QGraphicsView):
         self.viewport().update()
         if self._vector_refine_pages:
             self._vector_refine_timer.start(0)
+
+    def _start_vector_refine_worker(self, page):
+        if self._document is None or self._vector_refine_process is not None:
+            return
+        scale = self._vector_refine_scale
+        generation = getattr(self._document, "render_generation", 0)
+        key = (generation, page, scale)
+        self._vector_refine_attempted.add(key)
+        directory = tempfile.mkdtemp(prefix="spdf-gpu-scene-")
+        snapshot_path = os.path.join(directory, "page.pdf")
+        result_path = os.path.join(directory, "scene.pickle")
+        try:
+            with open(snapshot_path, "wb") as stream:
+                stream.write(self._document.gpu_page_snapshot(page))
+            from .paths import gpu_scene_worker_command, is_frozen, resource
+            command = gpu_scene_worker_command()
+            arguments = [snapshot_path, result_path, "--scale", str(scale),
+                         "--timeout", str(DEFERRED_GPU_SCENE_TIMEOUT_SECONDS)]
+            if os.environ.get("SPDF_GPU_AGGRESSIVE_BAND_MERGE", "").lower() in \
+                    ("1", "true", "yes", "on"):
+                arguments.append("--aggressive-band-merge")
+            environment = None
+            cwd = None
+            if not is_frozen():
+                cwd = resource()
+                environment = dict(os.environ)
+                previous = environment.get("PYTHONPATH", "")
+                environment["PYTHONPATH"] = (cwd + os.pathsep + previous
+                                               if previous else cwd)
+            process = subprocess.Popen(
+                command + arguments, cwd=cwd, env=environment,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as error:
+            shutil.rmtree(directory, ignore_errors=True)
+            self.render_failed.emit(str(error))
+            if self._vector_refine_pages:
+                self._vector_refine_timer.start(0)
+            return
+        self._vector_refine_process = process
+        self._vector_refine_job = {
+            "document": self._document, "generation": generation,
+            "page": page, "scale": scale, "directory": directory,
+            "result": result_path,
+            "deadline": time.monotonic() + GPU_SCENE_WORKER_TIMEOUT_SECONDS,
+        }
+        self._vector_refine_poll_timer.start()
+
+    def _poll_vector_refine_worker(self):
+        process = self._vector_refine_process
+        job = self._vector_refine_job
+        if process is None or job is None:
+            self._vector_refine_poll_timer.stop()
+            return
+        if process.poll() is None:
+            if time.monotonic() < job["deadline"]:
+                return
+            if not job.get("terminating"):
+                process.terminate()
+                job["terminating"] = True
+                job["deadline"] = time.monotonic() + 0.5
+            else:
+                process.kill()
+            return
+        self._vector_refine_poll_timer.stop()
+        self._vector_refine_process = None
+        self._vector_refine_job = None
+        scene = None
+        try:
+            if process.returncode == 0 and os.path.isfile(job["result"]):
+                with open(job["result"], "rb") as stream:
+                    scene = pickle.load(stream)
+        except Exception:
+            scene = None
+        finally:
+            shutil.rmtree(job["directory"], ignore_errors=True)
+        document = job["document"]
+        current = (document is self._document and
+                   job["generation"] == getattr(
+                       document, "render_generation", 0) and
+                   job["page"] in self._page_sizes)
+        from .gpu_raster import VectorPage
+        usable = isinstance(scene, VectorPage) and scene.supported
+        scale_matches = (job["scale"] == self._vector_raster_scale() or
+                         (usable and
+                          "image-downsample" not in scene.features))
+        if current and usable:
+            document.install_gpu_vector_page(job["page"], scene)
+        if current and usable and scale_matches:
+            self._discard_native_vector_page(job["page"])
+            self._vector_pages[job["page"]] = scene
+            self.viewport().update()
+        if self._vector_refine_pages:
+            self._vector_refine_timer.start(0)
+
+    def _stop_vector_refine_worker(self):
+        self._vector_refine_poll_timer.stop()
+        process = self._vector_refine_process
+        job = self._vector_refine_job
+        self._vector_refine_process = None
+        self._vector_refine_job = None
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.wait(timeout=0.2)
+                except subprocess.TimeoutExpired:
+                    pass
+        if job is not None:
+            shutil.rmtree(job["directory"], ignore_errors=True)
 
     def rasterization_device(self, page):
         """Last completed page frame, not the device used to composite tiles.
@@ -433,18 +625,64 @@ class ReaderPageView(QGraphicsView):
             isinstance(item, MaskBegin) or
             (isinstance(item, GroupPush) and
              (item.blend_mode or item.knockout)) for item in items)
+        composite_clips = set()
+        if composite_groups:
+            open_clips = []
+            for position, item in enumerate(items):
+                if isinstance(item, (ClipPush, ClipStrokePush)):
+                    open_clips.append(position)
+                    continue
+                if isinstance(item, MaskBegin):
+                    composite_clips.update(
+                        opener for opener in open_clips
+                        if opener is not None)
+                    # MaskEnd turns the capture into a clip that is closed by
+                    # the following ClipPop, just like an explicit clip push.
+                    open_clips.append(None)
+                    continue
+                if isinstance(item, GroupPush):
+                    # A composite target cannot be entered while an ordinary
+                    # Direct2D layer is open. Only clips that actually enclose
+                    # the target switch need the more expensive bitmap-backed
+                    # clip group; unrelated clips stay as native layers.
+                    composite_clips.update(
+                        opener for opener in open_clips
+                        if opener is not None)
+                    continue
+                if isinstance(item, ClipPop) and open_clips:
+                    open_clips.pop()
+        axis_clips = {}
+        if self._render_mode in ("auto", "gpu"):
+            axis_clips = {
+                position: rect
+                for position, item in enumerate(items)
+                if position not in composite_clips and
+                isinstance(item, ClipPush) and
+                (rect := _axis_aligned_clip_rect(item)) is not None
+            }
         clip_groups = []
         index = 0
         while index < len(items):
             item = items[index]
             if isinstance(item, (ClipPush, ClipStrokePush)):
-                clip_groups.append(composite_groups)
-                kind = "clip_group_push" if composite_groups else "clip_push"
-                draws.append((kind, native_items[index], item.transform))
+                composite_clip = index in composite_clips
+                axis_rect = axis_clips.get(index)
+                clip_kind = ("group" if composite_clip else
+                             "axis" if axis_rect is not None else "path")
+                clip_groups.append(clip_kind)
+                kind = ("clip_group_push" if composite_clip else
+                        "rect_clip_push" if axis_rect is not None else
+                        "clip_push")
+                values = ((item.transform, axis_rect)
+                          if axis_rect is not None else (item.transform,))
+                draws.append((kind, native_items[index], *values))
                 index += 1
                 continue
             if isinstance(item, ClipPop):
-                kind = "clip_group_pop" if clip_groups.pop() else "clip_pop"
+                clip_kind = clip_groups.pop()
+                kind = ("clip_group_pop" if clip_kind == "group" else
+                        "rect_clip_pop" if clip_kind == "axis" else
+                        "clip_pop")
                 draws.append((kind, None))
                 index += 1
                 continue
@@ -467,7 +705,7 @@ class ReaderPageView(QGraphicsView):
                 index += 1
                 continue
             if isinstance(item, MaskEnd):
-                clip_groups.append(composite_groups)
+                clip_groups.append("group" if composite_groups else "path")
                 kind = "composite_mask_end" if composite_groups else "mask_end"
                 draws.append((kind, item.transfer))
                 index += 1
@@ -555,6 +793,15 @@ class ReaderPageView(QGraphicsView):
                 continue
             if kind == "clip_group_pop":
                 self._d2d_surface.end_clip_group()
+                continue
+            if kind == "rect_clip_push":
+                # Retained ABI v19 scenes use an axis-aligned clip. Keep the
+                # direct fallback on the exact geometry path.
+                self._set_item_transform(page_transform, values[0])
+                self._d2d_surface.push_clip_path(resource)
+                continue
+            if kind == "rect_clip_pop":
+                self._d2d_surface.pop_clip()
                 continue
             if kind == "clip_push":
                 self._set_item_transform(page_transform, values[0])
@@ -709,6 +956,7 @@ class ReaderPageView(QGraphicsView):
         self._rasterized_pages.clear()
         changed = document is not self._document
         if changed:
+            self._vector_refine_attempted.clear()
             if (self._document is None or
                     os.path.normcase(os.path.abspath(self._document.path)) !=
                     os.path.normcase(os.path.abspath(document.path))):
@@ -751,6 +999,7 @@ class ReaderPageView(QGraphicsView):
         self.canvas._active_page = active_page
         self._layout_pages()
         self._schedule_refine()
+        self._schedule_vector_refine()
         self._notify_render_device()
 
     def page_rotation(self, page):
@@ -809,7 +1058,8 @@ class ReaderPageView(QGraphicsView):
             anchor = self.canvas._page_point(self.mapToScene(position))
         old_zoom = self.zoom
         self.zoom = max(self.ZOOM_MIN, min(self.ZOOM_MAX, zoom))
-        self.stop_rendering(keep_zoom_animation=True)
+        self.stop_rendering(
+            keep_zoom_animation=True, keep_vector_refine_worker=True)
         self._layout_pages()
         if anchor is not None:
             page, point = anchor
@@ -982,10 +1232,13 @@ class ReaderPageView(QGraphicsView):
         self._tile_bytes = 0
         self._wanted.clear()
 
-    def stop_rendering(self, *, keep_zoom_animation=False):
+    def stop_rendering(self, *, keep_zoom_animation=False,
+                       keep_vector_refine_worker=False):
         self._refine_timer.stop()
         self._tile_timer.stop()
         self._vector_refine_timer.stop()
+        if not keep_vector_refine_worker:
+            self._stop_vector_refine_worker()
         if not keep_zoom_animation:
             self._zoom_animation_timer.stop()
         self._pending.clear()
@@ -1108,6 +1361,7 @@ class ReaderPageView(QGraphicsView):
         if self._d2d_requested:
             QTimer.singleShot(0, self.viewport().update)
         self._schedule_refine()
+        self._schedule_vector_refine()
 
     def hideEvent(self, event):
         self.stop_rendering()

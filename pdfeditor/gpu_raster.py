@@ -37,6 +37,13 @@ FZ_LINEAR_SHADE = 2
 FZ_RADIAL_SHADE = 3
 FZ_LINEAR_SHADE_UNION_OFFSET = 224
 GLYPH_ENCODERS = ("fz_encode_character", "fz_encode_character_sc")
+GPU_SCENE_PROBE_OPERATIONS = (
+    "fill_path", "stroke_path", "clip_path", "pop_clip",
+    "fill_text", "stroke_text", "clip_text", "clip_stroke_text",
+    "clip_stroke_path", "fill_image", "fill_image_mask",
+    "clip_image_mask", "fill_shade", "begin_mask", "end_mask",
+    "begin_group", "end_group", "begin_tile", "end_tile",
+)
 
 
 @dataclass(frozen=True)
@@ -175,6 +182,90 @@ class _PathWalker(_mupdf.FzPathWalker2):
 
     def closepath(self, _context):
         self.commands.append(("close",))
+
+
+class _SceneProbeDevice(_mupdf.FzDevice2):
+    """Count display-list complexity without decoding or walking resources."""
+
+    def __init__(self):
+        super().__init__()
+        for name in GPU_SCENE_PROBE_OPERATIONS:
+            getattr(self, "use_virtual_" + name)()
+        self.score = 0
+        self.operations = 0
+
+    def _hit(self, weight=1):
+        self.operations += 1
+        self.score += weight
+
+    def fill_path(self, *_args):
+        self._hit()
+
+    def stroke_path(self, *_args):
+        self._hit()
+
+    def clip_path(self, *_args):
+        self._hit()
+
+    def pop_clip(self, *_args):
+        self._hit()
+
+    def fill_text(self, *_args):
+        self._hit(8)
+
+    def stroke_text(self, *_args):
+        self._hit(8)
+
+    def clip_text(self, *_args):
+        self._hit(8)
+
+    def clip_stroke_text(self, *_args):
+        self._hit(8)
+
+    def clip_stroke_path(self, *_args):
+        self._hit()
+
+    def fill_image(self, *_args):
+        self._hit(4)
+
+    def fill_image_mask(self, *_args):
+        self._hit(4)
+
+    def clip_image_mask(self, *_args):
+        self._hit(4)
+
+    def fill_shade(self, *_args):
+        self._hit(8)
+
+    def begin_mask(self, *_args):
+        self._hit(8)
+
+    def end_mask(self, *_args):
+        self._hit()
+
+    def begin_group(self, *_args):
+        self._hit(8)
+
+    def end_group(self, *_args):
+        self._hit()
+
+    def begin_tile(self, *_args):
+        self._hit(8)
+        return 0
+
+    def end_tile(self, *_args):
+        self._hit()
+
+
+def probe_gpu_scene_complexity(page):
+    """Return ``(weighted score, operations)`` from a cheap full-page pass."""
+    cookie = _mupdf.FzCookie()
+    device = _SceneProbeDevice()
+    try:
+        _mupdf.fz_run_page(page.this, device, _mupdf.FzMatrix(), cookie)
+        return device.score, device.operations
+    finally:
+        _mupdf.fz_close_device(device)
 
 
 def _path_commands(path, *, allow_empty=False):

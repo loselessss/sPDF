@@ -80,11 +80,13 @@ def _render_diagnostic_summary(info):
     reason = str(info.get("reason", "") or "")
     features = tuple(info.get("features", ()))
     labels = {
-        "direct": localize("GPU direct", "GPU 직접"),
-        "composite": localize("GPU composite", "GPU 합성"),
-        "fallback": localize("CPU fallback", "CPU 대체"),
-        "pending": localize("GPU preparing", "GPU 준비 중"),
-        "cpu": "CPU",
+        "direct": localize("GPU rendering", "GPU 렌더링"),
+        "composite": localize(
+            "GPU rendering (composited)", "GPU 렌더링(합성)"),
+        "fallback": localize("CPU rendering", "CPU 렌더링"),
+        "pending": localize(
+            "CPU now · GPU preparing", "현재 CPU · GPU 준비 중"),
+        "cpu": localize("CPU rendering", "CPU 렌더링"),
     }
     reason_labels = (
         (("begin-mask", "end-mask"), localize("soft mask", "소프트 마스크")),
@@ -102,6 +104,8 @@ def _render_diagnostic_summary(info):
             short_reason = label
             break
     text = labels.get(mode, labels["cpu"])
+    if mode == "composite" and "shading" in features:
+        text = localize("CPU+GPU rendering", "CPU+GPU 렌더링")
     if mode == "fallback" and short_reason:
         text += " · " + short_reason
     feature_names = {
@@ -123,13 +127,26 @@ def _render_diagnostic_summary(info):
             "stroked text clip", "윤곽선 글자 클리핑"),
         "stroked-vector-clip": localize(
             "stroked vector clip", "선 클리핑"),
+        "deferred-scene": localize(
+            "background GPU preparation", "백그라운드 GPU 준비"),
     }
-    tooltip = localize("Page rendering: ", "페이지 렌더링: ") + text
+    detail = reason
+    if reason == "GPU scene deferred by complexity probe":
+        detail = localize(
+            "This complex page is displayed by the CPU while its GPU scene is prepared in the background.",
+            "복잡한 쪽을 CPU로 먼저 표시하면서 GPU 장면을 백그라운드에서 준비하고 있습니다.")
+    elif reason == "GPU scene time budget exceeded":
+        detail = localize(
+            "The page did not finish GPU preparation within the interactive budget, so CPU display remains visible while background preparation continues.",
+            "대화형 준비 시간 안에 GPU 장면이 끝나지 않아 CPU 화면을 유지하면서 백그라운드 준비를 계속합니다.")
+    tooltip = localize(
+        "Current page rendering: ", "현재 페이지 렌더링: ") + text
     if features:
-        tooltip += "\n" + localize("Features: ", "기능: ") + ", ".join(
+        tooltip += "\n" + localize(
+            "GPU scene contents: ", "GPU 장면 구성: ") + ", ".join(
             feature_names.get(feature, feature) for feature in features)
-    if reason:
-        tooltip += "\n" + localize("Detail: ", "상세: ") + reason
+    if detail:
+        tooltip += "\n" + localize("Status: ", "상태: ") + detail
     return text, tooltip
 
 

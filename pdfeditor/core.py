@@ -78,6 +78,8 @@ class Document:
         self._display_cache = {}
         self._gpu_vector_cache = OrderedDict()
         self._gpu_vector_cache_bytes = 0
+        self._gpu_scene_probe_cache = {}
+        self._render_generation = 0
         sidecar_exists = os.path.exists(os.path.realpath(path) + ".spdf-annotations.json")
         if self.read_only and (self.annotation_mode or sidecar_exists):
             try:
@@ -111,6 +113,8 @@ class Document:
         document._display_cache = {}
         document._gpu_vector_cache = OrderedDict()
         document._gpu_vector_cache_bytes = 0
+        document._gpu_scene_probe_cache = {}
+        document._render_generation = 0
         return document
 
     @staticmethod
@@ -132,6 +136,7 @@ class Document:
             self._display_cache.clear()
             self._gpu_vector_cache.clear()
             self._gpu_vector_cache_bytes = 0
+            self._gpu_scene_probe_cache.clear()
             self._doc.close()
             self._doc = None
         if getattr(self, "_snapshot", None) is not None:
@@ -200,12 +205,15 @@ class Document:
         return pix.x, pix.y, pix.width, pix.height, pix.stride, pix.samples
 
     def invalidate_render(self, index=None):
+        self._render_generation += 1
         if index is None:
             self._display_cache.clear()
             self._gpu_vector_cache.clear()
             self._gpu_vector_cache_bytes = 0
+            self._gpu_scene_probe_cache.clear()
         else:
             self._display_cache.pop(index, None)
+            self._gpu_scene_probe_cache.pop(index, None)
             for key in tuple(self._gpu_vector_cache):
                 if key[0] == index:
                     scene = self._gpu_vector_cache.pop(key, None)
@@ -242,6 +250,57 @@ class Document:
                 self._gpu_vector_cache_bytes -= _gpu_scene_cost(old_scene)
         else:
             self._gpu_vector_cache.move_to_end(key)
+        return scene
+
+    def cached_gpu_vector_page(self, index, raster_scale=1.0):
+        """Return a reusable supported scene without starting extraction."""
+        scale = max(1.0, float(raster_scale))
+        aggressive_band_merge = _aggressive_gpu_band_merge_enabled()
+        for cached_key, candidate in reversed(self._gpu_vector_cache.items()):
+            if cached_key[0] != index or \
+                    cached_key[2] != aggressive_band_merge or \
+                    not candidate.supported:
+                continue
+            if candidate.raster_scale >= scale or \
+                    "image-downsample" not in candidate.features:
+                self._gpu_vector_cache.move_to_end(cached_key)
+                return candidate
+        return None
+
+    @property
+    def render_generation(self):
+        return self._render_generation
+
+    def gpu_scene_complexity(self, index):
+        result = self._gpu_scene_probe_cache.get(index)
+        if result is None:
+            from .gpu_raster import probe_gpu_scene_complexity
+            result = probe_gpu_scene_complexity(self._doc[index])
+            self._gpu_scene_probe_cache[index] = result
+        return result
+
+    def gpu_page_snapshot(self, index):
+        """Return one current page as an isolated worker-safe PDF snapshot."""
+        snapshot = fitz.open()
+        try:
+            snapshot.insert_pdf(self._doc, from_page=index, to_page=index)
+            return snapshot.tobytes(garbage=0, deflate=True)
+        finally:
+            snapshot.close()
+
+    def install_gpu_vector_page(self, index, scene):
+        """Install a scene produced from the current page snapshot."""
+        aggressive_band_merge = _aggressive_gpu_band_merge_enabled()
+        key = (index, float(scene.raster_scale), aggressive_band_merge)
+        previous = self._gpu_vector_cache.pop(key, None)
+        if previous is not None:
+            self._gpu_vector_cache_bytes -= _gpu_scene_cost(previous)
+        self._gpu_vector_cache[key] = scene
+        self._gpu_vector_cache_bytes += _gpu_scene_cost(scene)
+        while (self._gpu_vector_cache_bytes > GPU_VECTOR_CACHE_BYTES and
+               len(self._gpu_vector_cache) > 1):
+            _old_key, old_scene = self._gpu_vector_cache.popitem(last=False)
+            self._gpu_vector_cache_bytes -= _gpu_scene_cost(old_scene)
         return scene
 
     def page_size(self, index):
@@ -937,6 +996,8 @@ class Document:
         self._display_cache = {}
         self._gpu_vector_cache.clear()
         self._gpu_vector_cache_bytes = 0
+        self._gpu_scene_probe_cache.clear()
+        self._render_generation += 1
 
     # --- 저장 -------------------------------------------------------
 

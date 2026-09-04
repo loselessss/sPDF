@@ -91,7 +91,7 @@ a_gui = Analysis(
     binaries=[(str(d2d_renderer), "native")],
     datas=[("assets/spdf.ico", "assets"),
            ("assets/spdf_doc.ico", "assets")] + legal_datas,
-    hiddenimports=["pdfeditor", "fitz"],
+    hiddenimports=["pdfeditor", "fitz", "pdfeditor.gpu_scene_worker"],
     excludes=["rapidocr", "onnxruntime", "cv2", "onnx", "tensorrt", "paddle",
               "tkinter", "matplotlib"],
 )

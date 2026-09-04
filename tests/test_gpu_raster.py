@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+import pickle
 import unittest
 from unittest.mock import patch
 
@@ -1064,6 +1065,35 @@ class GpuRasterSceneTests(unittest.TestCase):
             self.document._doc[0], timeout_seconds=0)
         self.assertFalse(scene.supported)
         self.assertEqual(scene.reason, "GPU scene time budget exceeded")
+
+    def test_scene_complexity_probe_is_cached_and_invalidated(self):
+        score, operations = self.document.gpu_scene_complexity(0)
+        self.assertGreaterEqual(score, operations)
+        self.assertGreater(operations, 0)
+        with patch(
+                "pdfeditor.gpu_raster.probe_gpu_scene_complexity") as probe:
+            self.assertEqual(
+                self.document.gpu_scene_complexity(0), (score, operations))
+            probe.assert_not_called()
+            self.document.invalidate_render(0)
+            probe.return_value = (123, 45)
+            self.assertEqual(self.document.gpu_scene_complexity(0), (123, 45))
+
+    def test_gpu_scene_worker_builds_pickled_snapshot_scene(self):
+        from pdfeditor.gpu_scene_worker import main as worker_main
+
+        snapshot = self.document.gpu_page_snapshot(0)
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot_path = Path(directory) / "page.pdf"
+            result_path = Path(directory) / "scene.pickle"
+            snapshot_path.write_bytes(snapshot)
+            self.assertEqual(worker_main([
+                str(snapshot_path), str(result_path), "--timeout", "2",
+            ]), 0)
+            with result_path.open("rb") as stream:
+                scene = pickle.load(stream)
+        self.assertTrue(scene.supported, scene.reason)
+        self.assertGreater(len(scene.drawables), 0)
 
     def test_original_font_cmap_can_recover_missing_glyph_id(self):
         from pdfeditor.gpu_raster import _encoded_glyph_id

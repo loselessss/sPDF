@@ -1,6 +1,6 @@
-# sPDF 1.29.4 Release Notes
+# sPDF 1.29.5 Release Notes
 
-Release date: 2026-09-04
+Release date: 2026-09-05
 
 ## 1.28.0 highlights - 2026-09-02
 
@@ -67,3 +67,11 @@ Release date: 2026-09-04
 ## 1.29.4 performance improvement - 2026-09-05
 
 - Image masks and geometry clips now use bounded temporary GPU composition surfaces instead of repeatedly copying the whole window, improving interaction on complex poster and leaflet pages while preserving exact page transforms.
+
+## 1.29.5 performance improvements - 2026-09-05
+
+- Ordinary geometry clips on pages containing masks or blend groups now avoid unnecessary temporary GPU composition surfaces.
+- Retained GPU scenes reuse gradient resources across frames, making zooming and panning substantially more responsive on gradient-heavy pages.
+- Automatic and forced GPU modes accelerate simple rectangular clipping while keeping page coordinates and transforms exact. The native renderer ABI is now v19.
+- Automatic mode quickly identifies highly complex pages, displays the CPU-rendered page first, and seamlessly replaces it with the GPU scene after background preparation completes.
+- Deferred GPU preparation now starts reliably when a document tab becomes visible, and rendering diagnostics clearly distinguish the current CPU/GPU path from background GPU preparation.

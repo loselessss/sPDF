@@ -9,7 +9,7 @@
 #define SPDF_D2D_API extern "C" __declspec(dllimport)
 #endif
 
-constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 18;
+constexpr std::uint32_t SPDF_D2D_ABI_VERSION = 19;
 constexpr std::uint32_t SPDF_D2D_ADAPTER_NAME_LENGTH = 128;
 
 enum SpdfD2DDriver : std::uint32_t {
@@ -72,6 +72,8 @@ enum SpdfD2DSceneCommandType : std::uint32_t {
     SPDF_D2D_SCENE_PATH_STROKE = 16,
     SPDF_D2D_SCENE_LINEAR_GRADIENT = 17,
     SPDF_D2D_SCENE_RADIAL_GRADIENT = 18,
+    SPDF_D2D_SCENE_RECT_CLIP_PUSH = 19,
+    SPDF_D2D_SCENE_RECT_CLIP_POP = 20,
 };
 
 constexpr std::uint32_t SPDF_D2D_SCENE_HAS_TRANSFORM = 1;

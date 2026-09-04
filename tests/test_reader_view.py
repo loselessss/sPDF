@@ -3,6 +3,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import pickle
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -294,7 +295,24 @@ class ReaderViewTests(unittest.TestCase):
         fallback = self.view.render_diagnostic(2)
         self.assertEqual(fallback["mode"], "fallback")
         self.assertEqual(fallback["reason"], "unsupported operation: begin-mask")
+        self.view._vector_pages[3] = VectorPage(
+            False, reason="GPU scene deferred by complexity probe",
+            features=("deferred-scene",))
+        self.assertEqual(self.view.render_diagnostic(3)["mode"], "pending")
         self.view._d2d_requested = False
+
+    def test_pending_diagnostic_names_current_cpu_and_future_gpu(self):
+        from pdfeditor.app import _render_diagnostic_summary
+
+        text, tooltip = _render_diagnostic_summary({
+            "mode": "pending",
+            "reason": "GPU scene deferred by complexity probe",
+            "features": ("deferred-scene",),
+        })
+        self.assertIn("CPU", text)
+        self.assertIn("GPU", text)
+        self.assertIn("CPU", tooltip)
+        self.assertIn("GPU", tooltip)
 
     def test_raster_label_tracks_completed_frames_not_composition_device(self):
         from types import SimpleNamespace
@@ -562,6 +580,88 @@ class ReaderViewTests(unittest.TestCase):
             self.view._gpu_scene_timeout_seconds(),
             reader_view.GPU_SCENE_TIMEOUT_SECONDS)
 
+    def test_auto_complex_scene_defers_extraction_and_queues_worker(self):
+        from pdfeditor.gpu_raster import VectorPage
+
+        self.view._render_mode = "auto"
+        with patch.object(
+                self.doc, "cached_gpu_vector_page", return_value=None), \
+                patch.object(
+                    self.doc, "gpu_scene_complexity",
+                    return_value=(5000, 1000)), \
+                patch.object(self.doc, "gpu_vector_page") as vector_page:
+            scene = self.view._gpu_vector_page(self.doc, 0)
+        vector_page.assert_not_called()
+        self.assertFalse(scene.supported)
+        self.assertEqual(scene.features, ("deferred-scene",))
+
+        self.view._vector_pages[0] = scene
+        self.view._schedule_vector_refine(1000)
+        self.view._vector_refine_timer.stop()
+        self.assertEqual(self.view._vector_refine_pages, [0])
+
+    def test_showing_deferred_page_schedules_background_gpu_scene(self):
+        from pdfeditor.gpu_raster import VectorPage
+
+        self.view._render_mode = "auto"
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = VectorPage(
+            False, reason="GPU scene deferred by complexity probe",
+            features=("deferred-scene",))
+        self.view.hide()
+        self.app.processEvents()
+        with patch.object(
+                self.view, "_schedule_vector_refine") as schedule:
+            self.view.show()
+            self.app.processEvents()
+        schedule.assert_called()
+
+    def test_completed_worker_installs_and_swaps_supported_scene(self):
+        from pdfeditor.gpu_raster import VectorPage, VectorPath
+
+        scene = VectorPage(True, (VectorPath(
+            (("move", 10, 10), ("line", 20, 20)),
+            stroke_argb=0xff000000),))
+        process = Mock(returncode=0)
+        process.poll.return_value = 0
+        directory = tempfile.mkdtemp(prefix="spdf-worker-test-")
+        result = Path(directory) / "scene.pickle"
+        with result.open("wb") as stream:
+            pickle.dump(scene, stream)
+        self.view._vector_pages[0] = VectorPage(
+            False, reason="GPU scene deferred by complexity probe",
+            features=("deferred-scene",))
+        self.view._vector_refine_process = process
+        self.view._vector_refine_job = {
+            "document": self.doc,
+            "generation": self.doc.render_generation,
+            "page": 0,
+            "scale": self.view._vector_raster_scale(),
+            "directory": directory,
+            "result": str(result),
+            "deadline": 0,
+        }
+
+        self.view._poll_vector_refine_worker()
+
+        installed = self.view._vector_pages[0]
+        self.assertEqual(installed, scene)
+        self.assertIs(
+            self.doc.cached_gpu_vector_page(
+                0, self.view._vector_raster_scale()), installed)
+        self.assertFalse(Path(directory).exists())
+
+    def test_zoom_does_not_cancel_running_scene_worker(self):
+        process = Mock()
+        process.poll.return_value = None
+        self.view._vector_refine_process = process
+        self.view._vector_refine_job = None
+
+        self.view.preview_zoom(2)
+
+        process.terminate.assert_not_called()
+        self.view._vector_refine_process = None
+
     def test_stroked_clip_path_is_widened_then_pushed_on_gpu(self):
         from pdfeditor.gpu_raster import ClipPop, ClipStrokePush, VectorPage
 
@@ -618,7 +718,7 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
 
-    def test_blended_scene_routes_geometry_clips_through_backdrop_captures(self):
+    def test_blended_scene_only_captures_clip_crossing_target_switch(self):
         from pdfeditor.gpu_raster import (ClipPush, ClipStrokePush, ClipPop,
                                          GroupPush, GroupPop, VectorPage)
         commands = (("move", 0, 0), ("line", 50, 0), ("line", 50, 50), ("close",))
@@ -638,11 +738,40 @@ class ReaderViewTests(unittest.TestCase):
                 "begin_clip_group", "end_clip_group", "begin_composite_group",
                 "end_composite_group")]
             self.assertEqual(events, ["begin_composite_group", "begin_clip_group",
-                "begin_composite_group", "begin_clip_group", "end_clip_group",
-                "end_composite_group", "end_clip_group", "end_composite_group"])
+                "begin_composite_group", "end_composite_group",
+                "end_clip_group", "end_composite_group"])
             surface.create_stroked_path.assert_called_once()
-            surface.push_clip_path.assert_not_called()
-            surface.pop_clip.assert_not_called()
+            surface.push_clip_path.assert_called_once()
+            surface.pop_clip.assert_called_once()
+        finally:
+            self.view._d2d_surface = None
+            self.view._d2d_vector_paths.clear()
+            self.view._d2d_requested = False
+
+    def test_blended_scene_keeps_unrelated_clip_as_native_layer(self):
+        from pdfeditor.gpu_raster import (ClipPop, ClipPush, GroupPop,
+                                         GroupPush, VectorPage, VectorPath)
+        commands = (("move", 0, 0), ("line", 50, 0),
+                    ("line", 50, 50), ("close",))
+        drawing = VectorPath(commands, fill_argb=0xff0080ff)
+        scene = VectorPage(True, items=(
+            GroupPush(.5, 9), drawing, GroupPop(),
+            ClipPush(commands), drawing, ClipPop()))
+        path = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = path
+        self.view._d2d_surface = surface
+        self.view._d2d_requested = True
+        self.view._vector_pages[0] = scene
+        ratio = max(1.0, self.view.viewport().devicePixelRatioF())
+        self.view._d2d_size = (self.view.viewport().size(), ratio)
+        try:
+            self.view._paint_d2d()
+            surface.begin_composite_group.assert_called_once_with(9, .5, False)
+            surface.push_clip_path.assert_called_once_with(path)
+            surface.pop_clip.assert_called_once_with()
+            surface.begin_clip_group.assert_not_called()
+            surface.end_clip_group.assert_not_called()
         finally:
             self.view._d2d_surface = None
             self.view._d2d_vector_paths.clear()
@@ -801,6 +930,28 @@ class ReaderViewTests(unittest.TestCase):
         self.view._d2d_surface = None
         self.view._d2d_vector_paths.clear()
         self.view._d2d_requested = False
+
+    def test_auto_gpu_scene_uses_axis_clip_for_simple_rectangle(self):
+        from pdfeditor.gpu_raster import (ClipPop, ClipPush, VectorPage,
+                                          VectorPath)
+
+        commands = (("move", 10, 20), ("line", 90, 20),
+                    ("line", 90, 70), ("line", 10, 70), ("close",))
+        drawing = VectorPath(commands, fill_argb=0xff0080ff)
+        scene = VectorPage(True, items=(ClipPush(commands), drawing, ClipPop()))
+        path = Mock(closed=False)
+        surface = Mock()
+        surface.create_path.return_value = path
+        self.view._d2d_surface = surface
+        self.view._render_mode = "auto"
+        try:
+            draws = self.view._native_vector_draws(0, scene)
+            self.assertEqual(draws[0], (
+                "rect_clip_push", path, None, (10.0, 20.0, 90.0, 70.0)))
+            self.assertEqual(draws[-1], ("rect_clip_pop", None))
+        finally:
+            self.view._d2d_surface = None
+            self.view._d2d_vector_paths.clear()
 
     def test_transparency_group_uses_opacity_layer_in_order(self):
         from pdfeditor.gpu_raster import (GroupPop, GroupPush, VectorPage,

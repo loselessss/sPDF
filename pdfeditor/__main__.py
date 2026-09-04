@@ -2,6 +2,11 @@ import sys
 
 
 def main():
+    if "--gpu-scene-worker" in sys.argv:
+        from .gpu_scene_worker import main as gpu_scene_main
+        index = sys.argv.index("--gpu-scene-worker")
+        sys.exit(gpu_scene_main(sys.argv[index + 1:]))
+
     # GUI와 OCR 작업 프로세스가 Windows에서 같은 sPDF 앱으로 인식되도록
     # 어떤 실행 모드에서도 UI/작업 초기화보다 먼저 명시한다.
     from .windows_integration import set_current_process_app_id

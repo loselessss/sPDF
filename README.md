@@ -8,7 +8,7 @@ editing, annotations, offline OCR, and multi-document tools in one application.
 Documents stay on your
 computer unless you explicitly use an external link or optional model download.
 
-**Current version: 1.29.4** · English and Korean interface · Windows
+**Current version: 1.29.5** · English and Korean interface · Windows
 
 ## What sPDF is for
 
@@ -200,9 +200,9 @@ Standalone users can also choose **Auto**, **GPU (Direct2D)**, or **CPU
 (PyMuPDF)** in the display-renderer menu; restart sPDF after changing it. The
 document window title shows the active `[GPU]` or `[CPU]` path, and the GPU
 choice is disabled when Direct2D hardware rendering is unavailable.
-Enable **Rendering diagnostics** in the same menu to show whether the current
-page is using direct GPU drawing, GPU composition, or the CPU fallback, including
-the fallback reason.
+Enable **Rendering diagnostics** in the same menu to label the current page as
+CPU rendering, GPU rendering, CPU+GPU rendering, or CPU display while a GPU scene
+is prepared in the background. Its tooltip explains the current state and scene contents.
 
 ```bash
 pip install PyQt5 PyMuPDF rapidocr onnxruntime

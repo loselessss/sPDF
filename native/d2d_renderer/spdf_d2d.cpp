@@ -233,7 +233,8 @@ public:
 
     HRESULT begin_frame(std::uint32_t argb) noexcept {
         if (!d2d_context_ || !target_ || drawing_ || layer_depth_ != 0 ||
-                !mask_captures_.empty() || !composite_captures_.empty()) {
+                axis_clip_depth_ != 0 || !mask_captures_.empty() ||
+                !composite_captures_.empty()) {
             return E_UNEXPECTED;
         }
         const auto alpha = static_cast<float>((argb >> 24) & 0xff) / 255.0f;
@@ -574,6 +575,27 @@ public:
         return S_OK;
     }
 
+    HRESULT push_axis_aligned_clip(
+        float left, float top, float right, float bottom) noexcept {
+        if (!drawing_ || !std::isfinite(left) || !std::isfinite(top) ||
+                !std::isfinite(right) || !std::isfinite(bottom) ||
+                right <= left || bottom <= top) {
+            return E_INVALIDARG;
+        }
+        d2d_context_->PushAxisAlignedClip(
+            D2D1::RectF(left, top, right, bottom),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        ++axis_clip_depth_;
+        return S_OK;
+    }
+
+    HRESULT pop_axis_aligned_clip() noexcept {
+        if (!drawing_ || axis_clip_depth_ == 0) return E_UNEXPECTED;
+        d2d_context_->PopAxisAlignedClip();
+        --axis_clip_depth_;
+        return S_OK;
+    }
+
     HRESULT pop_clip() noexcept {
         return pop_layer();
     }
@@ -748,7 +770,8 @@ public:
         const D2D1_RECT_F* capture_bounds = nullptr) noexcept {
         // No implicit layer may cross a target switch. The scene validator
         // rejects these combinations before any page drawing starts.
-        if (!drawing_ || layer_depth_ != 0 || !mask_captures_.empty() ||
+        if (!drawing_ || layer_depth_ != 0 || axis_clip_depth_ != 0 ||
+                !mask_captures_.empty() ||
                 mode > 15 || !std::isfinite(opacity) || opacity < 0 || opacity > 1 ||
                 (clip != nullptr && (clip->owner != this || !clip->resource))) {
             return E_INVALIDARG;
@@ -1278,30 +1301,39 @@ public:
         float end_y,
         const SpdfD2DGradientStop* stops,
         std::uint32_t stop_count) noexcept {
-        if (!drawing_ || path == nullptr || path->owner != this ||
-                !path->resource || !std::isfinite(start_x) ||
+        ComPtr<ID2D1LinearGradientBrush> brush;
+        auto result = create_linear_gradient_brush(
+            start_x, start_y, end_x, end_y, stops, stop_count, &brush);
+        if (FAILED(result)) return result;
+        return fill_gradient_path(path, brush.Get());
+    }
+
+    HRESULT create_linear_gradient_brush(
+        float start_x,
+        float start_y,
+        float end_x,
+        float end_y,
+        const SpdfD2DGradientStop* stops,
+        std::uint32_t stop_count,
+        ID2D1LinearGradientBrush** brush) noexcept {
+        if (!d2d_context_ || brush == nullptr || !std::isfinite(start_x) ||
                 !std::isfinite(start_y) || !std::isfinite(end_x) ||
                 !std::isfinite(end_y)) {
             return E_INVALIDARG;
         }
+        *brush = nullptr;
         ComPtr<ID2D1GradientStopCollection> collection;
         auto result = create_gradient_stop_collection(
             stops, stop_count, &collection);
         if (FAILED(result)) {
             return result;
         }
-        ComPtr<ID2D1LinearGradientBrush> brush;
-        result = d2d_context_->CreateLinearGradientBrush(
+        return d2d_context_->CreateLinearGradientBrush(
             D2D1::LinearGradientBrushProperties(
                 D2D1::Point2F(start_x, start_y),
                 D2D1::Point2F(end_x, end_y)),
             collection.Get(),
-            &brush);
-        if (FAILED(result)) {
-            return result;
-        }
-        d2d_context_->FillGeometry(path->resource.Get(), brush.Get());
-        return S_OK;
+            brush);
     }
 
     HRESULT fill_radial_gradient(
@@ -1314,33 +1346,54 @@ public:
         float radius_y,
         const SpdfD2DGradientStop* stops,
         std::uint32_t stop_count) noexcept {
-        if (!drawing_ || path == nullptr || path->owner != this ||
-                !path->resource || !std::isfinite(center_x) ||
+        ComPtr<ID2D1RadialGradientBrush> brush;
+        auto result = create_radial_gradient_brush(
+            center_x, center_y, origin_x, origin_y, radius_x, radius_y,
+            stops, stop_count, &brush);
+        if (FAILED(result)) return result;
+        return fill_gradient_path(path, brush.Get());
+    }
+
+    HRESULT create_radial_gradient_brush(
+        float center_x,
+        float center_y,
+        float origin_x,
+        float origin_y,
+        float radius_x,
+        float radius_y,
+        const SpdfD2DGradientStop* stops,
+        std::uint32_t stop_count,
+        ID2D1RadialGradientBrush** brush) noexcept {
+        if (!d2d_context_ || brush == nullptr || !std::isfinite(center_x) ||
                 !std::isfinite(center_y) || !std::isfinite(origin_x) ||
                 !std::isfinite(origin_y) || !std::isfinite(radius_x) ||
                 !std::isfinite(radius_y) || radius_x <= 0.0f ||
                 radius_y <= 0.0f) {
             return E_INVALIDARG;
         }
+        *brush = nullptr;
         ComPtr<ID2D1GradientStopCollection> collection;
         auto result = create_gradient_stop_collection(
             stops, stop_count, &collection);
         if (FAILED(result)) {
             return result;
         }
-        ComPtr<ID2D1RadialGradientBrush> brush;
-        result = d2d_context_->CreateRadialGradientBrush(
+        return d2d_context_->CreateRadialGradientBrush(
             D2D1::RadialGradientBrushProperties(
                 D2D1::Point2F(center_x, center_y),
                 D2D1::Point2F(origin_x - center_x, origin_y - center_y),
                 radius_x,
                 radius_y),
             collection.Get(),
-            &brush);
-        if (FAILED(result)) {
-            return result;
+            brush);
+    }
+
+    HRESULT fill_gradient_path(Path* path, ID2D1Brush* brush) noexcept {
+        if (!drawing_ || path == nullptr || path->owner != this ||
+                !path->resource || brush == nullptr) {
+            return E_INVALIDARG;
         }
-        d2d_context_->FillGeometry(path->resource.Get(), brush.Get());
+        d2d_context_->FillGeometry(path->resource.Get(), brush);
         return S_OK;
     }
 
@@ -1391,6 +1444,15 @@ public:
             d2d_context_->EndDraw();
             return E_UNEXPECTED;
         }
+        if (axis_clip_depth_ != 0) {
+            while (axis_clip_depth_ != 0) {
+                d2d_context_->PopAxisAlignedClip();
+                --axis_clip_depth_;
+            }
+            drawing_ = false;
+            d2d_context_->EndDraw();
+            return E_UNEXPECTED;
+        }
         if (layer_depth_ != 0) {
             while (layer_depth_ != 0) {
                 d2d_context_->PopLayer();
@@ -1423,7 +1485,7 @@ public:
         ID2D1CommandList** commands) noexcept {
         if (!drawing_ || previous_target == nullptr || commands == nullptr ||
                 !mask_captures_.empty() || !composite_captures_.empty() ||
-                layer_depth_ != 0) {
+                layer_depth_ != 0 || axis_clip_depth_ != 0) {
             return E_UNEXPECTED;
         }
         *previous_target = nullptr;
@@ -1597,6 +1659,7 @@ private:
     std::uint64_t composite_bytes_ = 0;
     ComPtr<ID2D1LookupTable3D> luminosity_lut_;
     std::uint32_t layer_depth_ = 0;
+    std::uint32_t axis_clip_depth_ = 0;
     bool drawing_ = false;
 };
 
@@ -1607,6 +1670,8 @@ struct SceneCommand {
     std::unique_ptr<Surface::StrokeStyle> stroke_style;
     std::vector<SpdfD2DGradientStop> stops;
     std::vector<float> transfer;
+    ComPtr<ID2D1LinearGradientBrush> linear_brush;
+    ComPtr<ID2D1RadialGradientBrush> radial_brush;
 };
 
 struct Scene {
@@ -1660,6 +1725,15 @@ HRESULT replay_scene(
             break;
         case SPDF_D2D_SCENE_CLIP_POP:
             result = surface->pop_clip();
+            break;
+        case SPDF_D2D_SCENE_RECT_CLIP_PUSH:
+            result = set_item_transform(command);
+            if (SUCCEEDED(result)) result = surface->push_axis_aligned_clip(
+                command.values[0], command.values[1],
+                command.values[2], command.values[3]);
+            break;
+        case SPDF_D2D_SCENE_RECT_CLIP_POP:
+            result = surface->pop_axis_aligned_clip();
             break;
         case SPDF_D2D_SCENE_OPACITY_PUSH:
             result = set_item_transform(command);
@@ -1730,18 +1804,13 @@ HRESULT replay_scene(
             break;
         case SPDF_D2D_SCENE_LINEAR_GRADIENT:
             result = set_item_transform(command);
-            if (SUCCEEDED(result)) result = surface->fill_linear_gradient(
-                static_cast<Surface::Path*>(command.resource),
-                command.values[0], command.values[1], command.values[2], command.values[3],
-                stored.stops.data(), static_cast<std::uint32_t>(stored.stops.size()));
+            if (SUCCEEDED(result)) result = surface->fill_gradient_path(
+                static_cast<Surface::Path*>(command.resource), stored.linear_brush.Get());
             break;
         case SPDF_D2D_SCENE_RADIAL_GRADIENT:
             result = set_item_transform(command);
-            if (SUCCEEDED(result)) result = surface->fill_radial_gradient(
-                static_cast<Surface::Path*>(command.resource),
-                command.values[0], command.values[1], command.values[2], command.values[3],
-                command.values[4], command.values[5], stored.stops.data(),
-                static_cast<std::uint32_t>(stored.stops.size()));
+            if (SUCCEEDED(result)) result = surface->fill_gradient_path(
+                static_cast<Surface::Path*>(command.resource), stored.radial_brush.Get());
             break;
         default:
             return E_INVALIDARG;
@@ -2238,7 +2307,7 @@ std::int32_t spdf_d2d_create_scene(
             stored.command.data = nullptr;
             const auto type = commands[index].type;
             if (type < SPDF_D2D_SCENE_FILL_RECT ||
-                    type > SPDF_D2D_SCENE_RADIAL_GRADIENT) {
+                    type > SPDF_D2D_SCENE_RECT_CLIP_POP) {
                 return static_cast<std::int32_t>(E_INVALIDARG);
             }
             if (type == SPDF_D2D_SCENE_COMPOSITE_PUSH ||
@@ -2295,6 +2364,24 @@ std::int32_t spdf_d2d_create_scene(
                 if (commands[index].data_count != 0) {
                     stored.stops.assign(first, first + commands[index].data_count);
                 }
+                HRESULT result = S_OK;
+                if (commands[index].type == SPDF_D2D_SCENE_LINEAR_GRADIENT) {
+                    result = created->owner->create_linear_gradient_brush(
+                        commands[index].values[0], commands[index].values[1],
+                        commands[index].values[2], commands[index].values[3],
+                        stored.stops.data(),
+                        static_cast<std::uint32_t>(stored.stops.size()),
+                        &stored.linear_brush);
+                } else {
+                    result = created->owner->create_radial_gradient_brush(
+                        commands[index].values[0], commands[index].values[1],
+                        commands[index].values[2], commands[index].values[3],
+                        commands[index].values[4], commands[index].values[5],
+                        stored.stops.data(),
+                        static_cast<std::uint32_t>(stored.stops.size()),
+                        &stored.radial_brush);
+                }
+                if (FAILED(result)) return static_cast<std::int32_t>(result);
             } else if (commands[index].type == SPDF_D2D_SCENE_MASK_END ||
                     commands[index].type == SPDF_D2D_SCENE_COMPOSITE_MASK_END) {
                 if (commands[index].data_count == 1) {

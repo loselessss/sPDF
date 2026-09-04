@@ -45,3 +45,10 @@ def ocr_command():
         exe_dir = os.path.dirname(sys.executable)
         return [os.path.join(exe_dir, "ocr", "spdf-ocr.exe")]
     return [sys.executable, "-m", "pdfeditor.ocr_subprocess"]
+
+
+def gpu_scene_worker_command():
+    """Return the isolated GPU scene worker command for dev or frozen mode."""
+    if is_frozen():
+        return [sys.executable, "--gpu-scene-worker"]
+    return [sys.executable, "-m", "pdfeditor.gpu_scene_worker"]

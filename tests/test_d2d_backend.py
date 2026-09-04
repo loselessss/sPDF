@@ -45,7 +45,7 @@ def pdf_component_blend(mode, backdrop, source):
 
 class D2DBackendTests(unittest.TestCase):
     def test_native_structure_has_stable_abi_layout(self):
-        self.assertEqual(ABI_VERSION, 18)
+        self.assertEqual(ABI_VERSION, 19)
         self.assertEqual(_NativeInfo.adapter_name.offset, 20)
         if os.name == "nt":
             self.assertEqual(ctypes.sizeof(_NativeInfo), 276)
@@ -141,15 +141,18 @@ class D2DBackendTests(unittest.TestCase):
                     ("move", 0, 0), ("line", 8, 0),
                     ("line", 8, 8), ("line", 0, 8), ("close",)])
                 scene = surface.create_scene(32, 32, (
+                    ("rect_clip_push", None, (1, 0, 0, 1, 2, 3),
+                     (0, 0, 4, 8)),
                     ("path", path, 0xffff0000, None, 1.0,
-                     (1, 0, 0, 1, 2, 3), None),))
+                     (1, 0, 0, 1, 2, 3), None),
+                    ("rect_clip_pop", None)))
                 path.close()
                 surface.begin_frame(0xff000000)
                 surface.draw_scene(scene, (1, 0, 0, 1, 4, 5))
                 pixels = surface.read_pixels_bgra(32, 32)
                 surface.end_frame()
                 inside = pixels[(10 * 32 + 8) * 4:(10 * 32 + 8) * 4 + 4]
-                outside = pixels[(6 * 32 + 5) * 4:(6 * 32 + 5) * 4 + 4]
+                outside = pixels[(10 * 32 + 12) * 4:(10 * 32 + 12) * 4 + 4]
                 self.assertEqual(inside, bytes((0, 0, 255, 255)))
                 self.assertEqual(outside, bytes((255, 255, 255, 255)))
         finally:
