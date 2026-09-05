@@ -139,8 +139,7 @@ class ViewerMixin(NavigationMixin):
         self._update_page_label()
 
     def set_zoom(self, zoom):
-        zoom = round(max(self.view.ZOOM_MIN,
-                         min(self.view.ZOOM_MAX, zoom)) * 100) / 100.0
+        zoom = max(self.view.ZOOM_MIN, min(self.view.ZOOM_MAX, zoom))
         if zoom == self.view.zoom:
             self._update_page_label()
             return
@@ -154,10 +153,21 @@ class ViewerMixin(NavigationMixin):
         self.set_zoom(self.view.zoom / 1.25)
 
     def zoom_in_fine(self):
-        self.set_zoom(self.view.zoom + 0.01)
+        self.set_zoom_percent(self.zoom_percent() + 1)
 
     def zoom_out_fine(self):
-        self.set_zoom(self.view.zoom - 0.01)
+        self.set_zoom_percent(self.zoom_percent() - 1)
+
+    def _actual_size_scale(self):
+        # PDF points are 1/72 inch. Qt reports physical DPI in device-
+        # independent coordinates; DPR is applied separately by rendering.
+        return max(1.0, float(self.view.viewport().physicalDpiX())) / 72.0
+
+    def zoom_percent(self):
+        return self.view.zoom / self._actual_size_scale() * 100.0
+
+    def set_zoom_percent(self, percent):
+        self.set_zoom(percent / 100.0 * self._actual_size_scale())
 
     def rotate_reader_cw(self):
         return self._rotate_reader(90)
@@ -238,14 +248,22 @@ class ViewerMixin(NavigationMixin):
         if self._initial_reading_state is not None:
             state = self._initial_reading_state
             self._initial_reading_state = None
-            self.restore_view_state(state)
-            self._view_ready = True
-            return
+            # Explicit transfers/refreshes preserve the live view; only an
+            # ordinary file open replaces the saved zoom with fit-width.
+            if getattr(self, "_restore_initial_view", False):
+                self._restore_initial_view = False
+                self.restore_view_state(state)
+                self._view_ready = True
+                return
+            self._two_page_mode = bool(state.get("two_page", False))
+            self._two_page_act.setChecked(self._two_page_mode)
+            self.page_index = max(0, min(
+                self.doc.page_count - 1, int(state.get("page", 0))))
         old_zoom = self.view.zoom
         self._set_fit_zoom(self.page_index)
         if self.view.zoom != old_zoom:
             self._cache.clear()
-        self._render_current()
+        self.show_page(self.page_index)
         self._update_page_label()
         self.update_thumbnail_viewport_marker()
         self._view_ready = True

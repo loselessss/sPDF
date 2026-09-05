@@ -60,6 +60,21 @@ class ReaderViewTests(unittest.TestCase):
             self.view._render_next_tile()
             self.view._tile_timer.stop()
 
+    def test_cpu_diagnostic_retains_native_failure(self):
+        self.view._backend_failure = "native renderer ABI mismatch"
+        info = self.view.render_diagnostic(0)
+        self.assertEqual(info["mode"], "cpu")
+        self.assertIn("ABI mismatch", info["reason"])
+
+    def test_opengl_diagnostic_distinguishes_rendering_and_composition(self):
+        from pdfeditor.app import _render_diagnostic_summary
+        text, tooltip = _render_diagnostic_summary({
+            "mode": "composite", "reason": "OpenGL CPU tiles",
+            "backend_failure": "native renderer is not built"})
+        self.assertIn("CPU", text)
+        self.assertIn("OpenGL", text)
+        self.assertIn("native renderer is not built", tooltip)
+
     def test_zoom_immediately_reuses_images_and_preserves_pointer(self):
         from PyQt5.QtCore import QPoint
         from PyQt5.QtTest import QSignalSpy

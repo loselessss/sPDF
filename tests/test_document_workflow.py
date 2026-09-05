@@ -96,8 +96,25 @@ class DocumentWorkflowTests(unittest.TestCase):
         self.tab = self.window.open_in_tab(str(self.source))
         self.events()
         self.assertEqual(self.tab.page_index, 2)
-        self.assertEqual(self.tab.view.zoom, 2.5)
+        expected = (self.tab.view.viewport().width() - 24) / 200
+        self.assertAlmostEqual(self.tab.view.zoom, expected)
         self.assertFalse(self.tab._view_history.back)
+
+    def test_zoom_display_and_input_use_screen_dpi(self):
+        tab = self.tab
+        with patch.object(tab, "_actual_size_scale", return_value=144 / 72):
+            tab.set_zoom_percent(125)
+            self.events()
+            self.assertEqual(tab.view.zoom, 2.5)
+            self.assertEqual(tab._zoom_input.value(), 125)
+            tab._render_current()
+            tab._update_page_label()
+            self.events()
+            self.assertEqual(tab._zoom_input.lineEdit().text(), "125%")
+            tab.zoom_in_fine()
+            self.assertAlmostEqual(tab.view.zoom, 2.52)
+            tab._zoom_input.setValue(100)
+            self.assertEqual(tab.view.zoom, 2)
 
     def test_bookmark_edit_undo_redo_preserves_hierarchy(self):
         tab = self.tab

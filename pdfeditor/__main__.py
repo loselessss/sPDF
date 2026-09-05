@@ -42,6 +42,12 @@ def main():
     # Windows의 모든 Qt 대화상자 제목 표시줄에 자동으로 붙는 `?`
     # 컨텍스트 도움말 버튼을 앱 전체에서 제거한다.
     QApplication.setAttribute(Qt.AA_DisableWindowContextHelpButton, True)
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # Preserve Windows fractional scales (125%, 150%, 175%) instead of
+    # rounding them to an integer device pixel ratio.
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     # Reader tabs can move between top-level windows without recreating GL
     # contexts. Embedded hosts retain full control of their own QApplication.
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)

@@ -1,4 +1,4 @@
-# sPDF 1.29.5 Release Notes
+# sPDF 1.29.6 Release Notes
 
 Release date: 2026-09-05
 
@@ -75,3 +75,11 @@ Release date: 2026-09-05
 - Automatic and forced GPU modes accelerate simple rectangular clipping while keeping page coordinates and transforms exact. The native renderer ABI is now v19.
 - Automatic mode quickly identifies highly complex pages, displays the CPU-rendered page first, and seamlessly replaces it with the GPU scene after background preparation completes.
 - Deferred GPU preparation now starts reliably when a document tab becomes visible, and rendering diagnostics clearly distinguish the current CPU/GPU path from background GPU preparation.
+
+## 1.29.6 fixes - 2026-09-05
+
+- Fixed zoom percentages reverting after zooming in CPU and GPU modes.
+- Zoom percentages now use screen DPI. Documents open fitted to the window width, including reopened documents.
+
+- Fixed Windows fractional display scaling, including 150%, for the standalone interface.
+- Rendering diagnostics distinguish CPU rendering with OpenGL composition and show Direct2D initialization failures.

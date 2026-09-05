@@ -104,6 +104,9 @@ def _render_diagnostic_summary(info):
             short_reason = label
             break
     text = labels.get(mode, labels["cpu"])
+    if reason == "OpenGL CPU tiles":
+        text = localize("CPU rendering · OpenGL composition",
+                        "CPU 렌더링 · OpenGL 합성")
     if mode == "composite" and "shading" in features:
         text = localize("CPU+GPU rendering", "CPU+GPU 렌더링")
     if mode == "fallback" and short_reason:
@@ -147,6 +150,10 @@ def _render_diagnostic_summary(info):
             feature_names.get(feature, feature) for feature in features)
     if detail:
         tooltip += "\n" + localize("Status: ", "상태: ") + detail
+    if info.get("backend_failure"):
+        tooltip += "\n" + localize(
+            "Direct2D unavailable: ", "Direct2D 사용 불가: ") + str(
+                info["backend_failure"])
     return text, tooltip
 
 
@@ -536,9 +543,11 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         self._zoom_input.setSuffix("%")
         self._zoom_input.setKeyboardTracking(False)
         self._zoom_input.setValue(100)
-        self._zoom_input.setToolTip("10~800% 범위를 1% 단위로 입력")
+        self._zoom_input.setToolTip(localize(
+            "Zoom in 1% steps, based on the screen's physical DPI",
+            "화면의 실제 DPI 기준 배율을 1% 단위로 입력"))
         self._zoom_input.valueChanged.connect(
-            lambda value: self.set_zoom(value / 100.0))
+            self.set_zoom_percent)
         self.statusBar().addPermanentWidget(self._zoom_input)
 
         self._build_menus()
@@ -1106,6 +1115,7 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         self.doc = doc
         self._view_ready = False
         self.clear_navigation_history()
+        self._restore_initial_view = bool(getattr(self, "_pending_view_state", None))
         self._initial_reading_state = (getattr(self, "_pending_view_state", None)
                                        or settings.reading_position(path))
         self._pending_view_state = None
@@ -1123,9 +1133,7 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
         if initial:
             self._two_page_mode = initial["two_page"]
             self._two_page_act.setChecked(self._two_page_mode)
-            self.view.zoom = initial["zoom"]
-        else:
-            self._set_fit_zoom(target)
+        self._set_fit_zoom(target)
         self.show_page(target)
         # 탭이 실제 화면에 배치된 뒤 확정된 폭과 모니터 DPR로 다시 맞춘다.
         QTimer.singleShot(0, lambda d=doc: self.finish_initial_layout(d))
@@ -1257,7 +1265,11 @@ class DocumentTab(QMainWindow, EditorWorkspaceMixin, AnnotationPersistenceMixin,
                     self.page_index + 1, self.doc.page_count))
             if hasattr(self, "_zoom_input"):
                 self._zoom_input.blockSignals(True)
-                self._zoom_input.setValue(round(self.view.zoom * 100))
+                scale = self._actual_size_scale()
+                self._zoom_input.setRange(
+                    max(1, round(self.view.ZOOM_MIN / scale * 100)),
+                    round(self.view.ZOOM_MAX / scale * 100))
+                self._zoom_input.setValue(round(self.zoom_percent()))
                 self._zoom_input.blockSignals(False)
         if hasattr(self, "_render_diagnostic_label"):
             self._update_render_diagnostic()

@@ -3,7 +3,7 @@ import unittest
 
 from PyQt5 import sip
 from PyQt5.QtCore import QEvent
-from PyQt5.QtWidgets import QApplication, QPushButton, QWidget
+from PyQt5.QtWidgets import QApplication, QPushButton, QWidget, QSpinBox
 
 from pdfeditor.i18n import install, set_language
 
@@ -63,6 +63,19 @@ class TranslationLifecycleTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(button.text(), "Save")
         sip.delete(button)
+
+    def test_translation_preserves_live_zoom_editor(self):
+        spin = QSpinBox()
+        spin.setRange(10, 800)
+        spin.setSuffix("%")
+        spin.setValue(100)
+        self.app._spdf_translate_tree(spin)
+        spin.setValue(175)
+        self.translator.schedule(spin)
+        self.app.processEvents()
+        self.assertEqual(spin.value(), 175)
+        self.assertEqual(spin.lineEdit().text(), "175%")
+        sip.delete(spin)
 
 
 if __name__ == "__main__":

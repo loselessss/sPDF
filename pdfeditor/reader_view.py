@@ -171,6 +171,8 @@ class ReaderPageView(QGraphicsView):
         render_mode = settings.render_backend() if use_opengl is None else "auto"
         self._render_mode = render_mode
         d2d = probe_d2d_backend() if enable_opengl else None
+        self._backend_failure = (d2d.reason if d2d is not None and
+                                 not d2d.available else "")
         self._d2d_requested = bool(
             d2d is not None and d2d.available and
             (render_mode != "gpu" or d2d.driver == "hardware"))
@@ -233,8 +235,8 @@ class ReaderPageView(QGraphicsView):
                     "features": scene.features}
         if self.composition_backend == "opengl":
             return {"mode": "composite", "reason": "OpenGL CPU tiles",
-                    "features": ()}
-        return {"mode": "cpu", "reason": "PyMuPDF",
+                    "backend_failure": self._backend_failure, "features": ()}
+        return {"mode": "cpu", "reason": self._backend_failure or "PyMuPDF",
                 "features": ()}
 
     def _vector_raster_scale(self):
@@ -935,8 +937,9 @@ class ReaderPageView(QGraphicsView):
                     self._paint_d2d()
                     event.accept()
                     return
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, RuntimeError, ValueError) as error:
                 # A device-loss or native-load failure must never blank the PDF.
+                self._backend_failure = str(error)
                 self._release_d2d_surface(disable=True)
         super().paintEvent(event)
 

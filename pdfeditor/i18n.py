@@ -609,7 +609,7 @@ def install(app, language_code=None):
     import weakref
     from PyQt5 import sip
     from PyQt5.QtCore import QEvent, QObject, QTimer
-    from PyQt5.QtWidgets import QComboBox, QListWidget, QTabWidget
+    from PyQt5.QtWidgets import QComboBox, QListWidget, QTabWidget, QLineEdit
 
     def translate_source_text(text):
         translated = tr(text)
@@ -625,6 +625,10 @@ def install(app, language_code=None):
                 ("windowTitle", "setWindowTitle"),
                 ("toolTip", "setToolTip"), ("statusTip", "setStatusTip"),
                 ("placeholderText", "setPlaceholderText")):
+            # Editable values (including spin-box editors) are user/model
+            # state, not translatable labels. Never replay their initial text.
+            if getter == "text" and isinstance(obj, QLineEdit):
+                continue
             get = getattr(obj, getter, None)
             put = getattr(obj, setter, None)
             if callable(get) and callable(put):
