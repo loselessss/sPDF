@@ -2031,6 +2031,7 @@ class _DisplayListDevice(_mupdf.FzDevice2):
                     self._features.add("vector-clip")
                 return
             scale = SHADE_RASTER_SCALE
+            self._features.add("raster-shading")
             left = math.floor(x0 * scale)
             top = math.floor(y0 * scale)
             right = math.ceil(x1 * scale)

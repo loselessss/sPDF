@@ -107,7 +107,7 @@ def _render_diagnostic_summary(info):
     if reason == "OpenGL CPU tiles":
         text = localize("CPU rendering · OpenGL composition",
                         "CPU 렌더링 · OpenGL 합성")
-    if mode == "composite" and "shading" in features:
+    if mode == "composite" and {"raster-shading", "cpu-island"}.intersection(features):
         text = localize("CPU+GPU rendering", "CPU+GPU 렌더링")
     if mode == "fallback" and short_reason:
         text += " · " + short_reason
@@ -119,6 +119,10 @@ def _render_diagnostic_summary(info):
         "image": localize("decoded image", "디코딩 이미지"),
         "stencil": localize("stencil image", "스텐실 이미지"),
         "shading": localize("shading", "그라데이션"),
+        "vector-shading": localize("GPU gradient drawing", "GPU 그라데이션 그리기"),
+        "gradient-primitive": localize("native gradient brush", "네이티브 그라데이션 브러시"),
+        "raster-shading": localize("CPU-prepared gradient bitmap", "CPU에서 준비한 그라데이션 비트맵"),
+        "cpu-island": localize("CPU-prepared composite region", "CPU에서 준비한 합성 영역"),
         "transparency-group": localize(
             "transparency group", "투명도 그룹"),
         "soft-mask": localize("soft mask", "소프트 마스크"),
@@ -144,6 +148,40 @@ def _render_diagnostic_summary(info):
             "대화형 준비 시간 안에 GPU 장면이 끝나지 않아 CPU 화면을 유지하면서 백그라운드 준비를 계속합니다.")
     tooltip = localize(
         "Current page rendering: ", "현재 페이지 렌더링: ") + text
+    # Describe responsibilities of this display path, not instantaneous CPU
+    # activity: scene extraction/decoding may already be cached.
+    cpu_tasks = [localize("PDF interpretation", "PDF 해석")]
+    raster_path = mode in ("cpu", "fallback", "pending") or reason == "OpenGL CPU tiles"
+    if reason == "Direct2D WARP":
+        cpu_tasks.append(localize(
+            "Direct2D software rendering and composition",
+            "Direct2D 소프트웨어 렌더링·합성"))
+    elif raster_path:
+        cpu_tasks.append(localize(
+            "page preview and tile rasterization (text, vectors, images)",
+            "페이지 미리보기·타일 래스터화(글자·벡터·이미지)"))
+    else:
+        cpu_tasks.append(localize(
+            "GPU scene preparation (paths, glyphs, draw commands)",
+            "GPU 장면 준비(경로·글리프·그리기 명령)"))
+        if {"image", "stencil"}.intersection(features):
+            cpu_tasks.append(localize("image decoding and pixel preparation",
+                                      "이미지 디코딩·픽셀 준비"))
+        if "raster-shading" in features:
+            cpu_tasks.append(localize("shading bitmap preparation",
+                                      "그라데이션 비트맵 준비"))
+        if "vector-shading" in features:
+            cpu_tasks.append(localize("gradient colors and geometry preparation",
+                                      "그라데이션 색상·기하 정보 준비"))
+        if "cpu-island" in features:
+            cpu_tasks.append(localize("blend/transparency region rasterization",
+                                      "혼합·투명도 영역 래스터화"))
+    if mode == "pending":
+        cpu_tasks.append(localize("GPU scene preparation", "GPU 장면 준비"))
+    tooltip += "\n" + localize("CPU responsibilities: ", "CPU 담당 작업: ") + ", ".join(cpu_tasks)
+    tooltip += "\n" + localize(
+        "Tasks describe the rendering path; cached work may not run every frame.",
+        "렌더링 경로별 담당 작업이며 캐시된 작업은 매 프레임 반복하지 않습니다.")
     if features:
         tooltip += "\n" + localize(
             "GPU scene contents: ", "GPU 장면 구성: ") + ", ".join(

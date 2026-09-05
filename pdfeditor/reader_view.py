@@ -228,7 +228,7 @@ class ReaderPageView(QGraphicsView):
                             "features": scene.features}
                 return {"mode": "fallback", "reason": scene.reason,
                         "features": scene.features}
-            bitmap_features = {"image", "stencil", "shading", "clip-mask"}
+            bitmap_features = {"image", "stencil", "raster-shading", "clip-mask", "cpu-island"}
             mode = ("composite" if bitmap_features.intersection(scene.features)
                     else "direct")
             return {"mode": mode, "reason": "",
@@ -910,7 +910,9 @@ class ReaderPageView(QGraphicsView):
             vector_scene = self._vector_pages.get(page)
             if vector_scene is not None and vector_scene.supported:
                 self._draw_vector_page(page, vector_scene)
-                rasterized[page] = ("CPU+GPU" if "shading" in vector_scene.features else "GPU")
+                rasterized[page] = ("CPU+GPU" if
+                    {"raster-shading", "cpu-island"}.intersection(vector_scene.features)
+                    else "GPU")
             else:
                 rasterized[page] = "CPU"
                 bitmap = self._native_bitmap(self._d2d_previews, page, preview)

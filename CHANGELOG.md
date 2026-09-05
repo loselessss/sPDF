@@ -2,13 +2,10 @@
 
 English | [한국어](CHANGELOG.ko.md)
 
-## 1.29.6 - 2026-09-05
+## 1.29.7 - 2026-09-05
 
-### Bug fixes
+### Improvements
 
-- Fixed zoom percentages reverting after zooming in CPU and GPU modes.
-- Zoom display and input now use screen DPI instead of treating PDF points as screen pixels.
-- Documents always open fitted to the window width while retaining the last page.
+- Rendering diagnostics now list CPU responsibilities alongside GPU scene contents, including tile rendering and scene/image preparation.
 
-- Fixed Windows fractional display scaling, including 150%, for the standalone interface.
-- Rendering diagnostics distinguish CPU rendering with OpenGL composition and show Direct2D initialization failures.
+- GPU-drawn gradients are no longer reported as CPU bitmap work. Diagnostics distinguish rasterized gradients and CPU-composited transparency regions.

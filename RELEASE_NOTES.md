@@ -1,4 +1,4 @@
-# sPDF 1.29.6 Release Notes
+# sPDF 1.29.7 Release Notes
 
 Release date: 2026-09-05
 
@@ -83,3 +83,9 @@ Release date: 2026-09-05
 
 - Fixed Windows fractional display scaling, including 150%, for the standalone interface.
 - Rendering diagnostics distinguish CPU rendering with OpenGL composition and show Direct2D initialization failures.
+
+## 1.29.7 improvements - 2026-09-05
+
+- Rendering diagnostics now list CPU responsibilities alongside GPU scene contents, including tile rendering and scene/image preparation.
+
+- GPU-drawn gradients are no longer reported as CPU bitmap work. Diagnostics distinguish rasterized gradients and CPU-composited transparency regions.

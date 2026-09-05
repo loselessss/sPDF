@@ -1294,6 +1294,7 @@ class GpuRasterSceneTests(unittest.TestCase):
         self.assertIn("vector-shading", scene.features)
         self.assertIn("gradient-primitive", scene.features)
         self.assertIn("gradient-clip-merge", scene.features)
+        self.assertNotIn("raster-shading", scene.features)
         self.assertIn("vector-clip", scene.features)
         self.assertEqual(sum(isinstance(item, ClipPush)
                              for item in scene.drawables), 1)

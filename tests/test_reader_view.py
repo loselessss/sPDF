@@ -66,6 +66,25 @@ class ReaderViewTests(unittest.TestCase):
         self.assertEqual(info["mode"], "cpu")
         self.assertIn("ABI mismatch", info["reason"])
 
+    def test_gradient_diagnostics_separate_gpu_drawing_from_cpu_bitmaps(self):
+        from pdfeditor.app import _render_diagnostic_summary
+        from pdfeditor.i18n import language, set_language
+        previous = language()
+        try:
+            set_language("en")
+            text, tip = _render_diagnostic_summary({
+                "mode": "direct", "features": ("shading", "vector-shading")})
+            self.assertEqual(text, "GPU rendering")
+            self.assertNotIn("shading bitmap preparation", tip)
+            self.assertIn("gradient colors and geometry preparation", tip)
+            text, tip = _render_diagnostic_summary({
+                "mode": "composite", "features": ("shading", "raster-shading", "cpu-island")})
+            self.assertEqual(text, "CPU+GPU rendering")
+            self.assertIn("shading bitmap preparation", tip)
+            self.assertIn("blend/transparency region rasterization", tip)
+        finally:
+            set_language(previous)
+
     def test_opengl_diagnostic_distinguishes_rendering_and_composition(self):
         from pdfeditor.app import _render_diagnostic_summary
         text, tooltip = _render_diagnostic_summary({
@@ -871,7 +890,7 @@ class ReaderViewTests(unittest.TestCase):
         surface.fill_linear_gradient.assert_called_once_with(
             path, gradient.start, gradient.end, gradient.stops)
         surface.fill_path.assert_not_called()
-        self.assertEqual(self.view._rasterized_pages[0], "CPU+GPU")
+        self.assertEqual(self.view._rasterized_pages[0], "GPU")
 
         self.view._d2d_surface = None
         self.view._d2d_vector_paths.clear()
